@@ -100,7 +100,7 @@ Upstream changes can move anchors or collide with a hook. After a pull:
 - **Intent:** add a **Copy Full Source** item to the committed-view file
   right-click menu. On click it maps the selected paths (`selectedPatchFiles`,
   or `[node.path]` when none/one selected) against the loaded `files` to recover
-  each `{path,status,oldPath}`, attaches `uiStore.activeRepo` as `repoRootFsPath`
+  each `{path,status,oldPath}`, attaches `filesRepoRoot` as `repoRootFsPath`
   (one active repo per graph panel → same root for every file), and posts
   `{type:'snipcodeCopyFullSource', payload:{hash, files:GraphCopyFile[]}}`. Mirrors
   the adjacent Create Patch multi-select gate. No host logic — payload build + post.
@@ -114,8 +114,13 @@ Upstream changes can move anchors or collide with a hook. After a pull:
 - **Re-apply after pull:** re-add `oldPath?` to the local `CommitFile` interface
   and re-insert the `Copy Full Source` push before the stash-restore block.
   (`vscode` = `getVsCodeApi()`, `uiStore`, `files`, `selectedPatchFiles` all in
-  scope.) Active-repo path source: `uiStore.activeRepo` (set from the `repoList`
-  message `payload.active` in `App.svelte`).
+  scope.) Active-repo path source: a `filesRepoRoot` `$state` captured from
+  `uiStore.activeRepo` at the moment `files` are set (on `commitDiffData` /
+  `multiCommitSectionsData`), reset to `''` alongside `files`. This pairs the
+  root with the same fetch so a repo switch can't combine a stale commit's files
+  with a freshly-switched root; empty root degrades safely (host missingRepoCount).
+  `uiStore.activeRepo` originates from the `repoList` message `payload.active` in
+  `App.svelte`.
 
 ### Dummy menu item (S3/S4 seed) — `graph/webview-ui/src/components/graph/CommitGraph.svelte`
 - **Intent:** a single dummy context-menu item that proves the roundtrip:

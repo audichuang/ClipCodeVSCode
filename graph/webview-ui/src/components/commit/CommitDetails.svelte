@@ -49,6 +49,13 @@
   }
 
   let files = $state<CommitFile[]>([]);
+  /* SNIPCODE-HOOK start: repo root captured at the moment `files` are fetched.
+     Reading uiStore.activeRepo at click time risks pairing a freshly-switched
+     root with a stale commit's files; capturing it where `files` is set keeps
+     them from the same fetch. Empty when no files are loaded -> degrades safely
+     (host's missingRepoCount). */
+  let filesRepoRoot = $state('');
+  /* SNIPCODE-HOOK end */
   let diffs = $state<DiffData[]>([]);
   let sections = $state<Array<{ file: string; commit: string; diff: DiffData }>>([]);
   let selectedFile = $state<string | null>(null);
@@ -252,6 +259,7 @@
     if (hash !== activeHash) {
       activeHash = hash;
       files = [];
+      filesRepoRoot = '';
       diffs = [];
       sections = [];
       selectedFile = null;
@@ -282,6 +290,7 @@
       // Read r1/r2 above so this effect re-runs whenever they change.
       void r1; void r2;
       files = [];
+      filesRepoRoot = '';
       diffs = [];
       sections = [];
       selectedFile = null;
@@ -329,6 +338,7 @@
       if (msg.type === 'multiCommitSectionsData') {
         if (commit || !uiStore.comparing) return; // only valid in compare mode
         files = msg.payload.files;
+        filesRepoRoot = uiStore.activeRepo; // SNIPCODE-HOOK: pair root with this fetch
         diffs = [];
         sections = msg.payload.sections;
       }
@@ -336,6 +346,7 @@
         // Discard stale responses from previous commit selections
         if (msg.payload.hash !== activeHash) return;
         files = msg.payload.files;
+        filesRepoRoot = uiStore.activeRepo; // SNIPCODE-HOOK: pair root with this fetch
         sections = [];
         // Compare mode (compareCommits / compareToWorking) ships all diffs
         // upfront with an empty hash, so lazy per-file fetching never runs for
@@ -966,10 +977,10 @@
                     /* SNIPCODE-HOOK start: Copy Full Source (S3, multi-select)
                        Maps the selected paths (or the clicked file when none/one
                        selected) against `files` to recover {path,status,oldPath},
-                       attaches the panel's active-repo path as repoRootFsPath (one
-                       active repo per graph panel — same root for every file), and
-                       posts GraphCopyPayload. Mirrors the Create Patch multi-select
-                       gate above. */
+                       attaches `filesRepoRoot` (the active-repo path captured when
+                       these `files` were fetched — one active repo per graph panel,
+                       same root for every file), and posts GraphCopyPayload. Mirrors
+                       the Create Patch multi-select gate above. */
                     if (commit) {
                       const csMulti = selectedPatchFiles.has(node.path) && selectedPatchFiles.size >= 2;
                       const csPaths = csMulti ? [...selectedPatchFiles] : [node.path];
@@ -980,7 +991,7 @@
                           const payloadFiles = csPaths.map((p) => {
                             const f = files.find((cf) => cf.path === p);
                             return {
-                              repoRootFsPath: uiStore.activeRepo,
+                              repoRootFsPath: filesRepoRoot,
                               relativePath: p,
                               oldRelativePath: f?.oldPath,
                               status: f?.status ?? 'M',
