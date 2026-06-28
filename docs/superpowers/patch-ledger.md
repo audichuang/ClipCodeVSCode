@@ -96,6 +96,27 @@ Upstream changes can move anchors or collide with a hook. After a pull:
   `| { type: 'openExtensionSettings' }` member (the hook replaces its trailing `;`).
 - **Re-apply after pull:** re-add the union member at the end of `WebviewMessage`.
 
+### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (file right-click menu)
+- **Intent:** add a **Copy Full Source** item to the committed-view file
+  right-click menu. On click it maps the selected paths (`selectedPatchFiles`,
+  or `[node.path]` when none/one selected) against the loaded `files` to recover
+  each `{path,status,oldPath}`, attaches `uiStore.activeRepo` as `repoRootFsPath`
+  (one active repo per graph panel → same root for every file), and posts
+  `{type:'snipcodeCopyFullSource', payload:{hash, files:GraphCopyFile[]}}`. Mirrors
+  the adjacent Create Patch multi-select gate. No host logic — payload build + post.
+- **Anchor (2 edits):**
+  1. local `interface CommitFile { path; status }` — add `oldPath?: string`
+     (already present on the `commitDiffData` wire for R/C, needed for
+     `oldRelativePath`).
+  2. inside the file-item `oncontextmenu` handler, the `if (commit) { … }` block
+     immediately BEFORE the `// Restore from stash (stash commits only)` /
+     `if (stashIndex !== null)` block (right after the Create Patch push).
+- **Re-apply after pull:** re-add `oldPath?` to the local `CommitFile` interface
+  and re-insert the `Copy Full Source` push before the stash-restore block.
+  (`vscode` = `getVsCodeApi()`, `uiStore`, `files`, `selectedPatchFiles` all in
+  scope.) Active-repo path source: `uiStore.activeRepo` (set from the `repoList`
+  message `payload.active` in `App.svelte`).
+
 ### Dummy menu item (S3/S4 seed) — `graph/webview-ui/src/components/graph/CommitGraph.svelte`
 - **Intent:** a single dummy context-menu item that proves the roundtrip:
   posts `{type:'snipcodeCopyFullSource', payload:{hash:'x',files:[]}}`. Replaced

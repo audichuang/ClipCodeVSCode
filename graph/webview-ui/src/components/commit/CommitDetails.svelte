@@ -43,6 +43,9 @@
   interface CommitFile {
     path: string;
     status: string; // A=added, M=modified, D=deleted, R=renamed, C=copied
+    /* SNIPCODE-HOOK start: oldPath for rename/copy (already on the commitDiffData wire) */
+    oldPath?: string; // present only for R/C; maps to GraphCopyFile.oldRelativePath
+    /* SNIPCODE-HOOK end */
   }
 
   let files = $state<CommitFile[]>([]);
@@ -959,6 +962,36 @@
                         },
                       });
                     }
+
+                    /* SNIPCODE-HOOK start: Copy Full Source (S3, multi-select)
+                       Maps the selected paths (or the clicked file when none/one
+                       selected) against `files` to recover {path,status,oldPath},
+                       attaches the panel's active-repo path as repoRootFsPath (one
+                       active repo per graph panel — same root for every file), and
+                       posts GraphCopyPayload. Mirrors the Create Patch multi-select
+                       gate above. */
+                    if (commit) {
+                      const csMulti = selectedPatchFiles.has(node.path) && selectedPatchFiles.size >= 2;
+                      const csPaths = csMulti ? [...selectedPatchFiles] : [node.path];
+                      const hash = commit.hash;
+                      items.push({
+                        label: csMulti ? `Copy Full Source (${csPaths.length})` : 'Copy Full Source',
+                        action: () => {
+                          const payloadFiles = csPaths.map((p) => {
+                            const f = files.find((cf) => cf.path === p);
+                            return {
+                              repoRootFsPath: uiStore.activeRepo,
+                              relativePath: p,
+                              oldRelativePath: f?.oldPath,
+                              status: f?.status ?? 'M',
+                            };
+                          });
+                          vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files: payloadFiles } });
+                          fileContextMenu = null;
+                        },
+                      });
+                    }
+                    /* SNIPCODE-HOOK end */
 
                     // Restore from stash (stash commits only)
                     if (stashIndex !== null) {
