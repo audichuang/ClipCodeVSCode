@@ -408,7 +408,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes:`buildGraphCopyPayload`、`GraphCopyPayload`、`GraphCopyDeps`(Task 2);`getGitApi`、`readSettings`、`GitAPI`(`src/extension.ts` 既有);`normalizeFsPath`(`src/gitContent.ts`)
-- Produces:`copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void>`(注入給 `activateGraph`)
+- Produces:`copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void>`(注入給 `activateGraph`);**`activate()` 回傳 `{ copyFullSourceAtCommit }`**(VSCode 擴充 API exports)供 Task 7 E2E 直接呼叫測試
 
 - [ ] **Step 1: 在 `src/extension.ts` 實作 deps 工廠 + handler**
 
@@ -447,12 +447,13 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void> 
 }
 ```
 
-- [ ] **Step 2: 改 `activateGraph` 呼叫傳入真 handler**
+- [ ] **Step 2: 改 `activateGraph` 呼叫傳入真 handler + 回傳 API**
 
-`src/extension.ts` `activate()` 內(取代 Task 1 的 dummy):
+`src/extension.ts` `activate()` 內(取代 Task 1 的 dummy),並讓 `activate` 回傳 API 供 E2E:
 ```ts
-const assetRootUri = vscode.Uri.joinPath(context.extensionUri, /* spike report 記錄的 webview 落點 */);
+const assetRootUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'graph-webview');
 activateGraph(context, { assetRootUri, copyFullSourceAtCommit });
+return { copyFullSourceAtCommit }; // VSCode exports — Task 7 E2E 取此 API 直接測端到端複製
 ```
 
 - [ ] **Step 3: 定案 S1 型別**
@@ -615,6 +616,77 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 git tag v0.3.0 && git push origin <branch> --tags
 ```
 推 `v0.3.0` tag 觸發 `.github/workflows/publish.yml` 自動 `vsce publish`。用 `gh run list/view` 看狀態(輸出被 snip 截 → 抓 log 用 `gh api .../jobs/<jobId>/logs > file` 再 Read)。
+
+---
+
+### Task 7: 端到端整合測試(`@vscode/test-electron`,headless)
+
+使用者新增需求:測試 + E2E 都要完成。VSCode 擴充的 E2E 用 `@vscode/test-electron` 在 headless(xvfb)跑真 Extension Host。**這同時自動化原本要手動 F5 的 HARD GATE runtime 驗證**(啟動、指令註冊、開圖、端到端複製)。執行順序:在 T3 之後即可跑「gate 子集」;完整套件在 T3–T5 後跑;**E2E 綠是 T6 bump 的前置**。環境已確認可行(xvfb-run/Xvfb 在、`DISPLAY=:0`、libnss3/libgtk-3 在、可連 update.code.visualstudio.com)。
+
+**Files:**
+- Create: `test-e2e/runTest.ts`(建臨時 git repo → `runTests({extensionDevelopmentPath, extensionTestsPath, launchArgs:[repoDir,'--no-sandbox','--disable-gpu']})`)
+- Create: `test-e2e/suite/index.ts`(mocha 載入器,glob `*.test.js`)
+- Create: `test-e2e/suite/integration.test.ts`(下列測試)
+- Modify: `package.json`(devDeps:`@vscode/test-electron`、`mocha`、`glob`、`@types/mocha`;scripts:`compile:e2e`= 編 test-e2e→`out-e2e/`、`test:e2e`= `compile:e2e` 後 `node out-e2e/runTest.js`、`test:all`= `test` + `test:e2e`)
+- Create: `tsconfig.e2e.json`(rootDir `test-e2e`、outDir `out-e2e`、module commonjs、含 `vscode` 型別)
+- Modify: `.github/workflows/publish.yml`(發布前 `xvfb-run -a npm run test:e2e`)
+- Modify: `.vscodeignore`(排除 `test-e2e/**`、`out-e2e/**`、`tsconfig.e2e.json`,別進 VSIX)
+
+**Interfaces:**
+- Consumes:`activate()` 回傳的 `{ copyFullSourceAtCommit }`(Task 3);`gitGraphPlus.open` 指令;VSCode Git API
+- Produces:`test:e2e` / `test:all` script;CI E2E gate
+
+**測試(`integration.test.ts`,mocha + node `assert`):**
+
+- [ ] **Step 1: 裝 devDeps + 建 harness(runTest.ts / suite/index.ts / tsconfig.e2e.json)**;`runTest.ts` 在 launch 前用 `git init` 建臨時 repo(設 user.email/name),做 2 個 commit:commit A 新增 `a.ts`、`del.ts`、`old.ts`;commit B 改 `a.ts`、刪 `del.ts`、`old.ts`→`new.ts`(rename)、新增 `added.ts`。把 repo 路徑當 workspace 傳給 `launchArgs`。
+
+- [ ] **Step 2: 測 activation + 指令註冊**
+
+```ts
+const ext = vscode.extensions.getExtension('audichuang.clipcode-vscode');
+assert.ok(ext, 'extension present');
+const api = await ext.activate();
+assert.ok(ext.isActive);
+const cmds = await vscode.commands.getCommands(true);
+assert.ok(cmds.includes('gitGraphPlus.open'), 'graph view command registered');
+assert.ok(cmds.includes('clipcode.copyGitChanges') || cmds.some(c => c.startsWith('clipcode.')), 'existing clipcode commands intact');
+```
+
+- [ ] **Step 3: 測開圖不拋錯**
+
+```ts
+await vscode.commands.executeCommand('gitGraphPlus.open'); // 不拋即可;webview CSP/404 headless 難斷,至少確認指令解析
+```
+
+- [ ] **Step 4: 端到端複製(最關鍵 — 走真 VSCode Git API + 真 `git show` + buildGitPayload)**
+
+```ts
+// 等 vscode.git 探到臨時 repo
+const gitExt = vscode.extensions.getExtension('vscode.git'); const gitApi = (await gitExt.activate()).getAPI(1);
+// poll 直到 repositories 出現該 repo;取 headCommit B 的 hash
+const repo = await waitForRepo(gitApi, repoDir);
+const hashB = (await repo.log({maxEntries:1}))[0].hash;
+const payload = { hash: hashB, files: [
+  { repoRootFsPath: repoDir, relativePath: 'a.ts', status: 'M' },
+  { repoRootFsPath: repoDir, relativePath: 'del.ts', status: 'D' },
+  { repoRootFsPath: repoDir, relativePath: 'new.ts', oldRelativePath: 'old.ts', status: 'R' },
+  { repoRootFsPath: repoDir, relativePath: 'added.ts', status: 'A' },
+]};
+await api.copyFullSourceAtCommit(payload);
+const clip = await vscode.env.clipboard.readText();
+assert.match(clip, /\/\/ file: \[MODIFIED\] a\.ts/);
+assert.match(clip, /\[DELETED\] del\.ts/); assert.match(clip, /This file has been deleted/);
+assert.match(clip, /\[MOVED\] new\.ts/);
+assert.match(clip, /\[NEW\] added\.ts/);
+```
+
+- [ ] **Step 5: 跑 headless 綠**
+
+Run: `xvfb-run -a npm run test:e2e > /tmp/e2e.txt 2>&1; echo exit=$?` 然後 Read。Expected: mocha 全 pass。若 electron sandbox 報錯 → 確認 `--no-sandbox` 已在 launchArgs。**這是自動化的 HARD GATE:綠 = spike runtime gate 過。**
+
+- [ ] **Step 6: Commit**(`test-e2e/`、`tsconfig.e2e.json`、`package.json`、`.vscodeignore`、CI;Co-Authored-By trailer)
+
+**殘留手動煙霧(E2E 無法涵蓋,交付時告知使用者)**:webview 內右鍵選單的實際點擊(T4/T5 的 UI 互動,在 iframe webview 內,headless 難驅動)、syntax-highlight 的 shiki lazy chunk 在 CSP 下實載。其餘(啟動/指令/開圖/端到端複製/生命週期)已由 E2E 自動覆蓋。
 
 ---
 
