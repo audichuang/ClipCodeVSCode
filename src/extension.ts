@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
+import { decodeText, isTextContent, normalizeFsPath, readRefContent } from './gitContent.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
@@ -379,39 +380,16 @@ async function readGitChangeContent(
   forceIndexContent: boolean
 ): Promise<string | undefined> {
   if (changeType === 'DELETED') {
-    return await readRepositoryContent(repository, 'HEAD', change.originalUri ?? change.uri) ??
+    return await readRefContent(repository, 'HEAD', (change.originalUri ?? change.uri).fsPath) ??
       DELETED_FILE_MARKER;
   }
 
   if (forceIndexContent) {
-    return await readRepositoryContent(repository, '', change.uri) ??
+    return await readRefContent(repository, '', change.uri.fsPath) ??
       await readWorkspaceText(change.uri);
   }
 
   return readWorkspaceText(change.uri);
-}
-
-async function readRepositoryContent(
-  repository: GitRepository,
-  ref: string,
-  uri: vscode.Uri
-): Promise<string | undefined> {
-  const relativePath = repoRelativePath(repository, uri);
-  const candidates = distinctStrings([relativePath, uri.fsPath].filter(Boolean));
-
-  for (const candidate of candidates) {
-    if (repository.show) {
-      const shown = await repository.show(ref, candidate).catch(() => undefined);
-      if (isTextContent(shown)) return shown;
-    }
-    if (repository.buffer) {
-      const bytes = await repository.buffer(ref, candidate).catch(() => undefined);
-      const text = bytes ? decodeText(bytes) : undefined;
-      if (isTextContent(text)) return text;
-    }
-  }
-
-  return undefined;
 }
 
 async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
@@ -420,20 +398,6 @@ async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
   } catch {
     return undefined;
   }
-}
-
-function decodeText(bytes: Uint8Array): string | undefined {
-  if (bytes.includes(0)) return undefined;
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-}
-
-function isTextContent(content: string | undefined): content is string {
-  return content !== undefined && !content.includes('\0');
-}
-
-function repoRelativePath(repository: GitRepository, uri: vscode.Uri): string {
-  const relativePath = normalizeFsPath(uri.fsPath).slice(normalizeFsPath(repository.rootUri.fsPath).length + 1);
-  return relativePath.replaceAll('\\', '/');
 }
 
 function gitChangePath(change: GitChange): string {
@@ -477,15 +441,6 @@ function extractResourceSelections(value: unknown): GitSelection[] {
 
 function uriKey(uri: vscode.Uri): string {
   return normalizeFsPath(uri.fsPath);
-}
-
-function normalizeFsPath(value: string): string {
-  const normalized = value.replaceAll('\\', '/');
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-function distinctStrings(values: string[]): string[] {
-  return [...new Set(values)];
 }
 
 function sameStatus(left: unknown, right: unknown): boolean {
