@@ -1,0 +1,23 @@
+name: Publish Extension
+
+# 推一個 v* tag(例如 v0.2.0)就觸發:測試通過後發布到 VS Code Marketplace。
+# 需要在 repo Settings → Secrets and variables → Actions 加一個 secret:VSCE_PAT
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
