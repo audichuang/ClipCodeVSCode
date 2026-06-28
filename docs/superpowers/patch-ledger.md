@@ -18,8 +18,11 @@ checklist in order. The first three are CLI-automatable (build / package / e2e);
 the fourth is the residual human F5 smoke the e2e suite can't drive.
 
 1. **Hooks present** — `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph`
-   confirms all hooks below still present (there are 11 marked regions across 5
-   files — see counts per entry); re-apply any the merge dropped (use the anchor
+   confirms all hooks below still present. Across 5 files there are **12 marked
+   `start`/`end` block regions + 5 single-line hooks = 17 hook sites** (start
+   markers: extension.ts 1, MainPanel.ts 5, message-bus.ts 1, CommitDetails.svelte
+   3, CommitGraph.svelte 2; single-line: message-bus.ts 1, CommitDetails.svelte 4).
+   See per-entry counts below. Re-apply any the merge dropped (use the anchor
    strings, not line numbers — Svelte/TS line numbers drift).
 2. **Build** — `rm -rf node_modules graph/node_modules
    graph/webview-ui/node_modules dist && npm ci && npm run build` exits 0 (this
@@ -43,7 +46,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
 
 ## Hooks (current)
 
-### S5 — `graph/src/extension.ts`
+### S5 — `graph/src/extension.ts` (1 block)
 - **Intent:** export `activateGraph(context, { assetRootUri, copyFullSourceAtCommit })`
   — host-facing adapter so the vendored extension is driven as a library, not a
   second VSIX entry (spec §4.0). Sets `MainPanel.assetRootUri` +
@@ -57,7 +60,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   `MainPanel`, already imported). If upstream renames `activate`, point the
   wrapper at the new name.
 
-### MainPanel asset/handler statics — `graph/src/panels/MainPanel.ts` (top of class)
+### MainPanel asset/handler statics — `graph/src/panels/MainPanel.ts` (top of class — 1 block)
 - **Intent:** declare `static assetRootUri` + `static copyFullSourceAtCommit`
   (the injected webview asset root + host copy handler). `copyFullSourceAtCommit`
   is inline-typed `(payload:{hash:string;files:unknown[]})=>Promise<void>` to keep
@@ -66,7 +69,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   `private static avatarCache: AvatarCache | undefined = undefined;` line.
 - **Re-apply after pull:** re-add the two statics in the static-field block.
 
-### MainPanel localResourceRoots — `graph/src/panels/MainPanel.ts` (`createOrShow`)
+### MainPanel localResourceRoots — `graph/src/panels/MainPanel.ts` (`createOrShow` — 1 block)
 - **Intent:** when `MainPanel.assetRootUri` is set, the webview's only resource
   root is `[assetRootUri]` (host ships main.js/css + codicon.css/ttf there);
   standalone fallback keeps the upstream two-root layout (for vendored unit tests).
@@ -75,7 +78,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
 - **Re-apply after pull:** wrap the upstream array in the
   `MainPanel.assetRootUri ? [MainPanel.assetRootUri] : [<upstream array>]` ternary.
 
-### MainPanel getHtmlForWebview asset URIs — `graph/src/panels/MainPanel.ts`
+### MainPanel getHtmlForWebview asset URIs — `graph/src/panels/MainPanel.ts` (1 block)
 - **Intent:** resolve `scriptUri` / `styleUri` / `codiconUri` under
   `MainPanel.assetRootUri` when set (codicon → `<assetRoot>/codicon.css`);
   standalone fallback keeps `extensionUri/webview-ui/dist` + node_modules codicons.
@@ -86,7 +89,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   `MainPanel.assetRootUri ?? vscode.Uri.joinPath(this.extensionUri,'webview-ui','dist')`
   and gate the codicon URI on `MainPanel.assetRootUri`.
 
-### S2 — `graph/src/panels/MainPanel.ts` (`handleMessage` switch)
+### S2 — `graph/src/panels/MainPanel.ts` (`handleMessage` switch — 1 block)
 - **Intent:** `case 'snipcodeCopyFullSource'`: transfer-call
   `await MainPanel.copyFullSourceAtCommit?.(message.payload); return;`. No host
   logic here — just routes the message to the injected handler.
@@ -95,7 +98,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   (Currently MainPanel.ts:1582–1590.)
 - **Re-apply after pull:** re-insert the `case` before `default:`.
 
-### S4-fetch — `graph/src/panels/MainPanel.ts` (`handleMessage` switch, dedicated copy-files fetch)
+### S4-fetch — `graph/src/panels/MainPanel.ts` (`handleMessage` switch, dedicated copy-files fetch — 1 block)
 - **Intent:** `case 'getCommitFilesForCopy'`: a fetch path **separate** from
   `getCommitDiff` so it does NOT touch `commitFilesSequence` — a T5 commit-copy and
   a CommitDetails load can be in flight at once without dropping each other. Calls
@@ -106,7 +109,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
 - **Re-apply after pull:** re-insert the `case` after `getCommitDiff`; pairs with
   the S1 `getCommitFilesForCopy`/`commitFilesForCopy` types and the S4 webview hook.
 
-### S1 — `graph/src/utils/message-bus.ts` (message unions — 2 marked regions)
+### S1 — `graph/src/utils/message-bus.ts` (message unions — 1 block + 1 single-line)
 - **Intent (webview→extension, `WebviewMessage`):** add two members:
   1. `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:
      Array<{ repoRootFsPath; relativePath; oldRelativePath?; status }> } }` —
@@ -128,7 +131,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
 - **Re-apply after pull:** re-add the two `WebviewMessage` members and the one
   `ExtensionMessage` member at the marked spots.
 
-### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (file right-click menu)
+### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (file right-click menu — 3 blocks + 4 single-line)
 - **Intent:** add a **Copy Full Source** item to the committed-view file
   right-click menu. On click it maps the selected paths (`selectedPatchFiles`,
   or `[node.path]` when none/one selected) against the loaded `files` to recover
@@ -136,15 +139,30 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   (one active repo per graph panel → same root for every file), and posts
   `{type:'snipcodeCopyFullSource', payload:{hash, files:GraphCopyFile[]}}`. Mirrors
   the adjacent Create Patch multi-select gate. No host logic — payload build + post.
-- **Anchor (2 edits):**
-  1. local `interface CommitFile { path; status }` — add `oldPath?: string`
-     (already present on the `commitDiffData` wire for R/C, needed for
-     `oldRelativePath`).
-  2. inside the file-item `oncontextmenu` handler, the `if (commit) { … }` block
-     immediately BEFORE the `// Restore from stash (stash commits only)` /
-     `if (stashIndex !== null)` block (right after the Create Patch push).
-- **Re-apply after pull:** re-add `oldPath?` to the local `CommitFile` interface
-  and re-insert the `Copy Full Source` push before the stash-restore block.
+- **Anchor (5 edits — 3 `start`/`end` blocks + 2 single-line `filesRepoRoot`
+  fetch-pair captures, in addition to the 2 single-line resets below):**
+  1. **block** — local `interface CommitFile { path; status }` — add
+     `oldPath?: string` (already present on the `commitDiffData` wire for R/C,
+     needed for `oldRelativePath`).
+  2. **block** — the `let filesRepoRoot = $state('')` declaration (the host
+     `$state` that carries the active-repo path captured with `files`).
+  3. **single-line** — `filesRepoRoot = uiStore.activeRepo;` in the
+     `multiCommitSectionsData` handler (capture the root with this fetch).
+  4. **single-line** — `filesRepoRoot = uiStore.activeRepo;` in the
+     `commitDiffData` handler (capture the root with this fetch).
+  5. **block** — inside the file-item `oncontextmenu` handler, the
+     `if (commit) { … }` block immediately BEFORE the `// Restore from stash
+     (stash commits only)` / `if (stashIndex !== null)` block (right after the
+     Create Patch push).
+  Plus 2 **single-line** `filesRepoRoot = '';` resets that sit inside upstream
+  reset blocks — one in the activeHash-change `$effect`, one in the compare-ref
+  `$effect` — each marked `// SNIPCODE-HOOK: reset host root alongside \`files\` (S3)`.
+- **Re-apply after pull:** re-add `oldPath?` to the local `CommitFile` interface;
+  re-add the `filesRepoRoot` `$state`; re-add both `filesRepoRoot =
+  uiStore.activeRepo;` capture lines (in `commitDiffData` and
+  `multiCommitSectionsData`); re-add both `filesRepoRoot = '';` resets alongside
+  the `files = []` lines in the two reset blocks; and re-insert the
+  `Copy Full Source` push before the stash-restore block.
   (`vscode` = `getVsCodeApi()`, `uiStore`, `files`, `selectedPatchFiles` all in
   scope.) Active-repo path source: a `filesRepoRoot` `$state` captured from
   `uiStore.activeRepo` at the moment `files` are set (on `commitDiffData` /
@@ -154,7 +172,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   `uiStore.activeRepo` originates from the `repoList` message `payload.active` in
   `App.svelte`.
 
-### S4 — `graph/webview-ui/src/components/graph/CommitGraph.svelte` (commit right-click menu)
+### S4 — `graph/webview-ui/src/components/graph/CommitGraph.svelte` (commit right-click menu — 2 blocks)
 - **Intent:** add a **Copy Full Source** item to the commit right-click menu that
   copies the **whole** commit's changed files. The graph row has the hash but NOT
   the commit's file list (it is lazy-loaded into `CommitDetails`' local state, out

@@ -259,7 +259,7 @@
     if (hash !== activeHash) {
       activeHash = hash;
       files = [];
-      filesRepoRoot = '';
+      filesRepoRoot = ''; // SNIPCODE-HOOK: reset host root alongside `files` (S3)
       diffs = [];
       sections = [];
       selectedFile = null;
@@ -290,7 +290,7 @@
       // Read r1/r2 above so this effect re-runs whenever they change.
       void r1; void r2;
       files = [];
-      filesRepoRoot = '';
+      filesRepoRoot = ''; // SNIPCODE-HOOK: reset host root alongside `files` (S3)
       diffs = [];
       sections = [];
       selectedFile = null;
