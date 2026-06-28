@@ -1,0 +1,170 @@
+{
+  "name": "clipcode-vscode",
+  "displayName": "ClipCode",
+  "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
+  "version": "0.1.0",
+  "publisher": "audichuang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/audichuang/ClipCodeVSCode.git"
+  },
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:clipcode.copyToClipboard",
+    "onCommand:clipcode.copyAllOpenEditors",
+    "onCommand:clipcode.copyGitChanges",
+    "onCommand:clipcode.pasteAndRestoreFiles"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "clipcode.copyToClipboard",
+        "title": "ClipCode: Copy to Clipboard"
+      },
+      {
+        "command": "clipcode.copyAllOpenEditors",
+        "title": "ClipCode: Copy All Open Editors"
+      },
+      {
+        "command": "clipcode.copyGitChanges",
+        "title": "ClipCode: Copy Git Changes"
+      },
+      {
+        "command": "clipcode.pasteAndRestoreFiles",
+        "title": "ClipCode: Paste and Restore Files"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "clipcode.copyToClipboard",
+          "group": "navigation@20"
+        },
+        {
+          "command": "clipcode.pasteAndRestoreFiles",
+          "group": "navigation@21"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "clipcode.copyAllOpenEditors",
+          "group": "navigation@20"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "clipcode.copyGitChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@20"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "clipcode.copyGitChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@20"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ClipCode",
+      "properties": {
+        "clipcode.headerFormat": {
+          "type": "string",
+          "default": "// file: $FILE_PATH"
+        },
+        "clipcode.preText": {
+          "type": "string",
+          "default": ""
+        },
+        "clipcode.postText": {
+          "type": "string",
+          "default": ""
+        },
+        "clipcode.addExtraLineBetweenFiles": {
+          "type": "boolean",
+          "default": true
+        },
+        "clipcode.setMaxFileCount": {
+          "type": "boolean",
+          "default": true
+        },
+        "clipcode.fileCountLimit": {
+          "type": "number",
+          "default": 30
+        },
+        "clipcode.maxFileSizeKB": {
+          "type": "number",
+          "default": 500
+        },
+        "clipcode.showCopyNotification": {
+          "type": "boolean",
+          "default": true
+        },
+        "clipcode.useFilters": {
+          "type": "boolean",
+          "default": false
+        },
+        "clipcode.useIncludeFilters": {
+          "type": "boolean",
+          "default": true
+        },
+        "clipcode.useExcludeFilters": {
+          "type": "boolean",
+          "default": true
+        },
+        "clipcode.filterRules": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "PATH",
+                  "PATTERN"
+                ]
+              },
+              "action": {
+                "enum": [
+                  "INCLUDE",
+                  "EXCLUDE"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "action",
+              "value",
+              "enabled"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "package": "vsce package --out clipcode-vscode-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.3"
+  }
+}
