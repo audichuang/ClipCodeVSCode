@@ -179,7 +179,7 @@ async function pasteAndRestoreFiles(): Promise<void> {
 
   const entries = parseClipboard(clipboardText, settings.headerFormat);
   if (entries.length === 0) {
-    vscode.window.showWarningMessage('No ClipCode file headers found in clipboard.');
+    vscode.window.showWarningMessage('No Snipcode file headers found in clipboard.');
     return;
   }
 
@@ -221,7 +221,7 @@ async function pasteAndRestoreFiles(): Promise<void> {
   ].filter(Boolean);
   vscode.window.showInformationMessage(parts.length > 0 ? parts.join(', ') : 'No files changed.');
   if (result.errors.length > 0) {
-    vscode.window.showErrorMessage(`ClipCode failed ${result.errors.length} operation(s): ${result.errors.slice(0, 3).join('; ')}`);
+    vscode.window.showErrorMessage(`Snipcode failed ${result.errors.length} operation(s): ${result.errors.slice(0, 3).join('; ')}`);
   }
 }
 
@@ -261,7 +261,7 @@ function confirmationSummary(plan: Awaited<ReturnType<typeof planRestore>>): str
   const overwrite = plan.createOperations.filter(operation => operation.existed).length;
   const deleted = plan.deleteOperations.length;
   const skipped = plan.skippedOperations.length;
-  return `ClipCode will create ${create}, overwrite ${overwrite}, delete ${deleted}, and skip ${skipped} operation(s).`;
+  return `Snipcode will create ${create}, overwrite ${overwrite}, delete ${deleted}, and skip ${skipped} operation(s).`;
 }
 
 async function getGitApi(): Promise<GitAPI | undefined> {
