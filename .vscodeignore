@@ -30,4 +30,5 @@ graph/*.yml
 graph/.gitignore
 graph/.vscodeignore
 graph/CLAUDE.md
-!dist/**
+graph/dist/**
+**/*.map
