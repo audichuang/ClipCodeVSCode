@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
-import { decodeText, isTextContent, normalizeFsPath, readRefContent } from './gitContent.js';
+import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
+import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
@@ -41,7 +42,7 @@ interface GitSelection {
   status?: unknown;
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCommit: (payload: GraphCopyPayload) => Promise<void> } {
   context.subscriptions.push(
     vscode.commands.registerCommand('clipcode.copyToClipboard', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
       await copySelectedFiles(uri, uris);
@@ -67,19 +68,47 @@ export function activate(context: vscode.ExtensionContext): void {
       context: vscode.ExtensionContext,
       opts: {
         assetRootUri: vscode.Uri;
-        copyFullSourceAtCommit: (payload: { hash: string; files: unknown[] }) => Promise<void>;
+        copyFullSourceAtCommit: (payload: GraphCopyPayload) => Promise<void>;
       },
     ) => void;
   };
   // Webview assets ship under dist/graph-webview (see esbuild build script).
   const assetRootUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'graph-webview');
-  activateGraph(context, {
-    assetRootUri,
-    // Task 1 dummy handler; replaced by the real copyFullSourceAtCommit in Task 3.
-    copyFullSourceAtCommit: async () => {
-      vscode.window.showInformationMessage('snipcode dummy ok');
+  activateGraph(context, { assetRootUri, copyFullSourceAtCommit });
+  // VSCode exports — Task 7 E2E drives copyFullSourceAtCommit through this API.
+  return { copyFullSourceAtCommit };
+}
+
+function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDeps {
+  return {
+    resolveRepo(repoRootFsPath: string): ContentRepo | undefined {
+      const target = normalizeFsPath(repoRootFsPath);
+      return api.repositories.find(r => normalizeFsPath(r.rootUri.fsPath) === target) as unknown as
+        | ContentRepo
+        | undefined;
     },
-  });
+    settings,
+  };
+}
+
+async function copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void> {
+  const api = await getGitApi();
+  if (!api || api.repositories.length === 0) {
+    vscode.window.showWarningMessage('No Git repositories found.');
+    return;
+  }
+  const settings = readSettings();
+  const result = await buildGraphCopyPayload(makeGraphCopyDeps(api, settings), payload);
+  if (result.copiedFileCount === 0 && result.skippedFileSizeCount === 0) {
+    vscode.window.showWarningMessage('No source copied for this commit.');
+    return;
+  }
+  await vscode.env.clipboard.writeText(result.text);
+  if (settings.showCopyNotification) {
+    const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
+    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
+    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${skipped}.${limit}`);
+  }
 }
 
 export function deactivate(): void {}

@@ -126,9 +126,20 @@ export type WebviewMessage =
   | { type: 'openExtensionSettings' }
   /* SNIPCODE-HOOK start: webview→host copy message (S1)
      payload mirrors src/graphCopy.ts GraphCopyPayload. Inline-typed here so the
-     vendored tree never imports host code; Task 3 tightens files[] to
-     { repoRootFsPath; relativePath; oldRelativePath?; status }. */
-  | { type: 'snipcodeCopyFullSource'; payload: { hash: string; files: unknown[] } };
+     vendored tree never imports host code (keeps the adapter boundary thin);
+     each file element mirrors GraphCopyFile. */
+  | {
+      type: 'snipcodeCopyFullSource';
+      payload: {
+        hash: string;
+        files: Array<{
+          repoRootFsPath: string;
+          relativePath: string;
+          oldRelativePath?: string;
+          status: string;
+        }>;
+      };
+    };
   /* SNIPCODE-HOOK end */
 
 // Messages from Extension → Webview

@@ -86,9 +86,12 @@ Upstream changes can move anchors or collide with a hook. After a pull:
 - **Re-apply after pull:** re-insert the `case` before `default:`.
 
 ### S1 — `graph/src/utils/message-bus.ts` (`WebviewMessage` union)
-- **Intent:** add `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:unknown[] } }`
-  to the webview→extension message union. Inline-typed (mirrors
-  `src/graphCopy.ts` `GraphCopyPayload`); Task 3 tightens `files[]`.
+- **Intent:** add `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:
+  Array<{ repoRootFsPath; relativePath; oldRelativePath?; status }> } }` to the
+  webview→extension message union. Inline-typed — each element mirrors
+  `src/graphCopy.ts` `GraphCopyFile` (Task 3 tightened it from the Task 1 dummy
+  `files:unknown[]` to the real GraphCopyPayload shape) so vendored never imports
+  host code.
 - **Anchor:** end of the `export type WebviewMessage = …` union, right after the
   `| { type: 'openExtensionSettings' }` member (the hook replaces its trailing `;`).
 - **Re-apply after pull:** re-add the union member at the end of `WebviewMessage`.
