@@ -656,7 +656,7 @@
     "compile": "tsc -p .",
     "test": "npm run compile && node --test out/test/*.test.js",
     "compile:e2e": "tsc -p tsconfig.e2e.json",
-    "test:e2e": "npm run compile:e2e && node out-e2e/runTest.js",
+    "test:e2e": "npm run build && npm run compile:e2e && node out-e2e/runTest.js",
     "test:all": "npm test && npm run test:e2e",
     "build:graph-deps": "npm ci --prefix graph --no-audit --no-fund && npm ci --prefix graph/webview-ui --no-audit --no-fund",
     "build:graph-webview": "npm run build --prefix graph/webview-ui && node scripts/copy-graph-assets.mjs",
