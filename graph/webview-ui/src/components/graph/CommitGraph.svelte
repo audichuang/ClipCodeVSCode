@@ -739,6 +739,32 @@
     };
   });
 
+  /* SNIPCODE-HOOK start: lazy-load + post Copy Full Source for a whole commit (S4).
+     CommitGraph has the hash but not the commit's changed files (lazy-loaded into
+     CommitDetails' local state, out of scope here), so we request getCommitDiff and
+     await the matching commitDiffData (match payload.hash) via a one-shot message
+     listener, then map files -> GraphCopyFile[] and post. repoRoot = uiStore.activeRepo
+     (one active repo per graph panel), same source/mapping as the Task 4 file menu;
+     stale/empty root degrades safely via the host's missingRepoCount. */
+  function copyFullSourceForCommit(hash: string) {
+    const onMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (msg?.type !== 'commitDiffData' || msg.payload?.hash !== hash) return;
+      window.removeEventListener('message', onMessage);
+      const repoRootFsPath = uiStore.activeRepo;
+      const files = (msg.payload.files as Array<{ path: string; status: string; oldPath?: string }>).map(f => ({
+        repoRootFsPath,
+        relativePath: f.path,
+        oldRelativePath: f.oldPath,
+        status: f.status,
+      }));
+      vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files } });
+    };
+    window.addEventListener('message', onMessage);
+    vscode.postMessage({ type: 'getCommitDiff', payload: { hash } });
+  }
+  /* SNIPCODE-HOOK end */
+
   function onCommitContextMenu(e: MouseEvent, commit: Commit) {
     e.preventDefault();
     contextMenuHash = commit.hash;
@@ -1156,14 +1182,18 @@
       { label: t('graph.copyShortSHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
       { label: t('graph.copyCommitInfo'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
     );
-    /* SNIPCODE-HOOK start: dummy Copy Full Source menu item (spike roundtrip proof)
-       Task 1 only proves webview→S1→S2→injected host handler works end to end.
-       Hardcoded payload {hash:'x',files:[]} on purpose — the real per-commit
-       payload (all changed files mapped to GraphCopyFile) lands in Task 5. */
-    copyGroup.push({
-      label: 'Copy Full Source (snipcode dummy)',
-      action: () => vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: 'x', files: [] } }),
-    });
+    /* SNIPCODE-HOOK start: Copy Full Source (S4) — whole commit, lazy-loaded files.
+       The graph row has the hash but NOT the commit's changed-file list (that is
+       lazy-loaded into CommitDetails' local state, not in scope here). So the
+       handler requests the diff and awaits the matching commitDiffData (by
+       payload.hash) before posting the normalized GraphCopyPayload — same file
+       mapping + repo-root source (uiStore.activeRepo) as the Task 4 file menu. */
+    if (!isStashCommit) {
+      copyGroup.push({
+        label: 'Copy Full Source',
+        action: () => copyFullSourceForCommit(commit.hash),
+      });
+    }
     /* SNIPCODE-HOOK end */
     groups.push(copyGroup);
 

@@ -122,14 +122,28 @@ Upstream changes can move anchors or collide with a hook. After a pull:
   `uiStore.activeRepo` originates from the `repoList` message `payload.active` in
   `App.svelte`.
 
-### Dummy menu item (S3/S4 seed) — `graph/webview-ui/src/components/graph/CommitGraph.svelte`
-- **Intent:** a single dummy context-menu item that proves the roundtrip:
-  posts `{type:'snipcodeCopyFullSource', payload:{hash:'x',files:[]}}`. Replaced
-  by the real per-commit payload in Task 5 (and Task 4 adds the file-level item in
-  `CommitDetails.svelte`).
-- **Anchor:** inside `onCommitContextMenu`, the `copyGroup.push(...)` block with
-  the `t('graph.copySHA')` / `t('graph.copyShortSHA')` / `t('graph.copyCommitInfo')`
-  items, just before `groups.push(copyGroup);`.
-- **Re-apply after pull:** re-add the `copyGroup.push({ label:'Copy Full Source …',
-  action: () => vscode.postMessage({ type:'snipcodeCopyFullSource', payload:{hash:'x',files:[]} }) })`
-  after the copy-SHA items. (`vscode` = `getVsCodeApi()` already in scope.)
+### S4 — `graph/webview-ui/src/components/graph/CommitGraph.svelte` (commit right-click menu)
+- **Intent:** add a **Copy Full Source** item to the commit right-click menu that
+  copies the **whole** commit's changed files. The graph row has the hash but NOT
+  the commit's file list (it is lazy-loaded into `CommitDetails`' local state, out
+  of scope here). So the handler `copyFullSourceForCommit(hash)`: registers a
+  one-shot `window` `message` listener keyed by `payload.hash`, posts the existing
+  `getCommitDiff`, and on the matching `commitDiffData` maps `files` (`{path,
+  status,oldPath?}` wire shape) -> `GraphCopyFile[]` (attaching
+  `uiStore.activeRepo` as `repoRootFsPath` — one active repo per graph panel, same
+  source/mapping as the Task 4 file menu) and posts
+  `{type:'snipcodeCopyFullSource', payload:{hash, files}}`. Offered for real
+  commits only (`!isStashCommit`). Replaces the Task 1 dummy item. No host logic —
+  lazy-load + payload build + post.
+- **Anchor (2 edits):**
+  1. `copyFullSourceForCommit(hash)` function — immediately ABOVE
+     `function onCommitContextMenu(e: MouseEvent, commit: Commit) {`.
+  2. the `copyGroup.push({ label:'Copy Full Source', … })` item — inside
+     `onCommitContextMenu`, the `copyGroup` block right after the
+     `t('graph.copySHA')` / `t('graph.copyShortSHA')` / `t('graph.copyCommitInfo')`
+     items, just before `groups.push(copyGroup);` (gated on `!isStashCommit`).
+- **Re-apply after pull:** re-add `copyFullSourceForCommit` above
+  `onCommitContextMenu` and re-insert the gated `copyGroup.push` after the copy-SHA
+  items. (`vscode` = `getVsCodeApi()`, `uiStore` both already imported/in scope;
+  `getCommitDiff` / `commitDiffData` are existing message-bus members; the
+  `snipcodeCopyFullSource` type is the S1 hook.)
