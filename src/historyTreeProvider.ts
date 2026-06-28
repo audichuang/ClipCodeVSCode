@@ -11,9 +11,11 @@ export interface LoadMoreNode { kind: 'loadMore'; contextValue: 'loadMore'; }
 export interface MessageNode { kind: 'message'; text: string; contextValue: 'loading' | 'error' | 'empty'; }
 export type HistoryNode = CommitNode | FolderViewNode | FileViewNode | LoadMoreNode | MessageNode;
 
-export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode> {
+export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>, vscode.Disposable {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<HistoryNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  dispose(): void { this._onDidChangeTreeData.dispose(); }
 
   private repo_: HistoryRepo | undefined;
   private commits: HistoryCommit[] = [];

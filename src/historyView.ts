@@ -15,9 +15,10 @@ const LAST_REPO_KEY = 'clipcode.history.lastRepoRoot';
 export function registerHistoryView(context: vscode.ExtensionContext): void {
   const provider = new HistoryTreeProvider();
   const treeView = vscode.window.createTreeView('clipcode.history', { treeDataProvider: provider, canSelectMany: true });
-  context.subscriptions.push(treeView, provider as any);
+  context.subscriptions.push(treeView, provider, { dispose: () => apiListeners?.dispose() });
 
   let api: GitAPI | undefined;
+  let apiListeners: vscode.Disposable | undefined;
 
   const pickInitialRepo = (): HistoryRepo | undefined => {
     if (!api || api.repositories.length === 0) return undefined;
@@ -34,26 +35,29 @@ export function registerHistoryView(context: vscode.ExtensionContext): void {
     treeView.title = repo ? `ClipCode History — ${basename(repo.rootUri.fsPath)}` : 'ClipCode History';
   };
 
+  const repickIfNeeded = () => { if (!provider.repo || !currentRepoStillOpen()) useRepo(pickInitialRepo()); };
   const wireApi = (gitApi: GitAPI) => {
     api = gitApi;
-    useRepo(pickInitialRepo());
-    context.subscriptions.push(
-      gitApi.onDidOpenRepository(() => { if (!currentRepoStillOpen()) useRepo(pickInitialRepo()); }),
-      gitApi.onDidCloseRepository(() => { if (!currentRepoStillOpen()) useRepo(pickInitialRepo()); }),
+    apiListeners?.dispose(); // drop stale listeners from a previous enable cycle
+    apiListeners = vscode.Disposable.from(
+      gitApi.onDidOpenRepository(repickIfNeeded),
+      gitApi.onDidCloseRepository(repickIfNeeded),
     );
+    repickIfNeeded();
   };
-  const currentRepoStillOpen = () => {
-    const root = context.workspaceState.get<string>(LAST_REPO_KEY);
-    return !!api?.repositories.some(r => r.rootUri.toString() === root);
-  };
+  const disableApi = () => { api = undefined; apiListeners?.dispose(); apiListeners = undefined; useRepo(undefined); };
+  const currentRepoStillOpen = () =>
+    !!provider.repo && !!api?.repositories.some(r => r.rootUri.toString() === provider.repo!.rootUri.toString());
 
   // Git enabled 守衛:getAPI 在停用時會丟例外
   const tryAcquire = (ext: vscode.Extension<GitExtension>) => {
     const exports = ext.isActive ? ext.exports : undefined;
     const init = (gx: GitExtension) => {
-      if (!gx.enabled) { context.subscriptions.push(gx.onDidChangeEnablement(en => { if (en) try { wireApi(gx.getAPI(1)); } catch { /* ignore */ } })); return; }
-      try { wireApi(gx.getAPI(1)); } catch { /* Git disabled mid-flight */ }
-      context.subscriptions.push(gx.onDidChangeEnablement(en => { if (en && !api) try { wireApi(gx.getAPI(1)); } catch { /* ignore */ } }));
+      const enable = () => { try { wireApi(gx.getAPI(1)); } catch { /* Git disabled mid-flight */ } };
+      if (gx.enabled) enable();
+      context.subscriptions.push(gx.onDidChangeEnablement(en => {
+        if (en) { if (!api) enable(); } else disableApi();
+      }));
     };
     if (exports) init(exports); else void ext.activate().then(init);
   };
@@ -90,8 +94,9 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
   let copied = 0, skippedSize = 0, limitReached = false, usesFallback = false;
   for (const f of files) {
     if (settings.setMaxFileCount && copied >= settings.fileCountLimit) { limitReached = true; break; }
-    const clipboardPath = toClipboardPathFromRoots(roots.length ? roots : [f.repoRoot], f.change.uri.fsPath);
-    if (settings.useFilters && !fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, f.change.uri.fsPath)) continue;
+    const absPath = (f.change.renameUri ?? f.change.uri).fsPath;
+    const clipboardPath = toClipboardPathFromRoots(roots.length ? roots : [f.repoRoot], absPath);
+    if (settings.useFilters && !fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath)) continue;
 
     const content = await readFileAtCommit(provider.repo!, f.commit.hash, f.change);
     if (content === undefined) continue;
