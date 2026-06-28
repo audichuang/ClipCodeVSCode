@@ -2,7 +2,7 @@
   "name": "clipcode-vscode",
   "displayName": "ClipCode",
   "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "audichuang",
   "license": "MIT",
   "repository": {
@@ -206,7 +206,8 @@
   "scripts": {
     "compile": "tsc -p .",
     "test": "npm run compile && node --test out/test/*.test.js",
-    "package": "vsce package --out clipcode-vscode-0.1.0.vsix"
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
