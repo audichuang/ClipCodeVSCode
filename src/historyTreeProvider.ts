@@ -18,6 +18,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
   private repo_: HistoryRepo | undefined;
   private commits: HistoryCommit[] = [];
   private hasMore = false;
+  private hasLoadedCommits = false;
+  private generation = 0;
   private readonly fileCache = new Map<string, TreeNode[]>(); // key = commit.hash
 
   get repo(): HistoryRepo | undefined { return this.repo_; }
@@ -26,6 +28,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
     this.repo_ = repo;
     this.commits = [];
     this.hasMore = false;
+    this.hasLoadedCommits = false;
+    this.generation++;
     this.fileCache.clear();
     this.refresh();
   }
@@ -33,19 +37,26 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
   refresh(): void { this._onDidChangeTreeData.fire(undefined); }
 
   async loadMore(): Promise<void> {
-    if (!this.repo_) return;
-    const page = await listCommits(this.repo_, { limit: PAGE_SIZE, skip: this.commits.length });
+    const repo = this.repo_;
+    if (!repo) return;
+    const gen = this.generation;
+    const page = await listCommits(repo, { limit: PAGE_SIZE, skip: this.commits.length });
+    if (gen !== this.generation) return; // repo switched mid-await; discard stale page
     this.commits.push(...page);
     this.hasMore = page.length === PAGE_SIZE;
+    this.hasLoadedCommits = true;
     this.refresh();
   }
 
   private async ensureCommitFilesLoaded(commit: HistoryCommit): Promise<TreeNode[]> {
     const cached = this.fileCache.get(commit.hash);
     if (cached) return cached;
-    const changes = await listCommitFiles(this.repo_!, commit);
-    const tree = buildCommitFileTree(this.repo_!.rootUri.fsPath, commit, changes);
-    this.fileCache.set(commit.hash, tree);
+    const repo = this.repo_;
+    if (!repo) return [];
+    const gen = this.generation;
+    const changes = await listCommitFiles(repo, commit);
+    const tree = buildCommitFileTree(repo.rootUri.fsPath, commit, changes);
+    if (gen === this.generation) this.fileCache.set(commit.hash, tree); // skip cache write if repo switched
     return tree;
   }
 
@@ -102,7 +113,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
     if (!this.repo_) return [{ kind: 'message', text: 'No Git repository.', contextValue: 'empty' }];
 
     if (!node) {
-      if (this.commits.length === 0) await this.loadMore();
+      if (!this.hasLoadedCommits) await this.loadMore();
       const top: HistoryNode[] = this.commits.map(commit => ({ kind: 'commit', commit, contextValue: 'commit' }));
       if (this.hasMore) top.push({ kind: 'loadMore', contextValue: 'loadMore' });
       if (top.length === 0) return [{ kind: 'message', text: 'No commits.', contextValue: 'empty' }];
