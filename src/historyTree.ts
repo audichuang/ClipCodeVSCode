@@ -70,9 +70,10 @@ export function dedupeFilesKeepNewest(files: FileNode[]): FileNode[] {
   for (const file of files) {
     const existing = byPath.get(file.relPath);
     if (!existing) { byPath.set(file.relPath, file); continue; }
-    const a = file.commit.commitDate?.getTime() ?? Infinity;     // 無日期視為較新(清單較前)
-    const b = existing.commit.commitDate?.getTime() ?? Infinity;
-    if (a > b) byPath.set(file.relPath, file);
+    // 兩者都有日期才比較,擇新者;否則保留先見到的(清單較前)
+    const a = file.commit.commitDate?.getTime();
+    const b = existing.commit.commitDate?.getTime();
+    if (a !== undefined && b !== undefined && a > b) byPath.set(file.relPath, file);
   }
   return [...byPath.values()];
 }
