@@ -13,19 +13,28 @@ host `src/*.ts`.
 
 ## After every `git subtree pull` — MANDATORY smoke
 
-Upstream changes can move anchors or collide with a hook. After a pull:
+Upstream changes can move anchors or collide with a hook. After a pull, run this
+checklist in order. The first three are CLI-automatable (build / package / e2e);
+the fourth is the residual human F5 smoke the e2e suite can't drive.
 
-1. `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph` — confirm all
-   hooks below still present; re-apply any that the merge dropped (use the anchor
+1. **Hooks present** — `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph`
+   confirms all hooks below still present (there are 11 marked regions across 5
+   files — see counts per entry); re-apply any the merge dropped (use the anchor
    strings, not line numbers — Svelte/TS line numbers drift).
-2. `npm run compile && node --test out/test/*.test.js` — host regression
-   (must stay 52+ green).
-3. Clean build + package: `rm -rf node_modules graph/node_modules
-   graph/webview-ui/node_modules dist && npm ci && npm run build && npx vsce package`
-   — both exit 0; vsix `main` = `./dist/extension.js`.
-4. **Human F5 smoke** (CLI cannot do these): open the graph
-   (`gitGraphPlus.open`), confirm webview loads with no CSP/404; reload +
-   disable/enable once (no duplicate-command error); right-click a commit →
+2. **Build** — `rm -rf node_modules graph/node_modules
+   graph/webview-ui/node_modules dist && npm ci && npm run build` exits 0 (this
+   builds graph deps + Svelte webview + esbuild host bundle).
+3. **Package** — `npx vsce package` exits 0; `unzip -p *.vsix
+   extension/package.json | grep '"main"'` = `./dist/extension.js`; `unzip -l
+   *.vsix | grep -i graph/LICENSE` shows the Apache license ships.
+4. **Unit regression** — `npm run compile && node --test out/test/*.test.js`
+   stays green (currently 53; was 52 — must not drop).
+5. **E2E (automated runtime gate)** — `xvfb-run -a npm run test:e2e` all pass.
+   This covers activation, `gitGraphPlus.open` registration, open-without-throw,
+   and END-TO-END `copyFullSourceAtCommit` (MODIFIED/DELETED/MOVED/NEW).
+6. **Human F5 smoke** (residual — E2E can't drive in-webview right-click): open
+   the graph (`gitGraphPlus.open`), confirm webview loads with no CSP/404; reload
+   + disable/enable once (no duplicate-command error); right-click a commit →
    **Copy Full Source** and a changed file → **Copy Full Source**, paste, confirm
    format matches the SCM git-copy branch (header `// file: [LABEL] path`,
    deleted marker, R/C label).
@@ -83,18 +92,41 @@ Upstream changes can move anchors or collide with a hook. After a pull:
   logic here — just routes the message to the injected handler.
 - **Anchor:** immediately BEFORE the `default:` case at the bottom of the
   `handleMessage` `switch (message.type)` (just above `default: break; } } catch`).
+  (Currently MainPanel.ts:1582–1590.)
 - **Re-apply after pull:** re-insert the `case` before `default:`.
 
-### S1 — `graph/src/utils/message-bus.ts` (`WebviewMessage` union)
-- **Intent:** add `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:
-  Array<{ repoRootFsPath; relativePath; oldRelativePath?; status }> } }` to the
-  webview→extension message union. Inline-typed — each element mirrors
-  `src/graphCopy.ts` `GraphCopyFile` (Task 3 tightened it from the Task 1 dummy
-  `files:unknown[]` to the real GraphCopyPayload shape) so vendored never imports
-  host code.
-- **Anchor:** end of the `export type WebviewMessage = …` union, right after the
-  `| { type: 'openExtensionSettings' }` member (the hook replaces its trailing `;`).
-- **Re-apply after pull:** re-add the union member at the end of `WebviewMessage`.
+### S4-fetch — `graph/src/panels/MainPanel.ts` (`handleMessage` switch, dedicated copy-files fetch)
+- **Intent:** `case 'getCommitFilesForCopy'`: a fetch path **separate** from
+  `getCommitDiff` so it does NOT touch `commitFilesSequence` — a T5 commit-copy and
+  a CommitDetails load can be in flight at once without dropping each other. Calls
+  `gitService.showCommitFiles(hash)` and posts `commitFilesForCopy` echoing the
+  webview's `requestId`. No host logic — vendored fetch + correlated response.
+- **Anchor:** the `case 'getCommitFilesForCopy':` block immediately AFTER the
+  `getCommitDiff` `commitDiffData` post / break (currently MainPanel.ts:498–512).
+- **Re-apply after pull:** re-insert the `case` after `getCommitDiff`; pairs with
+  the S1 `getCommitFilesForCopy`/`commitFilesForCopy` types and the S4 webview hook.
+
+### S1 — `graph/src/utils/message-bus.ts` (message unions — 2 marked regions)
+- **Intent (webview→extension, `WebviewMessage`):** add two members:
+  1. `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:
+     Array<{ repoRootFsPath; relativePath; oldRelativePath?; status }> } }` —
+     inline-typed, each element mirrors `src/graphCopy.ts` `GraphCopyFile` (Task 3
+     tightened it from the Task 1 dummy `files:unknown[]`) so vendored never
+     imports host code.
+  2. `| { type:'getCommitFilesForCopy'; payload:{ hash:string; requestId:string } }`
+     — the dedicated T5 copy fetch (own `requestId`, never shares the
+     `getCommitDiff`/`commitFilesSequence` latest-wins guard).
+- **Intent (extension→webview, `ExtensionMessage`):** add
+  `| { type:'commitFilesForCopy'; payload:{ hash:string; requestId:string; files:
+  Array<{ path; status; oldPath? }> } }` — the correlated response to
+  `getCommitFilesForCopy` (separate channel from `commitDiffData`; carries
+  `oldPath` for rename/copy mapping).
+- **Anchor:** in `WebviewMessage`, the marked block right after the
+  `| { type: 'openExtensionSettings' }` member (currently message-bus.ts:127–148);
+  in `ExtensionMessage`, the marked `commitFilesForCopy` line right after the
+  `commitDiffData` member (currently message-bus.ts:156–158).
+- **Re-apply after pull:** re-add the two `WebviewMessage` members and the one
+  `ExtensionMessage` member at the marked spots.
 
 ### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (file right-click menu)
 - **Intent:** add a **Copy Full Source** item to the committed-view file
@@ -126,24 +158,30 @@ Upstream changes can move anchors or collide with a hook. After a pull:
 - **Intent:** add a **Copy Full Source** item to the commit right-click menu that
   copies the **whole** commit's changed files. The graph row has the hash but NOT
   the commit's file list (it is lazy-loaded into `CommitDetails`' local state, out
-  of scope here). So the handler `copyFullSourceForCommit(hash)`: registers a
-  one-shot `window` `message` listener keyed by `payload.hash`, posts the existing
-  `getCommitDiff`, and on the matching `commitDiffData` maps `files` (`{path,
-  status,oldPath?}` wire shape) -> `GraphCopyFile[]` (attaching
+  of scope here). So the handler `copyFullSourceForCommit(hash)`: mints a unique
+  `requestId` (`gcopy-<n>-<ts>`), registers a one-shot `window` `message` listener
+  matched on that `requestId`, posts the **dedicated** `getCommitFilesForCopy`
+  (NOT `getCommitDiff` — so it never collides with the commit-details
+  latest-wins guard), and on the matching `commitFilesForCopy` maps `files`
+  (`{path,status,oldPath?}` wire shape) -> `GraphCopyFile[]` (attaching
   `uiStore.activeRepo` as `repoRootFsPath` — one active repo per graph panel, same
   source/mapping as the Task 4 file menu) and posts
-  `{type:'snipcodeCopyFullSource', payload:{hash, files}}`. Offered for real
-  commits only (`!isStashCommit`). Replaces the Task 1 dummy item. No host logic —
-  lazy-load + payload build + post.
+  `{type:'snipcodeCopyFullSource', payload:{hash, files}}`. A `settled` flag +
+  30s timeout tears the listener down on every path (match or timeout) so no
+  listener leaks and no duplicate posts. Offered for real commits only
+  (`!isStashCommit`). Replaces the Task 1 dummy item. No host logic — lazy-load +
+  payload build + post.
 - **Anchor (2 edits):**
-  1. `copyFullSourceForCommit(hash)` function — immediately ABOVE
-     `function onCommitContextMenu(e: MouseEvent, commit: Commit) {`.
+  1. `copyReqCounter` + `copyFullSourceForCommit(hash)` function — immediately
+     ABOVE `function onCommitContextMenu(e: MouseEvent, commit: Commit) {`
+     (currently CommitGraph.svelte:742–785).
   2. the `copyGroup.push({ label:'Copy Full Source', … })` item — inside
      `onCommitContextMenu`, the `copyGroup` block right after the
      `t('graph.copySHA')` / `t('graph.copyShortSHA')` / `t('graph.copyCommitInfo')`
-     items, just before `groups.push(copyGroup);` (gated on `!isStashCommit`).
-- **Re-apply after pull:** re-add `copyFullSourceForCommit` above
-  `onCommitContextMenu` and re-insert the gated `copyGroup.push` after the copy-SHA
-  items. (`vscode` = `getVsCodeApi()`, `uiStore` both already imported/in scope;
-  `getCommitDiff` / `commitDiffData` are existing message-bus members; the
-  `snipcodeCopyFullSource` type is the S1 hook.)
+     items, just before `groups.push(copyGroup);` (gated on `!isStashCommit`;
+     currently CommitGraph.svelte:1204–1216).
+- **Re-apply after pull:** re-add `copyReqCounter` + `copyFullSourceForCommit`
+  above `onCommitContextMenu` and re-insert the gated `copyGroup.push` after the
+  copy-SHA items. (`vscode` = `getVsCodeApi()`, `uiStore` both already
+  imported/in scope; `getCommitFilesForCopy` / `commitFilesForCopy` are the S1
+  hook members; `snipcodeCopyFullSource` is the S1 hook.)

@@ -9,6 +9,19 @@ ClipCode copies and restores files with the same clipboard format used by the In
 - `ClipCode: Copy Git Changes`
 - `ClipCode: Paste and Restore Files`
 
+## Git graph
+
+Snipcode bundles the [git-graph-plus](https://github.com/the0807/git-graph-plus)
+commit-graph view (open it with **Git Graph+: Open Git Graph**). Right-click a
+commit, or a changed file in the commit details, and choose **Copy Full Source**
+to copy that commit's file contents in the same clipboard format as
+`Copy Git Changes` (git-style labels, deleted markers, rename labels).
+
+> **Do not install the standalone `git-graph-plus` extension alongside Snipcode.**
+> Snipcode ships git-graph-plus under its original `gitGraphPlus.*` command/view
+> ids, so having both installed causes command-id collisions. Use one or the
+> other, not both.
+
 Install from a local package with:
 
 ```bash
