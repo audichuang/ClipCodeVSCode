@@ -13,7 +13,9 @@ const NEW_STATUS_NAMES = new Set([
   'INTENT_TO_ADD',
   'ADDED',
   'COPIED',
-  'NEW'
+  'NEW',
+  'A',
+  'C'
 ]);
 
 const DELETED_STATUS_NAMES = new Set([
@@ -21,14 +23,16 @@ const DELETED_STATUS_NAMES = new Set([
   'DELETED',
   'DELETED_BY_US',
   'DELETED_BY_THEM',
-  'BOTH_DELETED'
+  'BOTH_DELETED',
+  'D'
 ]);
 
 const MOVED_STATUS_NAMES = new Set([
   'INDEX_RENAMED',
   'INTENT_TO_RENAME',
   'RENAMED',
-  'MOVED'
+  'MOVED',
+  'R'
 ]);
 
 const STAGED_STATUSES = new Set([0, 1, 2, 3, 4]);

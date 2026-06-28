@@ -41,3 +41,11 @@ test('detects staged Git statuses', () => {
   assert.equal(isStagedGitStatus('INDEX_RENAMED'), true);
   assert.equal(isStagedGitStatus('MODIFIED'), false);
 });
+
+test('mapGitStatusToChangeType maps porcelain single letters', () => {
+  assert.equal(mapGitStatusToChangeType('A'), 'NEW');
+  assert.equal(mapGitStatusToChangeType('M'), 'MODIFIED');
+  assert.equal(mapGitStatusToChangeType('D'), 'DELETED');
+  assert.equal(mapGitStatusToChangeType('R'), 'MOVED');
+  assert.equal(mapGitStatusToChangeType('C'), 'NEW');
+});
