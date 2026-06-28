@@ -4,6 +4,7 @@ import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './cop
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent } from './gitContent.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
+import { registerHistoryView } from './historyView.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -55,6 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await pasteAndRestoreFiles();
     })
   );
+  registerHistoryView(context);
 }
 
 export function deactivate(): void {}
