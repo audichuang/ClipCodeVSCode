@@ -15,7 +15,11 @@ const NEW_STATUS_NAMES = new Set([
   'COPIED',
   'NEW',
   'A',
-  'C'
+  'C',
+  // git-graph-plus tags an untracked working-tree file 'U' (NOT 'N' — that is a
+  // nested repo). 'U' is also porcelain "unmerged"; conflicts are rare and the
+  // content still copies correctly, so labelling them NEW is an accepted edge.
+  'U'
 ]);
 
 const DELETED_STATUS_NAMES = new Set([

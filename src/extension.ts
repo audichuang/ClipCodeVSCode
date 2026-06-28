@@ -87,6 +87,8 @@ function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDe
         | ContentRepo
         | undefined;
     },
+    // Working-tree read for the UNCOMMITTED view (no commit to `git show`).
+    readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
     settings,
   };
 }
@@ -100,7 +102,7 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void> 
   const settings = readSettings();
   const result = await buildGraphCopyPayload(makeGraphCopyDeps(api, settings), payload);
   if (result.copiedFileCount === 0 && result.skippedFileSizeCount === 0) {
-    vscode.window.showWarningMessage('No source copied for this commit.');
+    vscode.window.showWarningMessage('No source copied.');
     return;
   }
   await vscode.env.clipboard.writeText(result.text);

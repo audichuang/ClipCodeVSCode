@@ -15,6 +15,10 @@ export interface GraphCopyPayload {
   files: GraphCopyFile[];
 }
 
+// Sentinel hash for the working-tree (uncommitted) view: there is no commit to
+// `git show`, so content is read from disk via deps.readWorking instead.
+export const UNCOMMITTED_HASH = 'UNCOMMITTED';
+
 export interface GraphCopySettings {
   headerFormat: string;
   preText: string;
@@ -27,6 +31,9 @@ export interface GraphCopySettings {
 
 export interface GraphCopyDeps {
   resolveRepo(repoRootFsPath: string): ContentRepo | undefined;
+  // Reads working-tree content for the UNCOMMITTED view (absolute fsPath).
+  // Optional: commit-mode callers (a real hash) never need it.
+  readWorking?(absolutePath: string): Promise<string | undefined>;
   settings: GraphCopySettings;
 }
 
@@ -76,7 +83,9 @@ export async function buildGraphCopyPayload(
     }
 
     const absolutePath = joinFsPath(file.repoRootFsPath, file.relativePath);
-    const content = await readRefContent(repo, payload.hash, absolutePath);
+    const content = payload.hash === UNCOMMITTED_HASH && deps.readWorking
+      ? await deps.readWorking(absolutePath)            // working-tree (uncommitted) view
+      : await readRefContent(repo, payload.hash, absolutePath); // `git show <hash>:<path>`
     if (content === undefined) continue; // 二進位/讀取失敗 → 跳過
 
     const size = Buffer.byteLength(content, 'utf8');

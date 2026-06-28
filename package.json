@@ -2,7 +2,7 @@
   "name": "clipcode-vscode",
   "displayName": "Snipcode",
   "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "audichuang",
   "license": "MIT",
   "repository": {
@@ -449,86 +449,86 @@
     },
     "configuration": [
       {
-      "title": "Snipcode",
-      "properties": {
-        "clipcode.headerFormat": {
-          "type": "string",
-          "default": "// file: $FILE_PATH"
-        },
-        "clipcode.preText": {
-          "type": "string",
-          "default": ""
-        },
-        "clipcode.postText": {
-          "type": "string",
-          "default": ""
-        },
-        "clipcode.addExtraLineBetweenFiles": {
-          "type": "boolean",
-          "default": true
-        },
-        "clipcode.setMaxFileCount": {
-          "type": "boolean",
-          "default": true
-        },
-        "clipcode.fileCountLimit": {
-          "type": "number",
-          "default": 30
-        },
-        "clipcode.maxFileSizeKB": {
-          "type": "number",
-          "default": 500
-        },
-        "clipcode.showCopyNotification": {
-          "type": "boolean",
-          "default": true
-        },
-        "clipcode.useFilters": {
-          "type": "boolean",
-          "default": false
-        },
-        "clipcode.useIncludeFilters": {
-          "type": "boolean",
-          "default": true
-        },
-        "clipcode.useExcludeFilters": {
-          "type": "boolean",
-          "default": true
-        },
-        "clipcode.filterRules": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "object",
-            "properties": {
-              "type": {
-                "enum": [
-                  "PATH",
-                  "PATTERN"
-                ]
+        "title": "Snipcode",
+        "properties": {
+          "clipcode.headerFormat": {
+            "type": "string",
+            "default": "// file: $FILE_PATH"
+          },
+          "clipcode.preText": {
+            "type": "string",
+            "default": ""
+          },
+          "clipcode.postText": {
+            "type": "string",
+            "default": ""
+          },
+          "clipcode.addExtraLineBetweenFiles": {
+            "type": "boolean",
+            "default": true
+          },
+          "clipcode.setMaxFileCount": {
+            "type": "boolean",
+            "default": true
+          },
+          "clipcode.fileCountLimit": {
+            "type": "number",
+            "default": 30
+          },
+          "clipcode.maxFileSizeKB": {
+            "type": "number",
+            "default": 500
+          },
+          "clipcode.showCopyNotification": {
+            "type": "boolean",
+            "default": true
+          },
+          "clipcode.useFilters": {
+            "type": "boolean",
+            "default": false
+          },
+          "clipcode.useIncludeFilters": {
+            "type": "boolean",
+            "default": true
+          },
+          "clipcode.useExcludeFilters": {
+            "type": "boolean",
+            "default": true
+          },
+          "clipcode.filterRules": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "PATH",
+                    "PATTERN"
+                  ]
+                },
+                "action": {
+                  "enum": [
+                    "INCLUDE",
+                    "EXCLUDE"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                }
               },
-              "action": {
-                "enum": [
-                  "INCLUDE",
-                  "EXCLUDE"
-                ]
-              },
-              "value": {
-                "type": "string"
-              },
-              "enabled": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "type",
-              "action",
-              "value",
-              "enabled"
-            ]
+              "required": [
+                "type",
+                "action",
+                "value",
+                "enabled"
+              ]
+            }
           }
         }
-      }
       },
       {
         "title": "Git Graph+",
@@ -540,7 +540,12 @@
           },
           "gitGraphPlus.locale": {
             "type": "string",
-            "enum": ["auto", "en", "ko", "zh-cn"],
+            "enum": [
+              "auto",
+              "en",
+              "ko",
+              "zh-cn"
+            ],
             "default": "auto",
             "description": "UI language (auto = follow VS Code language setting)"
           },
@@ -564,7 +569,11 @@
           },
           "gitGraphPlus.graphSortOrder": {
             "type": "string",
-            "enum": ["author-date", "date", "topological"],
+            "enum": [
+              "author-date",
+              "date",
+              "topological"
+            ],
             "default": "topological",
             "description": "Commit sort order in the graph"
           },
@@ -575,7 +584,11 @@
           },
           "gitGraphPlus.branchBadgeBarThickness": {
             "type": "string",
-            "enum": ["thin", "medium", "thick"],
+            "enum": [
+              "thin",
+              "medium",
+              "thick"
+            ],
             "default": "thin",
             "description": "Thickness of the colored accent bar on the left of branch badges in the graph"
           },
@@ -585,17 +598,39 @@
             "items": {
               "type": "object",
               "properties": {
-                "pattern": { "type": "string" },
-                "color": { "type": "string" }
+                "pattern": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string"
+                }
               },
-              "required": ["pattern", "color"]
+              "required": [
+                "pattern",
+                "color"
+              ]
             },
             "markdownDescription": "Assign fixed colors to branches by name pattern in the graph."
           },
           "gitGraphPlus.graphColors": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["#63b0f4", "#73d13d", "#ff7a45", "#b37feb", "#f759ab", "#36cfc9", "#ffc53d", "#ff4d4f", "#597ef7", "#9254de", "#43e8d8", "#faad14"],
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "#63b0f4",
+              "#73d13d",
+              "#ff7a45",
+              "#b37feb",
+              "#f759ab",
+              "#36cfc9",
+              "#ffc53d",
+              "#ff4d4f",
+              "#597ef7",
+              "#9254de",
+              "#43e8d8",
+              "#faad14"
+            ],
             "markdownDescription": "Color palette auto-assigned to graph rails."
           },
           "gitGraphPlus.commitMessageLinks": {
@@ -604,10 +639,17 @@
             "items": {
               "type": "object",
               "properties": {
-                "pattern": { "type": "string" },
-                "url": { "type": "string" }
+                "pattern": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
               },
-              "required": ["pattern", "url"]
+              "required": [
+                "pattern",
+                "url"
+              ]
             },
             "markdownDescription": "Turn matching text in commit messages into clickable links."
           },
@@ -616,38 +658,159 @@
             "default": true,
             "markdownDescription": "Automatically link references based on the `origin` remote."
           },
-          "gitGraphPlus.defaults.push.force": { "type": "string", "enum": ["none", "with-lease", "force"], "default": "none" },
-          "gitGraphPlus.defaults.push.setUpstream": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.push.allTags": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.pull.rebase": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.pull.stash": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.fetch.allRemotes": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.merge.mode": { "type": "string", "enum": ["default", "no-ff", "squash"], "default": "default" },
-          "gitGraphPlus.defaults.merge.pushAfter": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.merge.deleteSource": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.rebase.autostash": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.rebase.pushAfter": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.amend.keepMessage": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.amend.resetDate": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.amend.resetAuthor": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.amend.only": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.amend.pushAfter": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.checkout.dirty": { "type": "string", "enum": ["keep", "stash", "discard"], "default": "keep" },
-          "gitGraphPlus.defaults.checkoutRemote.dirty": { "type": "string", "enum": ["keep", "stash", "discard"], "default": "keep" },
-          "gitGraphPlus.defaults.createBranch.checkout": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.createBranch.publish": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.createTag.push": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.cherryPick.noCommit": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.cherryPick.pushAfter": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.revert.noCommit": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.revert.pushAfter": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.reset.mode": { "type": "string", "enum": ["soft", "mixed", "hard"], "default": "mixed" },
-          "gitGraphPlus.defaults.stashSave.includeUntracked": { "type": "boolean", "default": true },
-          "gitGraphPlus.defaults.stashSave.keepIndex": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.deleteBranch.force": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.deleteBranch.deleteRemote": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.deleteTag.deleteRemote": { "type": "boolean", "default": false },
-          "gitGraphPlus.defaults.removeWorktree.deleteBranch": { "type": "boolean", "default": false }
+          "gitGraphPlus.defaults.push.force": {
+            "type": "string",
+            "enum": [
+              "none",
+              "with-lease",
+              "force"
+            ],
+            "default": "none"
+          },
+          "gitGraphPlus.defaults.push.setUpstream": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.push.allTags": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.pull.rebase": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.pull.stash": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.fetch.allRemotes": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.merge.mode": {
+            "type": "string",
+            "enum": [
+              "default",
+              "no-ff",
+              "squash"
+            ],
+            "default": "default"
+          },
+          "gitGraphPlus.defaults.merge.pushAfter": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.merge.deleteSource": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.rebase.autostash": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.rebase.pushAfter": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.amend.keepMessage": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.amend.resetDate": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.amend.resetAuthor": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.amend.only": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.amend.pushAfter": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.checkout.dirty": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "stash",
+              "discard"
+            ],
+            "default": "keep"
+          },
+          "gitGraphPlus.defaults.checkoutRemote.dirty": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "stash",
+              "discard"
+            ],
+            "default": "keep"
+          },
+          "gitGraphPlus.defaults.createBranch.checkout": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.createBranch.publish": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.createTag.push": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.cherryPick.noCommit": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.cherryPick.pushAfter": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.revert.noCommit": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.revert.pushAfter": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.reset.mode": {
+            "type": "string",
+            "enum": [
+              "soft",
+              "mixed",
+              "hard"
+            ],
+            "default": "mixed"
+          },
+          "gitGraphPlus.defaults.stashSave.includeUntracked": {
+            "type": "boolean",
+            "default": true
+          },
+          "gitGraphPlus.defaults.stashSave.keepIndex": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.deleteBranch.force": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.deleteBranch.deleteRemote": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.deleteTag.deleteRemote": {
+            "type": "boolean",
+            "default": false
+          },
+          "gitGraphPlus.defaults.removeWorktree.deleteBranch": {
+            "type": "boolean",
+            "default": false
+          }
         }
       }
     ]

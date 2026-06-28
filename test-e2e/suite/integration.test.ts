@@ -85,6 +85,33 @@ describe('Snipcode × git-graph-plus integration', () => {
     assert.match(clip, /\[NEW\] added\.ts/, 'new header');
   });
 
+  it('END-TO-END copies WORKING-TREE source for the UNCOMMITTED view', async () => {
+    assert.ok(repoDir, 'SNIPCODE_E2E_REPO env set');
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+
+    // Make on-disk (uncommitted) changes the committed blobs do not have.
+    await fs.writeFile(path.join(repoDir, 'a.ts'), 'export const a = 999; // working tree', 'utf8');
+    await fs.writeFile(path.join(repoDir, 'working-only.ts'), 'export const wonly = true;', 'utf8');
+
+    const payload: GraphCopyPayload = {
+      hash: 'UNCOMMITTED',
+      files: [
+        { repoRootFsPath: repoDir, relativePath: 'a.ts', status: 'M' },
+        { repoRootFsPath: repoDir, relativePath: 'working-only.ts', status: 'U' }, // git-graph-plus untracked
+      ],
+    };
+
+    await api.copyFullSourceAtCommit(payload);
+    const clip = await vscode.env.clipboard.readText();
+
+    assert.match(clip, /\/\/ file: \[MODIFIED\] a\.ts/, 'modified header');
+    assert.match(clip, /export const a = 999; \/\/ working tree/, 'reads WORKING-TREE content, not the committed blob');
+    assert.ok(!/export const a = 2;/.test(clip), 'does not fall back to committed content');
+    assert.match(clip, /\[NEW\] working-only\.ts/, 'untracked status U maps to NEW');
+    assert.match(clip, /export const wonly = true;/, 'untracked working file content');
+  });
+
   it('best-effort lifecycle: re-running open does not throw', async () => {
     await vscode.commands.executeCommand('gitGraphPlus.open');
     await vscode.commands.executeCommand('gitGraphPlus.refresh');

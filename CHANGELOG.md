@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- **Copy Full Source** now appears consistently everywhere in the graph's Changes
+  panel: committed-commit **folders**, **uncommitted** (working-tree) files, and
+  **uncommitted folders** (previously the folder right-click did nothing and the
+  uncommitted file menu only had Open File / Open Changes). Uncommitted copies the
+  current working-tree content; committed copies the file at that commit. Folder
+  copy includes every changed file under the folder.
+
 ## 0.3.0
 
 - Bundle the [git-graph-plus](https://github.com/the0807/git-graph-plus) commit

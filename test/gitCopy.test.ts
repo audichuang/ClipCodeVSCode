@@ -48,4 +48,5 @@ test('mapGitStatusToChangeType maps porcelain single letters', () => {
   assert.equal(mapGitStatusToChangeType('D'), 'DELETED');
   assert.equal(mapGitStatusToChangeType('R'), 'MOVED');
   assert.equal(mapGitStatusToChangeType('C'), 'NEW');
+  assert.equal(mapGitStatusToChangeType('U'), 'NEW'); // git-graph-plus untracked working file
 });

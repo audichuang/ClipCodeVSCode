@@ -478,6 +478,26 @@
     return node.isFile ? [node.path] : node.children.flatMap(collectFilePaths);
   }
 
+  /* SNIPCODE-HOOK start: Copy Full Source payload builder (S3).
+     Shared by every "Copy Full Source" menu (committed file/folder + uncommitted
+     file/folder). Maps each repo-relative path to a GraphCopyFile via `lookup`
+     (the file's {status,oldPath}) and attaches the active-repo root + commit hash
+     ('UNCOMMITTED' sentinel for the working-tree view → host reads from disk). */
+  function snipcodeCopyFiles(
+    hash: string,
+    paths: string[],
+    lookup: (p: string) => CommitFile | undefined,
+    root: string
+  ): void {
+    const payloadFiles = paths.map((p) => {
+      const f = lookup(p);
+      return { repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status: f?.status ?? 'M' };
+    });
+    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files: payloadFiles } });
+    fileContextMenu = null;
+  }
+  /* SNIPCODE-HOOK end */
+
   // A collapsed folder counts as selected when every changed file under it is
   // selected. An expanded folder is never highlighted: its files are visible and
   // already highlighted individually, so highlighting the folder too is redundant
@@ -836,6 +856,17 @@
                           action: () => { vscode.postMessage({ type: 'openDiff', payload: { file: node.path, staged } }); fileContextMenu = null; },
                         });
                       }
+                      /* SNIPCODE-HOOK start: Copy Full Source (uncommitted file, S3) — working-tree content */
+                      items.push({
+                        label: 'Copy Full Source',
+                        action: () => snipcodeCopyFiles(
+                          'UNCOMMITTED',
+                          [node.path],
+                          (p) => (staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find((cf) => cf.path === p),
+                          uiStore.activeRepo,
+                        ),
+                      });
+                      /* SNIPCODE-HOOK end */
                       fileContextMenu = { x: e.clientX, y: e.clientY, items };
                     }}
                   >
@@ -850,6 +881,20 @@
                     class="dir-item"
                     style="padding-left: {8 + depth * 16}px;"
                     onclick={() => toggleDir(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}
+                    oncontextmenu={(e) => {
+                      e.preventDefault();
+                      /* SNIPCODE-HOOK start: Copy Full Source (uncommitted folder, S3) — all files under, working-tree */
+                      fileContextMenu = { x: e.clientX, y: e.clientY, items: [{
+                        label: 'Copy Full Source',
+                        action: () => snipcodeCopyFiles(
+                          'UNCOMMITTED',
+                          collectFilePaths(node),
+                          (p) => (staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find((cf) => cf.path === p),
+                          uiStore.activeRepo,
+                        ),
+                      }] };
+                      /* SNIPCODE-HOOK end */
+                    }}
                   >
                     <i class="codicon" class:codicon-chevron-right={!expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)} class:codicon-chevron-down={expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}></i>
                     <i class="codicon codicon-folder"></i>
@@ -1093,6 +1138,17 @@
                         },
                       },
                     ];
+                    /* SNIPCODE-HOOK start: Copy Full Source (committed folder, S3) — all files under, at this commit */
+                    folderItems.push({
+                      label: 'Copy Full Source',
+                      action: () => snipcodeCopyFiles(
+                        commit.hash,
+                        collectFilePaths(node),
+                        (p) => files.find((cf) => cf.path === p),
+                        filesRepoRoot,
+                      ),
+                    });
+                    /* SNIPCODE-HOOK end */
                     if (stashIndex !== null) {
                       folderItems.push({ separator: true, label: '', action: () => {} });
                       folderItems.push({

@@ -18,10 +18,10 @@ checklist in order. The first three are CLI-automatable (build / package / e2e);
 the fourth is the residual human F5 smoke the e2e suite can't drive.
 
 1. **Hooks present** — `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph`
-   confirms all hooks below still present. Across 5 files there are **12 marked
-   `start`/`end` block regions + 5 single-line hooks = 17 hook sites** (start
+   confirms all hooks below still present. Across 5 files there are **16 marked
+   `start`/`end` block regions + 5 single-line hooks = 21 hook sites** (start
    markers: extension.ts 1, MainPanel.ts 5, message-bus.ts 1, CommitDetails.svelte
-   3, CommitGraph.svelte 2; single-line: message-bus.ts 1, CommitDetails.svelte 4).
+   7, CommitGraph.svelte 2; single-line: message-bus.ts 1, CommitDetails.svelte 4).
    See per-entry counts below. Re-apply any the merge dropped (use the anchor
    strings, not line numbers — Svelte/TS line numbers drift).
 2. **Build** — `rm -rf node_modules graph/node_modules
@@ -131,7 +131,7 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
 - **Re-apply after pull:** re-add the two `WebviewMessage` members and the one
   `ExtensionMessage` member at the marked spots.
 
-### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (file right-click menu — 3 blocks + 4 single-line)
+### S3 — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (committed file right-click menu — 3 blocks + 4 single-line; see also S3b for folder + uncommitted menus)
 - **Intent:** add a **Copy Full Source** item to the committed-view file
   right-click menu. On click it maps the selected paths (`selectedPatchFiles`,
   or `[node.path]` when none/one selected) against the loaded `files` to recover
@@ -171,6 +171,40 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   with a freshly-switched root; empty root degrades safely (host missingRepoCount).
   `uiStore.activeRepo` originates from the `repoList` message `payload.active` in
   `App.svelte`.
+
+### S3b — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (folder + uncommitted Copy Full Source — 4 blocks)
+- **Intent:** make **Copy Full Source** consistent across every file-list context
+  in the Changes panel (the original S3 only covered committed-commit *files*).
+  Adds it to: committed-commit **folders**, **uncommitted** files, and
+  **uncommitted** folders. Uncommitted reads working-tree content via the
+  `UNCOMMITTED` sentinel hash (host `deps.readWorking`); committed reads via
+  `git show <hash>:<path>` as before.
+- **Anchor (4 `start`/`end` blocks):**
+  1. **shared helper** `snipcodeCopyFiles(hash, paths, lookup, root)` — right
+     after `function collectFilePaths(node)`. Builds `GraphCopyFile[]` from paths
+     via a `lookup` (the file's `{status,oldPath}`) + root, posts
+     `snipcodeCopyFullSource`, clears the menu. Used by all three menus below
+     (and could fold the S3 file menu in later).
+  2. **uncommitted file menu** — inside the `renderUncommittedTree` file-item
+     `oncontextmenu`, the `items.push({ label:'Copy Full Source', … })` right
+     before `fileContextMenu = { … items }`. `hash='UNCOMMITTED'`, single
+     `[node.path]`, lookup from `uncommittedFiles.{staged|unstaged}` (per the
+     snippet's `staged` arg), root `uiStore.activeRepo`.
+  3. **uncommitted folder menu** — a NEW `oncontextmenu` on the
+     `renderUncommittedTree` `dir-item` button (upstream had none → the reported
+     "資料夾右鍵沒反應"). Copies `collectFilePaths(node)` under the folder, same
+     lookup/root/hash as (2).
+  4. **committed folder menu** — `folderItems.push({ label:'Copy Full Source', … })`
+     right after the `createPatchFromFolder` array literal in the committed
+     `dir-item` `oncontextmenu`. `hash=commit.hash`, `collectFilePaths(node)`,
+     lookup from `files`, root `filesRepoRoot`.
+- **Re-apply after pull:** re-add the helper after `collectFilePaths`; re-insert
+  the three menu items at the anchors above. (`uncommittedFiles`, `uiStore`,
+  `files`, `filesRepoRoot`, `commit`, `collectFilePaths`, `vscode` all in scope.)
+  Host side pairs: `UNCOMMITTED_HASH` + optional `readWorking` in `src/graphCopy.ts`,
+  wired to `readWorkspaceText(Uri.file(abs))` in `src/extension.ts makeGraphCopyDeps`;
+  status `'U'` (git-graph-plus untracked working file; `'N'` is a nested repo)
+  added to the NEW set in `src/gitCopy.ts`.
 
 ### S4 — `graph/webview-ui/src/components/graph/CommitGraph.svelte` (commit right-click menu — 2 blocks)
 - **Intent:** add a **Copy Full Source** item to the commit right-click menu that
