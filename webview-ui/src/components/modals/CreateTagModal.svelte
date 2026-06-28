@@ -1,0 +1,94 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import Modal from '../common/Modal.svelte';
+  import { t } from '../../lib/i18n/index.svelte';
+  import { tooltip } from '../../lib/actions/tooltip';
+  import { branchStore } from '../../lib/stores/branches.svelte';
+  import { validateGitRefName } from '../../lib/utils/git-ref';
+  import { defaultsStore } from '../../lib/stores/defaults.svelte';
+
+  interface Props {
+    startPoint: string;
+    subject?: string;
+    editableStartPoint?: boolean;
+    onClose: () => void;
+    onCreate: (name: string, message: string, startPoint: string, push: boolean) => void;
+  }
+
+  let { startPoint: initialStartPoint, subject, editableStartPoint = false, onClose, onCreate }: Props = $props();
+  let name = $state('');
+  let message = $state('');
+  // svelte-ignore state_referenced_locally
+  let startPoint = $state(initialStartPoint);
+  let push = $state(defaultsStore.current.createTag.push);
+  let nameInput: HTMLInputElement | undefined = $state();
+  const isStartPointHash = $derived(/^[0-9a-f]{7,40}$/i.test(startPoint));
+  const tagExists = $derived(name.trim() !== '' && branchStore.tags.some(tag => tag.name === name.trim()));
+  const refError = $derived(name.trim() !== '' ? validateGitRefName(name.trim()) : null);
+
+  onMount(() => { nameInput?.focus(); });
+
+  function handleSubmit() {
+    const trimmed = name.trim();
+    if (!trimmed || tagExists || refError) { return; }
+    onCreate(trimmed, message.trim(), startPoint.trim() || 'HEAD', push);
+  }
+</script>
+
+<Modal title={t('createTag.title')} {onClose}>
+  <p class="modal-desc">{t('createTag.desc')}</p>
+  <div class="modal-context-card">
+    <span use:tooltip={isStartPointHash ? startPoint.substring(0, 7) : startPoint} class="modal-pill modal-pill--source"><i class="codicon {isStartPointHash ? 'codicon-git-commit' : 'codicon-git-branch'}"></i><span class="modal-pill-text">{isStartPointHash ? startPoint.substring(0, 7) : startPoint}</span></span>
+    <i class="codicon codicon-arrow-right" style="color: var(--text-secondary);"></i>
+    <span use:tooltip={name.trim() || '...'} class="modal-pill modal-pill--tag"><i class="codicon codicon-tag"></i><span class="modal-pill-text">{name.trim() || '...'}</span></span>
+  </div>
+  {#if editableStartPoint}
+    <div class="modal-form-group">
+      <label class="modal-field-label" for="create-tag-target">{t('createTag.target')}</label>
+      <input
+        class="modal-input"
+        id="create-tag-target"
+        type="text"
+        bind:value={startPoint}
+        placeholder="HEAD"
+      />
+    </div>
+  {/if}
+  <div class="modal-form-group">
+    <label class="modal-field-label" for="create-tag-name">{t('createTag.name')}</label>
+    <input
+      class="modal-input"
+      id="create-tag-name"
+      type="text"
+      bind:this={nameInput}
+      bind:value={name}
+      placeholder={t('createTag.namePlaceholder')}
+      onkeydown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+    />
+  </div>
+  <div class="modal-form-group">
+    <label class="modal-field-label" for="create-tag-message">{t('createTag.message')}</label>
+    <textarea
+      class="modal-textarea"
+      id="create-tag-message"
+      bind:value={message}
+      placeholder={t('createTag.messagePlaceholder')}
+      rows="4"
+    ></textarea>
+  </div>
+  <div class="modal-form-group">
+    <label class="modal-checkbox">
+      <input type="checkbox" bind:checked={push} />
+      <span>{t('createTag.pushToRemotes')}</span>
+    </label>
+  </div>
+  {#if tagExists}
+    <p class="modal-warning" role="alert"><i class="codicon codicon-warning"></i>{t('createTag.tagExists', { name: name.trim() })}</p>
+  {:else if refError}
+    <p class="modal-warning" role="alert"><i class="codicon codicon-warning"></i>{t(refError)}</p>
+  {/if}
+  <div class="form-actions">
+    <button onclick={onClose}>{t('common.cancel')}</button>
+    <button class="primary" onclick={handleSubmit} disabled={!name.trim() || tagExists || !!refError}>{push ? t('createTag.createAndPush') : t('createTag.create')}</button>
+  </div>
+</Modal>

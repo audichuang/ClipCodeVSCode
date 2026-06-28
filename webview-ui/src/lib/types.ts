@@ -1,0 +1,180 @@
+// Mirrored types from extension for use in webview
+
+export interface Commit {
+  hash: string;
+  abbreviatedHash: string;
+  author: PersonInfo;
+  committer: PersonInfo;
+  subject: string;
+  body: string;
+  parents: string[];
+  refs: Ref[];
+  /** Present only when the graph is fetched with signature verification on. */
+  signatureStatus?: SignatureStatus;
+}
+
+/** Simplified 3-state mapping of git's `%G?` verification codes. */
+export type SignatureStatus = 'good' | 'none' | 'unverified';
+
+/** On-demand signature details for a single commit (Details panel). */
+export interface CommitSignature {
+  status: SignatureStatus;
+  signer?: string;
+  keyId?: string;
+}
+
+export interface PersonInfo {
+  name: string;
+  email: string;
+  date: string;
+}
+
+export interface Ref {
+  type: 'branch' | 'remote-branch' | 'tag' | 'head' | 'stash' | 'working-dir';
+  name: string;
+  remote?: string;
+}
+
+export interface GraphNode {
+  commit: string;
+  column: number;
+  color: string;
+  parents: ParentConnection[];
+}
+
+export interface ParentConnection {
+  hash: string;
+  column: number;
+  color: string;
+  waypoints?: Array<{ row: number; column: number }>;
+}
+
+export interface GraphPathData {
+  points: Array<{ x: number; y: number }>;
+  color: number;
+  colorOverride?: string;
+}
+
+export interface GraphLinkData {
+  start: { x: number; y: number };
+  control: { x: number; y: number };
+  end: { x: number; y: number };
+  color: number;
+  colorOverride?: string;
+}
+
+export interface GraphDotData {
+  center: { x: number; y: number };
+  color: number;
+  colorOverride?: string;
+  type: 'default' | 'head' | 'merge';
+  localOnly: boolean;
+  remoteTip: boolean;
+}
+
+export interface CommitGraphData {
+  commits: Commit[];
+  graph: GraphNode[];
+  paths?: GraphPathData[];
+  links?: GraphLinkData[];
+  dots?: GraphDotData[];
+  commitLeftMargin?: number[];
+  hasMore?: boolean;
+  currentLimit?: number;
+}
+
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+  remote?: string;
+  upstream?: string;
+  /** True when the branch still has upstream config but the tracked remote
+   *  branch no longer exists (git reports the track field as "gone"). */
+  upstreamGone?: boolean;
+  ahead: number;
+  behind: number;
+  hash: string;
+}
+
+export interface RemoteInfo {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+}
+
+export interface TagInfo {
+  name: string;
+  hash: string;
+  message?: string;
+  isAnnotated: boolean;
+}
+
+export interface StashEntry {
+  index: number;
+  message: string;
+  date: string;
+}
+
+export interface BranchData {
+  branches: BranchInfo[];
+  tags: TagInfo[];
+  remotes: RemoteInfo[];
+  stashes: StashEntry[];
+  worktrees: WorktreeInfo[];
+}
+
+export interface DiffData {
+  file: string;
+  hunks: DiffHunk[];
+  isBinary: boolean;
+  isImage: boolean;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: DiffLine[];
+}
+
+export interface DiffLine {
+  type: 'context' | 'add' | 'delete';
+  content: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  hash: string;
+  branch: string;
+  detached: boolean;
+  locked: boolean;
+  prunable: boolean;
+  isMain: boolean;
+}
+
+export interface FlowConfig {
+  productionBranch: string;
+  developBranch: string;
+  featurePrefix: string;
+  releasePrefix: string;
+  hotfixPrefix: string;
+  versionTagPrefix: string;
+}
+
+export interface FlowStatus {
+  installed: boolean;
+  initialized: boolean;
+  config: FlowConfig | null;
+}
+
+export interface FlowBranches {
+  features: string[];
+  releases: string[];
+  hotfixes: string[];
+}
+
+export type FlowType = 'feature' | 'release' | 'hotfix';
