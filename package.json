@@ -1,6 +1,6 @@
 {
   "name": "clipcode-vscode",
-  "displayName": "ClipCode",
+  "displayName": "CodeClip",
   "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
   "version": "0.2.0",
   "publisher": "audichuang",

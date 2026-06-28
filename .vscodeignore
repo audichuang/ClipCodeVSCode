@@ -7,3 +7,6 @@ tsconfig.json
 package-lock.json
 *.vsix
 .gitignore
+docs/**
+.github/**
+HANDOFF-*.md
