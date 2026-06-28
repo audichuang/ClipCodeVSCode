@@ -655,7 +655,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "test": "npm run compile && node --test out/test/*.test.js",
-    "build:graph-deps": "npm install --prefix graph --no-audit --no-fund && npm install --prefix graph/webview-ui --no-audit --no-fund",
+    "build:graph-deps": "npm ci --prefix graph --no-audit --no-fund && npm ci --prefix graph/webview-ui --no-audit --no-fund",
     "build:graph-webview": "npm run build --prefix graph/webview-ui && node scripts/copy-graph-assets.mjs",
     "build:host": "node esbuild.config.mjs",
     "build": "npm run build:graph-deps && npm run build:graph-webview && npm run build:host",
