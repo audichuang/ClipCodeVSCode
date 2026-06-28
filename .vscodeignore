@@ -1,10 +1,13 @@
 node_modules/**
 src/**
 test/**
+test-e2e/**
 out/**
+out-e2e/**
 scripts/**
 *.ts
 tsconfig.json
+tsconfig.e2e.json
 package-lock.json
 *.vsix
 .gitignore

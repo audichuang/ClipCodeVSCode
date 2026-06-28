@@ -17,6 +17,9 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm test
+      - run: npm run build
+      - name: E2E integration tests (headless)
+        run: xvfb-run -a npm run test:e2e
       - name: Publish to VS Code Marketplace
         run: npx @vscode/vsce publish -p "$VSCE_PAT"
         env:

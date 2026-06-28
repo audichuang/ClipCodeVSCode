@@ -655,6 +655,9 @@
   "scripts": {
     "compile": "tsc -p .",
     "test": "npm run compile && node --test out/test/*.test.js",
+    "compile:e2e": "tsc -p tsconfig.e2e.json",
+    "test:e2e": "npm run compile:e2e && node out-e2e/runTest.js",
+    "test:all": "npm test && npm run test:e2e",
     "build:graph-deps": "npm ci --prefix graph --no-audit --no-fund && npm ci --prefix graph/webview-ui --no-audit --no-fund",
     "build:graph-webview": "npm run build --prefix graph/webview-ui && node scripts/copy-graph-assets.mjs",
     "build:host": "node esbuild.config.mjs",
@@ -663,10 +666,14 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.13.0",
     "@types/vscode": "^1.108.0",
+    "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.25.12",
+    "glob": "^11.0.0",
+    "mocha": "^10.8.2",
     "typescript": "^5.7.3"
   }
 }
