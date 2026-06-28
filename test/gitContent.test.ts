@@ -17,6 +17,12 @@ test('repoRelativePath strips root and uses forward slashes', () => {
   assert.equal(repoRelativePath('/repo', '/repo/src/auth/login.ts'), 'src/auth/login.ts');
 });
 
+test('normalizeFsPath trims trailing separator so /repo/ matches /repo', () => {
+  assert.equal(normalizeFsPath('/repo/'), normalizeFsPath('/repo'));
+  // slice arithmetic in repoRelativePath stays correct with a trailing-slash root
+  assert.equal(repoRelativePath('/repo/', '/repo/src/a.ts'), 'src/a.ts');
+});
+
 test('readRefContent tries show then buffer and skips binary', async () => {
   const repo = {
     rootUri: { fsPath: '/repo' },

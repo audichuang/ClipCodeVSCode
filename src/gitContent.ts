@@ -5,7 +5,9 @@ export interface ContentRepo {
 }
 
 export function normalizeFsPath(value: string): string {
-  const normalized = value.replaceAll('\\', '/');
+  // Trim a trailing separator so a repo root like '/repo/' compares equal to
+  // '/repo' (resolveRepo) and repoRelativePath's slice(length+1) stays correct.
+  const normalized = value.replaceAll('\\', '/').replace(/\/+$/, '');
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
