@@ -139,7 +139,12 @@ export type WebviewMessage =
           status: string;
         }>;
       };
-    };
+    }
+  /* Dedicated copy-files request (T5 commit menu). Carries its own requestId so
+     it never shares the commit-details `getCommitDiff`/`commitFilesSequence`
+     latest-wins guard — a T5 click and a CommitDetails load can be in flight at
+     once without dropping each other. */
+  | { type: 'getCommitFilesForCopy'; payload: { hash: string; requestId: string } };
   /* SNIPCODE-HOOK end */
 
 // Messages from Extension → Webview
@@ -148,6 +153,9 @@ export type ExtensionMessage =
   | { type: 'branchData'; payload: BranchData }
   | { type: 'fullRefresh'; payload: { logData: CommitGraphData; branchData: BranchData } }
   | { type: 'commitDiffData'; payload: { hash?: string; diffs?: DiffData[]; files: Array<{ path: string; status: string }> } }
+  /* SNIPCODE-HOOK: dedicated copy-files response, correlated by requestId (not the
+     shared commitDiffData channel). Files carry oldPath for rename/copy mapping. */
+  | { type: 'commitFilesForCopy'; payload: { hash: string; requestId: string; files: Array<{ path: string; status: string; oldPath?: string }> } }
   | { type: 'commitSignatureData'; payload: { hash: string; signature: CommitSignature } }
   | { type: 'rebaseCommitsData'; payload: { base: string; commits: Commit[] } }
   | { type: 'searchResults'; payload: CommitGraphData }

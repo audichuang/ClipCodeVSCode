@@ -495,6 +495,21 @@ export class MainPanel {
           });
           break;
         }
+        /* SNIPCODE-HOOK start: dedicated copy-files fetch (T5).
+           Separate from getCommitDiff so it does NOT touch commitFilesSequence —
+           a T5 copy and a CommitDetails load can be in flight concurrently
+           without dropping each other. The webview correlates by requestId, so
+           no latest-wins guard is needed here (a late copy fetch can't clobber
+           anything; the webview's one-shot listener matches requestId). */
+        case 'getCommitFilesForCopy': {
+          const files = await this.gitService.showCommitFiles(message.payload.hash);
+          this.post({
+            type: 'commitFilesForCopy',
+            payload: { hash: message.payload.hash, requestId: message.payload.requestId, files },
+          });
+          break;
+        }
+        /* SNIPCODE-HOOK end */
         case 'getFileDiff': {
           const ticket = this.fileDiffSequence.issue();
           const diffs = await this.gitService.showCommitDiff(message.payload.hash, message.payload.file);

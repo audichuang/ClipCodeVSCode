@@ -198,6 +198,20 @@ describe('MainPanel message routing', () => {
     expect(data.payload!.hash).toBe('h1');
   });
 
+  it('getCommitFilesForCopy posts commitFilesForCopy echoing the requestId, off the commit-details channel', async () => {
+    H.git.showCommitFiles.mockResolvedValue([{ path: 'a.ts', status: 'M', oldPath: 'b.ts' }]);
+    await dispatch({ type: 'getCommitFilesForCopy', payload: { hash: 'h7', requestId: 'gcopy-1' } });
+    expect(H.git.showCommitFiles).toHaveBeenCalledWith('h7');
+    // dedicated channel: responds with commitFilesForCopy, not commitDiffData
+    expect(postedOfType('commitDiffData')).toHaveLength(0);
+    const data = postedOfType('commitFilesForCopy').at(-1)!;
+    expect(data.payload).toMatchObject({
+      hash: 'h7',
+      requestId: 'gcopy-1',
+      files: [{ path: 'a.ts', status: 'M', oldPath: 'b.ts' }],
+    });
+  });
+
   it('merge calls GitService.merge then refreshes the whole view', async () => {
     await dispatch({ type: 'merge', payload: { branch: 'feature' } });
     expect(H.git.merge).toHaveBeenCalledWith('feature', expect.anything());

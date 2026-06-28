@@ -741,16 +741,30 @@
 
   /* SNIPCODE-HOOK start: lazy-load + post Copy Full Source for a whole commit (S4).
      CommitGraph has the hash but not the commit's changed files (lazy-loaded into
-     CommitDetails' local state, out of scope here), so we request getCommitDiff and
-     await the matching commitDiffData (match payload.hash) via a one-shot message
-     listener, then map files -> GraphCopyFile[] and post. repoRoot = uiStore.activeRepo
-     (one active repo per graph panel), same source/mapping as the Task 4 file menu;
-     stale/empty root degrades safely via the host's missingRepoCount. */
+     CommitDetails' local state, out of scope here), so we request them and await
+     the matching response, then map files -> GraphCopyFile[] and post.
+
+     Uses the DEDICATED getCommitFilesForCopy/commitFilesForCopy channel (not the
+     shared getCommitDiff/commitDiffData one) correlated by a unique requestId, so:
+       - a T5 copy never collides with the commit-details latest-wins guard (no
+         silent non-copy / no starving a CommitDetails load), and
+       - the one-shot listener is keyed by requestId and torn down on every path
+         (match, timeout) via the `settled` flag — no listener leak / no duplicate
+         posts from accumulated stale listeners.
+     repoRoot = uiStore.activeRepo (one active repo per graph panel), same mapping
+     as the Task 4 file menu; stale/empty root degrades safely via the host's
+     missingRepoCount. */
+  let copyReqCounter = 0;
   function copyFullSourceForCommit(hash: string) {
+    const requestId = `gcopy-${++copyReqCounter}-${Date.now()}`;
+    let settled = false;
     const onMessage = (event: MessageEvent) => {
       const msg = event.data;
-      if (msg?.type !== 'commitDiffData' || msg.payload?.hash !== hash) return;
+      if (msg?.type !== 'commitFilesForCopy' || msg.payload?.requestId !== requestId) return;
+      if (settled) return;
+      settled = true;
       window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
       const repoRootFsPath = uiStore.activeRepo;
       const files = (msg.payload.files as Array<{ path: string; status: string; oldPath?: string }>).map(f => ({
         repoRootFsPath,
@@ -760,8 +774,13 @@
       }));
       vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files } });
     };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
+    }, 30_000);
     window.addEventListener('message', onMessage);
-    vscode.postMessage({ type: 'getCommitDiff', payload: { hash } });
+    vscode.postMessage({ type: 'getCommitFilesForCopy', payload: { hash, requestId } });
   }
   /* SNIPCODE-HOOK end */
 
@@ -1185,9 +1204,9 @@
     /* SNIPCODE-HOOK start: Copy Full Source (S4) — whole commit, lazy-loaded files.
        The graph row has the hash but NOT the commit's changed-file list (that is
        lazy-loaded into CommitDetails' local state, not in scope here). So the
-       handler requests the diff and awaits the matching commitDiffData (by
-       payload.hash) before posting the normalized GraphCopyPayload — same file
-       mapping + repo-root source (uiStore.activeRepo) as the Task 4 file menu. */
+       handler requests the files on the dedicated copy channel and awaits the
+       requestId-matched response before posting the normalized GraphCopyPayload —
+       same file mapping + repo-root source (uiStore.activeRepo) as the file menu. */
     if (!isStashCommit) {
       copyGroup.push({
         label: 'Copy Full Source',
