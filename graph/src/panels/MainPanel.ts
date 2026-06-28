@@ -35,6 +35,22 @@ export class MainPanel {
   private static avatarCacheDir: string | undefined = undefined;
   private static avatarCache: AvatarCache | undefined = undefined;
 
+  /* SNIPCODE-HOOK start: host-injected webview asset root + copy handler
+     Snipcode vendors graph/ as a subdirectory, so context.extensionUri points at
+     the HOST root, not graph/. The webview bundle ships under a host-owned asset
+     dir; activateGraph() injects its Uri here so getHtmlForWebview / createOrShow
+     resolve assets (and CSP localResourceRoots) from it instead of the vendored
+     'webview-ui/dist' / 'node_modules' layout. copyFullSourceAtCommit is the
+     host's clipboard handler (logic lives in src/graphCopy.ts), reached by the
+     S2 handleMessage case. */
+  public static assetRootUri: vscode.Uri | undefined = undefined;
+  // Mirrors src/graphCopy.ts GraphCopyPayload (redeclared inline to keep the
+  // vendored tree from importing host code; Task 3 finalizes the field types).
+  public static copyFullSourceAtCommit:
+    | ((payload: { hash: string; files: unknown[] }) => Promise<void>)
+    | undefined = undefined;
+  /* SNIPCODE-HOOK end */
+
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private repoPath: string;
@@ -305,10 +321,17 @@ export class MainPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'webview-ui', 'dist'),
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@vscode', 'codicons', 'dist'),
-        ],
+        /* SNIPCODE-HOOK start: asset root from host-injected assetRootUri
+           Host ships main.js/main.css AND codicon.css/font under one asset dir,
+           so the only allowed resource root is assetRootUri. Fall back to the
+           upstream layout when running standalone (tests / un-hooked dev). */
+        localResourceRoots: MainPanel.assetRootUri
+          ? [MainPanel.assetRootUri]
+          : [
+              vscode.Uri.joinPath(extensionUri, 'webview-ui', 'dist'),
+              vscode.Uri.joinPath(extensionUri, 'node_modules', '@vscode', 'codicons', 'dist'),
+            ],
+        /* SNIPCODE-HOOK end */
       }
     );
 
@@ -1541,6 +1564,15 @@ export class MainPanel {
           }
           break;
         }
+        /* SNIPCODE-HOOK start: transfer-call to host copy handler (S2)
+           Pure transfer — no host logic here. The handler is injected via
+           MainPanel.copyFullSourceAtCommit by activateGraph; its body lives in
+           src/graphCopy.ts (wired by host src/extension.ts). */
+        case 'snipcodeCopyFullSource': {
+          await MainPanel.copyFullSourceAtCommit?.(message.payload);
+          return;
+        }
+        /* SNIPCODE-HOOK end */
         default:
           break;
       }
@@ -1911,12 +1943,19 @@ export class MainPanel {
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
-    const distUri = vscode.Uri.joinPath(this.extensionUri, 'webview-ui', 'dist');
+    /* SNIPCODE-HOOK start: resolve assets from host-injected assetRootUri
+       When hosted by Snipcode, every asset (main.js, main.css, codicon.css +
+       its font) is copied into assetRootUri by the host build, so all three
+       URIs resolve under it. Standalone fallback keeps the upstream layout. */
+    const distUri = MainPanel.assetRootUri ?? vscode.Uri.joinPath(this.extensionUri, 'webview-ui', 'dist');
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'main.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'main.css'));
     const codiconUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
+      MainPanel.assetRootUri
+        ? vscode.Uri.joinPath(MainPanel.assetRootUri, 'codicon.css')
+        : vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
     );
+    /* SNIPCODE-HOOK end */
 
     const nonce = getNonce();
 

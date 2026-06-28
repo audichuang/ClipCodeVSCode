@@ -1,0 +1,106 @@
+# Vendored patch ledger — `graph/` (git-graph-plus)
+
+`graph/` is a git subtree of `the0807/git-graph-plus` (Apache-2.0). Every edit to
+vendored code is framed by `/* SNIPCODE-HOOK start: <intent> */ … /* SNIPCODE-HOOK end */`
+and listed here. Logic never lives in vendored code — hooks only inject types,
+transfer-calls, asset-root indirection, or a menu item; the real work is in
+host `src/*.ts`.
+
+- Subtree upstream ref (Task 1): `de701eb29b0609338d2561bebf4b0a73a0287dea`
+  (local squash `db821ee`), git-graph-plus `0.7.1`.
+- Re-find all hooks anytime with:
+  `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph`
+
+## After every `git subtree pull` — MANDATORY smoke
+
+Upstream changes can move anchors or collide with a hook. After a pull:
+
+1. `git -c grep.lineNumber=false grep -n "SNIPCODE-HOOK" -- graph` — confirm all
+   hooks below still present; re-apply any that the merge dropped (use the anchor
+   strings, not line numbers — Svelte/TS line numbers drift).
+2. `npm run compile && node --test out/test/*.test.js` — host regression
+   (must stay 52+ green).
+3. Clean build + package: `rm -rf node_modules graph/node_modules
+   graph/webview-ui/node_modules dist && npm ci && npm run build && npx vsce package`
+   — both exit 0; vsix `main` = `./dist/extension.js`.
+4. **Human F5 smoke** (CLI cannot do these): open the graph
+   (`gitGraphPlus.open`), confirm webview loads with no CSP/404; reload +
+   disable/enable once (no duplicate-command error); right-click a commit →
+   **Copy Full Source** and a changed file → **Copy Full Source**, paste, confirm
+   format matches the SCM git-copy branch (header `// file: [LABEL] path`,
+   deleted marker, R/C label).
+
+---
+
+## Hooks (current)
+
+### S5 — `graph/src/extension.ts`
+- **Intent:** export `activateGraph(context, { assetRootUri, copyFullSourceAtCommit })`
+  — host-facing adapter so the vendored extension is driven as a library, not a
+  second VSIX entry (spec §4.0). Sets `MainPanel.assetRootUri` +
+  `MainPanel.copyFullSourceAtCommit`, calls the original `activate(context)`
+  (all disposables already flow to `context.subscriptions`), and pushes one
+  disposable that clears the injected statics.
+- **Anchor:** immediately ABOVE `export function activate(context: vscode.ExtensionContext) {`
+  / the `const statusBar = new StatusBarManager();` line.
+- **Re-apply after pull:** if the merge keeps `activate` but drops the adapter,
+  re-add the `activateGraph` wrapper above `activate` (it only references
+  `MainPanel`, already imported). If upstream renames `activate`, point the
+  wrapper at the new name.
+
+### MainPanel asset/handler statics — `graph/src/panels/MainPanel.ts` (top of class)
+- **Intent:** declare `static assetRootUri` + `static copyFullSourceAtCommit`
+  (the injected webview asset root + host copy handler). `copyFullSourceAtCommit`
+  is inline-typed `(payload:{hash:string;files:unknown[]})=>Promise<void>` to keep
+  vendored free of host imports; mirrors `src/graphCopy.ts` `GraphCopyPayload`.
+- **Anchor:** right after the
+  `private static avatarCache: AvatarCache | undefined = undefined;` line.
+- **Re-apply after pull:** re-add the two statics in the static-field block.
+
+### MainPanel localResourceRoots — `graph/src/panels/MainPanel.ts` (`createOrShow`)
+- **Intent:** when `MainPanel.assetRootUri` is set, the webview's only resource
+  root is `[assetRootUri]` (host ships main.js/css + codicon.css/ttf there);
+  standalone fallback keeps the upstream two-root layout (for vendored unit tests).
+- **Anchor:** the `localResourceRoots: [ … 'webview-ui','dist' … '@vscode','codicons','dist' … ]`
+  array inside `vscode.window.createWebviewPanel(... { enableScripts:true, retainContextWhenHidden:true, … })`.
+- **Re-apply after pull:** wrap the upstream array in the
+  `MainPanel.assetRootUri ? [MainPanel.assetRootUri] : [<upstream array>]` ternary.
+
+### MainPanel getHtmlForWebview asset URIs — `graph/src/panels/MainPanel.ts`
+- **Intent:** resolve `scriptUri` / `styleUri` / `codiconUri` under
+  `MainPanel.assetRootUri` when set (codicon → `<assetRoot>/codicon.css`);
+  standalone fallback keeps `extensionUri/webview-ui/dist` + node_modules codicons.
+- **Anchor:** inside `private getHtmlForWebview(webview)`, the
+  `const distUri = … 'webview-ui','dist'` + the three `asWebviewUri(...)` lines.
+  (CSP `<meta http-equiv="Content-Security-Policy">` line is NOT modified.)
+- **Re-apply after pull:** replace `distUri` with
+  `MainPanel.assetRootUri ?? vscode.Uri.joinPath(this.extensionUri,'webview-ui','dist')`
+  and gate the codicon URI on `MainPanel.assetRootUri`.
+
+### S2 — `graph/src/panels/MainPanel.ts` (`handleMessage` switch)
+- **Intent:** `case 'snipcodeCopyFullSource'`: transfer-call
+  `await MainPanel.copyFullSourceAtCommit?.(message.payload); return;`. No host
+  logic here — just routes the message to the injected handler.
+- **Anchor:** immediately BEFORE the `default:` case at the bottom of the
+  `handleMessage` `switch (message.type)` (just above `default: break; } } catch`).
+- **Re-apply after pull:** re-insert the `case` before `default:`.
+
+### S1 — `graph/src/utils/message-bus.ts` (`WebviewMessage` union)
+- **Intent:** add `| { type:'snipcodeCopyFullSource'; payload:{ hash:string; files:unknown[] } }`
+  to the webview→extension message union. Inline-typed (mirrors
+  `src/graphCopy.ts` `GraphCopyPayload`); Task 3 tightens `files[]`.
+- **Anchor:** end of the `export type WebviewMessage = …` union, right after the
+  `| { type: 'openExtensionSettings' }` member (the hook replaces its trailing `;`).
+- **Re-apply after pull:** re-add the union member at the end of `WebviewMessage`.
+
+### Dummy menu item (S3/S4 seed) — `graph/webview-ui/src/components/graph/CommitGraph.svelte`
+- **Intent:** a single dummy context-menu item that proves the roundtrip:
+  posts `{type:'snipcodeCopyFullSource', payload:{hash:'x',files:[]}}`. Replaced
+  by the real per-commit payload in Task 5 (and Task 4 adds the file-level item in
+  `CommitDetails.svelte`).
+- **Anchor:** inside `onCommitContextMenu`, the `copyGroup.push(...)` block with
+  the `t('graph.copySHA')` / `t('graph.copyShortSHA')` / `t('graph.copyCommitInfo')`
+  items, just before `groups.push(copyGroup);`.
+- **Re-apply after pull:** re-add the `copyGroup.push({ label:'Copy Full Source …',
+  action: () => vscode.postMessage({ type:'snipcodeCopyFullSource', payload:{hash:'x',files:[]} }) })`
+  after the copy-SHA items. (`vscode` = `getVsCodeApi()` already in scope.)

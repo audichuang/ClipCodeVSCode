@@ -1156,6 +1156,15 @@
       { label: t('graph.copyShortSHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
       { label: t('graph.copyCommitInfo'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
     );
+    /* SNIPCODE-HOOK start: dummy Copy Full Source menu item (spike roundtrip proof)
+       Task 1 only proves webview→S1→S2→injected host handler works end to end.
+       Hardcoded payload {hash:'x',files:[]} on purpose — the real per-commit
+       payload (all changed files mapped to GraphCopyFile) lands in Task 5. */
+    copyGroup.push({
+      label: 'Copy Full Source (snipcode dummy)',
+      action: () => vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: 'x', files: [] } }),
+    });
+    /* SNIPCODE-HOOK end */
     groups.push(copyGroup);
 
     // Flatten groups with separators between them, preceded by a separator if there were refs

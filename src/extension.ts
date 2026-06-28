@@ -57,6 +57,29 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
   registerHistoryView(context);
+
+  // Vendored git-graph-plus host adapter (S5). Imported lazily so `tsc -p ./`
+  // (which emits out/ for node:test of the pure-logic modules) never pulls the
+  // graph/ tree into its program — only the esbuild host bundle binds it. The
+  // import is typed as the activateGraph contract from spec §4.0.
+  const { activateGraph } = require('../graph/src/extension') as {
+    activateGraph: (
+      context: vscode.ExtensionContext,
+      opts: {
+        assetRootUri: vscode.Uri;
+        copyFullSourceAtCommit: (payload: { hash: string; files: unknown[] }) => Promise<void>;
+      },
+    ) => void;
+  };
+  // Webview assets ship under dist/graph-webview (see esbuild build script).
+  const assetRootUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'graph-webview');
+  activateGraph(context, {
+    assetRootUri,
+    // Task 1 dummy handler; replaced by the real copyFullSourceAtCommit in Task 3.
+    copyFullSourceAtCommit: async () => {
+      vscode.window.showInformationMessage('snipcode dummy ok');
+    },
+  });
 }
 
 export function deactivate(): void {}

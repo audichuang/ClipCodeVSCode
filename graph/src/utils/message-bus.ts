@@ -123,7 +123,13 @@ export type WebviewMessage =
   | { type: 'getMultiCommitSections'; payload: { hashes: string[] } }
   | { type: 'getAvatar'; payload: { email: string; size: number } }
   | { type: 'openExternalUrl'; payload: { url: string } }
-  | { type: 'openExtensionSettings' };
+  | { type: 'openExtensionSettings' }
+  /* SNIPCODE-HOOK start: webview→host copy message (S1)
+     payload mirrors src/graphCopy.ts GraphCopyPayload. Inline-typed here so the
+     vendored tree never imports host code; Task 3 tightens files[] to
+     { repoRootFsPath; relativePath; oldRelativePath?; status }. */
+  | { type: 'snipcodeCopyFullSource'; payload: { hash: string; files: unknown[] } };
+  /* SNIPCODE-HOOK end */
 
 // Messages from Extension → Webview
 export type ExtensionMessage =

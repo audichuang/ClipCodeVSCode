@@ -30,6 +30,38 @@ export function resolveConfiguredGitPath(): string | undefined {
   return undefined;
 }
 
+/* SNIPCODE-HOOK start: host-facing activate adapter (S5)
+   The vendored activate() is an extension entry point, not a library. Snipcode
+   must NOT register it as a VSIX main (would double-register / leak on reload).
+   Instead the host calls activateGraph(context, opts) AFTER its own activation:
+     - opts.assetRootUri  → where the host shipped the webview bundle (§6.2);
+       stored on MainPanel so the panel resolves assets + localResourceRoots
+       from it instead of the vendored 'webview-ui/dist' layout.
+     - opts.copyFullSourceAtCommit → host clipboard handler, stored on MainPanel
+       and invoked by the S2 handleMessage case (logic in src/graphCopy.ts).
+   All disposables flow into context.subscriptions via the original activate(),
+   so reload / disable-enable tear down cleanly. */
+export function activateGraph(
+  context: vscode.ExtensionContext,
+  opts: {
+    assetRootUri: vscode.Uri;
+    // Mirrors src/graphCopy.ts GraphCopyPayload (inline so vendored stays
+    // host-import-free; Task 3 tightens the payload field types).
+    copyFullSourceAtCommit: (payload: { hash: string; files: unknown[] }) => Promise<void>;
+  },
+): void {
+  MainPanel.assetRootUri = opts.assetRootUri;
+  MainPanel.copyFullSourceAtCommit = opts.copyFullSourceAtCommit;
+  activate(context);
+  context.subscriptions.push({
+    dispose: () => {
+      MainPanel.assetRootUri = undefined;
+      MainPanel.copyFullSourceAtCommit = undefined;
+    },
+  });
+}
+/* SNIPCODE-HOOK end */
+
 export function activate(context: vscode.ExtensionContext) {
   // Status bar is always visible regardless of workspace state
   const statusBar = new StatusBarManager();
