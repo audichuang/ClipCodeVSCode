@@ -1,0 +1,69 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import Modal from '../common/Modal.svelte';
+  import { t } from '../../lib/i18n/index.svelte';
+  import { branchStore } from '../../lib/stores/branches.svelte';
+  import { defaultsStore } from '../../lib/stores/defaults.svelte';
+
+  interface Props {
+    branchName: string;
+    onClose: () => void;
+    onDelete: (force: boolean, deleteWorktree?: string, deleteRemote?: boolean) => void;
+  }
+
+  let { branchName, onClose, onDelete }: Props = $props();
+  let force = $state(defaultsStore.current.deleteBranch.force);
+  let deleteRemote = $state(defaultsStore.current.deleteBranch.deleteRemote);
+  let deleteBtn: HTMLButtonElement | undefined = $state();
+
+  const linkedWorktree = $derived(branchStore.worktrees.find(w => !w.isMain && w.branch === branchName));
+  const hasRemote = $derived((() => {
+    const localInfo = branchStore.branches.find(b => !b.remote && b.name === branchName);
+    if (localInfo?.upstream) {
+      // Check if the upstream remote branch actually exists in the branch list
+      return branchStore.branches.some(b => b.remote && b.name === localInfo.upstream);
+    }
+    // Fallback: check if any remote has a branch with this exact name
+    return branchStore.remotes.some(r =>
+      branchStore.branches.some(b => b.remote && b.name === `${r.name}/${branchName}`)
+    );
+  })());
+
+  onMount(() => { deleteBtn?.focus(); });
+</script>
+
+<Modal title={t('deleteBranch.title')} {onClose}>
+  <p class="modal-desc">{@html t('deleteBranch.confirm', { name: branchName })}</p>
+  <div class="modal-form-group">
+    <label class="modal-checkbox modal-checkbox--danger">
+      <input type="checkbox" bind:checked={force} />
+      <span>{t('deleteBranch.force')}</span>
+      <span class="modal-flag-badge">-D</span>
+    </label>
+    {#if hasRemote}
+      <label class="modal-checkbox modal-checkbox--danger" style="margin-top: 6px;">
+        <input type="checkbox" bind:checked={deleteRemote} />
+        <span>{t('deleteBranch.deleteRemote')}</span>
+      </label>
+    {/if}
+  </div>
+  {#if force}
+    <p class="modal-warning" role="alert"><i class="codicon codicon-warning"></i><span>{@html t('deleteBranch.forceWarning')}</span></p>
+  {/if}
+  {#if hasRemote && deleteRemote}
+    <p class="modal-warning" role="alert"><i class="codicon codicon-warning"></i><span>{@html t('deleteBranch.deleteRemoteWarning')}</span></p>
+  {/if}
+  {#if linkedWorktree}
+    <div class="modal-warning">
+      <i class="codicon codicon-warning"></i>
+      <span>{t('deleteBranch.worktreeWarning', { name: linkedWorktree.branch || branchName })}</span>
+    </div>
+  {/if}
+  <div class="form-actions">
+    <button onclick={onClose}>{t('common.cancel')}</button>
+    <button class="danger-btn" bind:this={deleteBtn} onclick={() => onDelete(force, linkedWorktree?.path, hasRemote && deleteRemote)}>{t('sidebar.delete')}</button>
+  </div>
+</Modal>
+
+<style>
+</style>

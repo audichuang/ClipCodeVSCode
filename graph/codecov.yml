@@ -1,0 +1,50 @@
+# Codecov configuration
+# Docs: https://docs.codecov.com/docs/codecov-yaml
+#
+# Posture: informational-only while the integration beds in.
+# Codecov will post PR comments and the dashboard will track trends, but
+# it will NEVER mark a PR's check as failed. Re-evaluate after ~1 month
+# of data and flip `informational: false` (and tighten thresholds) once
+# the cadence feels right.
+
+coverage:
+  precision: 2
+  round: down
+  range: "80...95"
+
+  status:
+    project:
+      default:
+        target: auto              # Compare against the previous commit, not a fixed %
+        threshold: 2%             # Allow 2pp dip — absorbs git-version stderr noise
+        informational: true       # Never fail the check
+        if_no_uploads: success    # Don't fail if Codecov is down or token misconfigured
+        if_not_found: success     # First PR with no base is fine
+        only_pulls: true          # Only annotate PRs, not direct main pushes
+
+    patch:
+      default:
+        target: 80%               # Aspirational target for new lines
+        threshold: 5%             # 75% still passes
+        informational: true
+        if_no_uploads: success
+
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: true           # No comment when coverage hasn't moved
+
+# Mirror vitest.config.mts's coverage.exclude so Codecov's numbers
+# match what `vitest run --coverage` prints locally.
+ignore:
+  - "src/**/__tests__/**"
+  - "src/**/types.ts"
+  - "src/extension.ts"
+  - "src/panels/**"
+  - "src/views/**"
+  - "src/services/file-watcher.ts"
+  - "src/services/git-content-provider.ts"
+  - "src/utils/**"
+  - "src/git/vscode-git-bridge.ts"
+  - "webview-ui/**"
+  - "test-repo/**"

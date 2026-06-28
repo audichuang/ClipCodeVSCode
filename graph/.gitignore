@@ -1,0 +1,16 @@
+node_modules/
+dist/
+webview-ui/dist/
+webview-ui/node_modules/
+*.vsix
+.vscode/
+.vscode-test/
+out/
+coverage/
+test-results.xml
+.DS_Store
+
+docs
+.superpowers
+.claude/
+test-repo/

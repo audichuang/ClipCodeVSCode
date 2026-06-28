@@ -1,0 +1,183 @@
+import type { CommitGraphData, BranchData, DiffData, Commit, WorktreeInfo, CommitSignature } from '../git/types';
+
+export interface LinkRule {
+  pattern: string;
+  url: string;
+}
+
+export interface ModalDefaults {
+  push: { force: 'none' | 'with-lease' | 'force'; setUpstream: boolean; allTags: boolean };
+  pull: { rebase: boolean; stash: boolean };
+  fetch: { allRemotes: boolean };
+  merge: { mode: 'default' | 'no-ff' | 'squash'; pushAfter: boolean; deleteSource: boolean };
+  rebase: { autostash: boolean; pushAfter: boolean };
+  amend: { keepMessage: boolean; resetDate: boolean; resetAuthor: boolean; only: boolean; pushAfter: boolean };
+  checkout: { dirty: 'keep' | 'stash' | 'discard' };
+  checkoutRemote: { dirty: 'keep' | 'stash' | 'discard' };
+  createBranch: { checkout: boolean; publish: boolean };
+  createTag: { push: boolean };
+  cherryPick: { noCommit: boolean; pushAfter: boolean };
+  revert: { noCommit: boolean; pushAfter: boolean };
+  reset: { mode: 'soft' | 'mixed' | 'hard' };
+  stashSave: { includeUntracked: boolean; keepIndex: boolean };
+  deleteBranch: { force: boolean; deleteRemote: boolean };
+  deleteTag: { deleteRemote: boolean };
+  removeWorktree: { deleteBranch: boolean };
+}
+
+// Messages from Webview → Extension
+export type WebviewMessage =
+  | { type: 'getLog'; payload: { branch?: string; branches?: string[]; limit?: number; skip?: number; remoteFilter?: string[] } }
+  | { type: 'getBranches' }
+  | { type: 'getRepoList' }
+  | { type: 'checkDirty'; payload?: { requestId?: string } }
+  | { type: 'predictConflicts'; payload: { ours: string; theirs: string; mode?: 'rebase'; mergeBase?: string; requestId?: string } }
+  | { type: 'checkout'; payload: { ref: string; pullAfter?: boolean; force?: boolean; merge?: boolean; stash?: boolean; stashUntracked?: boolean; clean?: boolean } }
+  | { type: 'getCommitDiff'; payload: { hash: string } }
+  | { type: 'getFileDiff'; payload: { hash: string; file: string } }
+  | { type: 'getCommitData'; payload: { hash: string } }
+  | { type: 'getCommitSignature'; payload: { hash: string } }
+  | { type: 'createBranch'; payload: { name: string; startPoint?: string; checkout?: boolean; publish?: boolean; stash?: boolean; stashUntracked?: boolean; force?: boolean; clean?: boolean; merge?: boolean } }
+  | { type: 'deleteBranch'; payload: { name: string; force?: boolean; worktreePath?: string; deleteRemote?: boolean } }
+  | { type: 'deleteRemoteBranch'; payload: { remote: string; name: string } }
+  | { type: 'renameBranch'; payload: { oldName: string; newName: string } }
+  | { type: 'merge'; payload: { branch: string; noFf?: boolean; ffOnly?: boolean; squash?: boolean; pushAfter?: boolean; deleteSource?: boolean } }
+  | { type: 'fastForward'; payload: { local: string; remote: string; stash?: boolean; stashUntracked?: boolean; clean?: boolean; noCheckout?: boolean } }
+  | { type: 'abortMerge' }
+  | { type: 'rebase'; payload: { onto: string; autostash?: boolean; pushAfter?: boolean } }
+  | { type: 'abortRebase' }
+  | { type: 'continueRebase' }
+  | { type: 'skipRebase' }
+  | { type: 'interactiveRebase'; payload: { base: string; todos: Array<{ action: string; hash: string; subject: string; message?: string }>; squashCount?: number } }
+  | { type: 'getRebaseCommits'; payload: { base: string } }
+  | { type: 'reset'; payload: { ref: string; mode: 'soft' | 'mixed' | 'hard' } }
+  | { type: 'push'; payload: { remote?: string; branch?: string; force?: 'with-lease' | 'force'; setUpstream?: boolean } }
+  | { type: 'pull'; payload: { remote?: string; branch?: string; rebase?: boolean; stash?: boolean } }
+  | { type: 'fetch'; payload: { remote?: string; prune?: boolean } }
+  | { type: 'stashSave'; payload: { message?: string; includeUntracked?: boolean; keepIndex?: boolean } }
+  | { type: 'stashApply'; payload: { index: number; drop?: boolean } }
+  | { type: 'cherryPick'; payload: { commit: string; commits?: string[]; noCommit?: boolean; pushAfter?: boolean } }
+  | { type: 'revert'; payload: { commit: string; noCommit?: boolean; pushAfter?: boolean } }
+  | { type: 'commitFixup'; payload: { commit: string } }
+  | { type: 'commitSquash'; payload: { commit: string } }
+  | { type: 'reverseCommitChanges'; payload: { commit: string; file: string; hunkIndex?: number; lineIndices?: number[] } }
+  | { type: 'dragRebase'; payload: { source: string; target: string; force?: boolean; merge?: boolean; stash?: boolean; stashUntracked?: boolean; clean?: boolean } }
+  | { type: 'dragMerge'; payload: { source: string; target: string; force?: boolean; merge?: boolean; stash?: boolean; stashUntracked?: boolean; clean?: boolean } }
+  | { type: 'addRemote'; payload: { name: string; url: string } }
+  | { type: 'removeRemote'; payload: { name: string } }
+  | { type: 'openDiff'; payload: { file: string; commitHash?: string; ref1?: string; ref2?: string; staged?: boolean } }
+  | { type: 'openFile'; payload: { file: string } }
+  | { type: 'openScmView'; payload?: { returnFocus?: boolean } }
+  | { type: 'amendCommit'; payload: { message?: string; keepMessage?: boolean; resetDate?: boolean; resetAuthor?: boolean; only?: boolean; pushAfter?: boolean } }
+  | { type: 'stashDrop'; payload: { index: number } }
+  | { type: 'stashRename'; payload: { index: number; message: string } }
+  | { type: 'worktreeAdd'; payload: { path: string; branch?: string; newBranch?: string } }
+  | { type: 'worktreeAddModalRequest'; payload: { startPoint?: string } }
+  | { type: 'worktreeRemove'; payload: { path: string; deleteBranch?: string } }
+  | { type: 'createTag'; payload: { name: string; ref?: string; message?: string } }
+  | { type: 'deleteTag'; payload: { name: string } }
+  | { type: 'searchCommits'; payload: { query: string; author?: string; after?: string; before?: string } }
+  | { type: 'searchByHash'; payload: { hash: string } }
+  | { type: 'searchByFile'; payload: { file: string } }
+  | { type: 'getActivityLog' }
+  | { type: 'getReflog'; payload?: { ref?: string; limit?: number } }
+  | { type: 'bisectStart'; payload: { bad?: string; good?: string } }
+  | { type: 'bisectGood'; payload: { ref?: string } }
+  | { type: 'bisectBad'; payload: { ref?: string } }
+  | { type: 'bisectSkip' }
+  | { type: 'bisectReset' }
+  | { type: 'getStats' }
+  | { type: 'lsTree'; payload: { ref: string; path?: string } }
+  | { type: 'checkFlowStatus' }
+  | { type: 'flowInit'; payload: { productionBranch: string; developBranch: string; featurePrefix: string; releasePrefix: string; hotfixPrefix: string; versionTagPrefix: string } }
+  | { type: 'flowAction'; payload: { flowType: string; action: string; name: string } }
+  | { type: 'getFlowBranches' }
+  | { type: 'getSubmodules' }
+  | { type: 'submoduleUpdate' }
+  | { type: 'getLfsFiles' }
+  | { type: 'lfsLock'; payload: { file: string } }
+  | { type: 'lfsUnlock'; payload: { file: string; force?: boolean } }
+  | { type: 'switchRepo'; payload: { path: string } }
+  | { type: 'getWorktrees' }
+  | { type: 'pruneWorktrees' }
+  | { type: 'pushTag'; payload: { name: string; remote?: string } }
+  | { type: 'pushAllTags'; payload: { remote?: string } }
+  | { type: 'deleteRemoteTag'; payload: { name: string; remote?: string } }
+  | { type: 'copyToClipboard'; payload: { text: string } }
+  | { type: 'saveCommitPatch'; payload: { hash: string; paths?: string[] } }
+  | { type: 'restoreStashFiles'; payload: { index: number; paths: string[] } }
+  | { type: 'compareToWorking'; payload: { hash: string } }
+  | { type: 'compareCommits'; payload: { ref1: string; ref2: string } }
+  | { type: 'getImageAtRef'; payload: { ref: string; path: string } }
+  | { type: 'continueOperation' }
+  | { type: 'refreshConflicts' }
+  | { type: 'stageFile'; payload: { file: string } }
+  | { type: 'abortOperation' }
+  | { type: 'openConflictFile'; payload: { file: string } }
+  | { type: 'setUpstream'; payload: { branch: string; remote: string; remoteBranch: string; createRemote?: boolean } }
+  | { type: 'openWorktreeInNewWindow'; payload: { path: string } }
+  | { type: 'showNotification'; payload: { message: string } }
+  | { type: 'showTagDetails'; payload: { name: string } }
+  | { type: 'getUncommittedDiff' }
+  | { type: 'getUncommittedFileDiff'; payload: { file: string; staged: boolean } }
+  | { type: 'getMultiCommitSections'; payload: { hashes: string[] } }
+  | { type: 'getAvatar'; payload: { email: string; size: number } }
+  | { type: 'openExternalUrl'; payload: { url: string } }
+  | { type: 'openExtensionSettings' };
+
+// Messages from Extension → Webview
+export type ExtensionMessage =
+  | { type: 'logData'; payload: CommitGraphData }
+  | { type: 'branchData'; payload: BranchData }
+  | { type: 'fullRefresh'; payload: { logData: CommitGraphData; branchData: BranchData } }
+  | { type: 'commitDiffData'; payload: { hash?: string; diffs?: DiffData[]; files: Array<{ path: string; status: string }> } }
+  | { type: 'commitSignatureData'; payload: { hash: string; signature: CommitSignature } }
+  | { type: 'rebaseCommitsData'; payload: { base: string; commits: Commit[] } }
+  | { type: 'searchResults'; payload: CommitGraphData }
+  | { type: 'activityLogData'; payload: Array<{ command: string; timestamp: string; success: boolean; duration: number }> }
+  | { type: 'reflogData'; payload: { entries: Array<{ hash: string; shortHash: string; selector: string; message: string; date: string; dangling: boolean }>; hasMore: boolean } }
+  | { type: 'repoChanged'; payload: { what: string } }
+  | { type: 'error'; payload: { message: string; command?: string; source?: string } }
+  | { type: 'notGitRepo' }
+  | { type: 'operationComplete'; payload: { operation: string; success: boolean } }
+  | { type: 'operationPaused'; payload: { operation: 'rebase' } }
+  | { type: 'checkoutBlocked'; payload: { ref: string; pullAfter?: boolean } }
+  | { type: 'dirtyState'; payload: { dirty: boolean; requestId?: string } }
+  | { type: 'conflictPrediction'; payload: { hasConflict: boolean; files: string[]; truncated?: boolean; requestId?: string } }
+  | { type: 'bisectResult'; payload: { message: string } }
+  | { type: 'statsData'; payload: { byAuthor: Array<{ author: string; email: string; count: number }>; byWeekdayHour: Array<{ weekday: number; hour: number; count: number }> } }
+  | { type: 'lsTreeData'; payload: { ref: string; path?: string; entries: Array<{ mode: string; type: 'blob' | 'tree'; hash: string; name: string }> } }
+  | { type: 'submoduleData'; payload: Array<{ hash: string; path: string; status: string }> }
+  | { type: 'lfsData'; payload: { files: Array<{ oid: string; path: string }>; locks: Array<{ path: string; owner: string; id: string }> } }
+  | { type: 'tagDetailsData'; payload: { name: string; hash: string; message?: string; isAnnotated: boolean } }
+  | { type: 'setLocale'; payload: { locale: string; homeDir?: string } }
+  | { type: 'setDefaults'; payload: ModalDefaults }
+  | { type: 'setLoadMoreCount'; payload: { count: number } }
+  | { type: 'setBadgeBarThickness'; payload: { width: number } }
+  | { type: 'setGraphColors'; payload: { colors: string[] } }
+  | { type: 'setCommitLinkRules'; payload: { rules: LinkRule[] } }
+  | { type: 'repoList'; payload: { repos: Array<{ path: string; name: string; type: 'root' | 'submodule' | 'nested' }>; active: string } }
+  | { type: 'worktreeData'; payload: WorktreeInfo[] }
+  | { type: 'uncommittedDiffData'; payload: { staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> } }
+  | { type: 'multiCommitSectionsData'; payload: { files: Array<{ path: string; status: string }>; sections: Array<{ file: string; commit: string; diff: DiffData }> } }
+  | { type: 'imageData'; payload: { ref: string; path: string; base64: string; mimeType: string } }
+  | { type: 'avatarData'; payload: { email: string; size: number; dataUri: string | null } }
+  | { type: 'conflictData'; payload: { operation: string; files: Array<{ path: string; resolved: boolean }> } }
+  | { type: 'flowStatus'; payload: { installed: boolean; initialized: boolean; config: { productionBranch: string; developBranch: string; featurePrefix: string; releasePrefix: string; hotfixPrefix: string; versionTagPrefix: string } | null } }
+  | { type: 'flowBranches'; payload: { features: string[]; releases: string[]; hotfixes: string[] } }
+  | { type: 'showModal'; payload:
+    | { modal: 'deleteBranch'; branchName: string }
+    | { modal: 'deleteTag'; tagName: string }
+    | { modal: 'stashDrop'; index: number; message: string }
+    | { modal: 'stashPop'; index: number; message: string }
+    | { modal: 'renameBranch'; branchName: string }
+    | { modal: 'mergeBranch'; branchName: string }
+    | { modal: 'createBranch' }
+    | { modal: 'createTag' }
+    | { modal: 'stashSave' }
+    | { modal: 'checkoutRemote'; remoteName: string; localName: string }
+    | { modal: 'deleteRemoteTag'; tagName: string }
+    | { modal: 'removeWorktree'; path: string; branch: string }
+    | { modal: 'deleteRemoteBranch'; remote: string; name: string }
+    | { modal: 'addWorktree'; defaultPath: string; startPoint?: string }
+  };
