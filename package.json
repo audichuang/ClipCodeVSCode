@@ -10,7 +10,7 @@
     "url": "https://github.com/audichuang/ClipCodeVSCode.git"
   },
   "engines": {
-    "vscode": "^1.92.0"
+    "vscode": "^1.108.0"
   },
   "categories": [
     "Other"
@@ -19,7 +19,8 @@
     "onCommand:clipcode.copyToClipboard",
     "onCommand:clipcode.copyAllOpenEditors",
     "onCommand:clipcode.copyGitChanges",
-    "onCommand:clipcode.pasteAndRestoreFiles"
+    "onCommand:clipcode.pasteAndRestoreFiles",
+    "onView:clipcode.history"
   ],
   "main": "./out/src/extension.js",
   "contributes": {
@@ -39,8 +40,35 @@
       {
         "command": "clipcode.pasteAndRestoreFiles",
         "title": "ClipCode: Paste and Restore Files"
+      },
+      {
+        "command": "clipcode.history.switchRepository",
+        "title": "ClipCode: Switch Repository",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "clipcode.history.copyFullSource",
+        "title": "ClipCode: Copy Full Source"
+      },
+      {
+        "command": "clipcode.history.loadMore",
+        "title": "Load More"
+      },
+      {
+        "command": "clipcode.history.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
       }
     ],
+    "views": {
+      "scm": [
+        {
+          "id": "clipcode.history",
+          "name": "ClipCode History",
+          "icon": "$(history)"
+        }
+      ]
+    },
     "menus": {
       "explorer/context": [
         {
@@ -70,6 +98,25 @@
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "clipcode.history.switchRepository",
+          "when": "view == clipcode.history",
+          "group": "navigation@10"
+        },
+        {
+          "command": "clipcode.history.refresh",
+          "when": "view == clipcode.history",
+          "group": "navigation@20"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "clipcode.history.copyFullSource",
+          "when": "view == clipcode.history && viewItem =~ /^(commit|folder|file)$/",
+          "group": "navigation@10"
         }
       ]
     },
@@ -163,7 +210,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
-    "@types/vscode": "^1.92.0",
+    "@types/vscode": "^1.108.0",
     "@vscode/vsce": "^3.2.1",
     "typescript": "^5.7.3"
   }
