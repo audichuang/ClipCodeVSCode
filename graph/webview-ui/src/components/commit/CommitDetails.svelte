@@ -496,6 +496,18 @@
     vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files: payloadFiles } });
     fileContextMenu = null;
   }
+
+  // The ref to read "full source" at for the committed file tree:
+  //  - single commit selected → that commit;
+  //  - multiple commits selected / explicit compare → the newer side
+  //    (uiStore.compareRef2; CommitGraph sets it to the newest selected hash),
+  //    falling back to the working tree ('UNCOMMITTED') when comparing to working.
+  // Returns null when neither applies (no copy offered).
+  function snipcodeTreeHash(): string | null {
+    if (commit) return commit.hash;
+    if (uiStore.comparing) return uiStore.compareRef2 ?? 'UNCOMMITTED';
+    return null;
+  }
   /* SNIPCODE-HOOK end */
 
   // A collapsed folder counts as selected when every changed file under it is
@@ -1019,32 +1031,17 @@
                       });
                     }
 
-                    /* SNIPCODE-HOOK start: Copy Full Source (S3, multi-select)
-                       Maps the selected paths (or the clicked file when none/one
-                       selected) against `files` to recover {path,status,oldPath},
-                       attaches `filesRepoRoot` (the active-repo path captured when
-                       these `files` were fetched — one active repo per graph panel,
-                       same root for every file), and posts GraphCopyPayload. Mirrors
-                       the Create Patch multi-select gate above. */
-                    if (commit) {
+                    /* SNIPCODE-HOOK start: Copy Full Source (S3, multi-select; single commit
+                       AND compare/multi-commit — reads at snipcodeTreeHash()). Maps the
+                       selected paths (or the clicked file) against `files` to recover
+                       {path,status,oldPath}, attaches `filesRepoRoot`, posts GraphCopyPayload. */
+                    const csHash = snipcodeTreeHash();
+                    if (csHash !== null) {
                       const csMulti = selectedPatchFiles.has(node.path) && selectedPatchFiles.size >= 2;
                       const csPaths = csMulti ? [...selectedPatchFiles] : [node.path];
-                      const hash = commit.hash;
                       items.push({
                         label: csMulti ? `Copy Full Source (${csPaths.length})` : 'Copy Full Source',
-                        action: () => {
-                          const payloadFiles = csPaths.map((p) => {
-                            const f = files.find((cf) => cf.path === p);
-                            return {
-                              repoRootFsPath: filesRepoRoot,
-                              relativePath: p,
-                              oldRelativePath: f?.oldPath,
-                              status: f?.status ?? 'M',
-                            };
-                          });
-                          vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files: payloadFiles } });
-                          fileContextMenu = null;
-                        },
+                        action: () => snipcodeCopyFiles(csHash, csPaths, (p) => files.find((cf) => cf.path === p), filesRepoRoot),
                       });
                     }
                     /* SNIPCODE-HOOK end */
@@ -1128,28 +1125,28 @@
                   }}
                   oncontextmenu={(e) => {
                     e.preventDefault();
-                    if (!commit) return;
-                    const folderItems: Array<{ label: string; action: () => void; danger?: boolean; separator?: boolean }> = [
-                      {
+                    const folderItems: Array<{ label: string; action: () => void; danger?: boolean; separator?: boolean }> = [];
+                    // Create Patch needs a concrete commit (not available in compare/multi-commit).
+                    if (commit) {
+                      folderItems.push({
                         label: t('file.createPatchFromFolder'),
                         action: () => {
                           vscode.postMessage({ type: 'saveCommitPatch', payload: { hash: commit.hash, paths: [node.path] } });
                           fileContextMenu = null;
                         },
-                      },
-                    ];
-                    /* SNIPCODE-HOOK start: Copy Full Source (committed folder, S3) — all files under, at this commit */
-                    folderItems.push({
-                      label: 'Copy Full Source',
-                      action: () => snipcodeCopyFiles(
-                        commit.hash,
-                        collectFilePaths(node),
-                        (p) => files.find((cf) => cf.path === p),
-                        filesRepoRoot,
-                      ),
-                    });
+                      });
+                    }
+                    /* SNIPCODE-HOOK start: Copy Full Source (committed folder, S3) — all files under,
+                       at snipcodeTreeHash() (single commit OR compare/multi-commit newer ref). */
+                    const csHash = snipcodeTreeHash();
+                    if (csHash !== null) {
+                      folderItems.push({
+                        label: 'Copy Full Source',
+                        action: () => snipcodeCopyFiles(csHash, collectFilePaths(node), (p) => files.find((cf) => cf.path === p), filesRepoRoot),
+                      });
+                    }
                     /* SNIPCODE-HOOK end */
-                    if (stashIndex !== null) {
+                    if (commit && stashIndex !== null) {
                       folderItems.push({ separator: true, label: '', action: () => {} });
                       folderItems.push({
                         label: t('file.restoreStashFromFolder'),
@@ -1159,7 +1156,7 @@
                         },
                       });
                     }
-                    fileContextMenu = { x: e.clientX, y: e.clientY, items: folderItems };
+                    if (folderItems.length > 0) fileContextMenu = { x: e.clientX, y: e.clientY, items: folderItems };
                   }}
                 >
                   <i class="codicon" class:codicon-chevron-right={!expandedDirs.has(node.path)} class:codicon-chevron-down={expandedDirs.has(node.path)}></i>

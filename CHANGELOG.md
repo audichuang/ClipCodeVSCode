@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- **Copy Full Source** now also works when **multiple commits are selected**
+  (compare / multi-commit view): the file and folder right-click menus copy each
+  file at the newer end of the selection (`compareRef2`). Previously the menu item
+  only appeared for a single selected commit. Single-commit and uncommitted
+  behaviour is unchanged.
+
 ## 0.3.1
 
 - **Copy Full Source** now appears consistently everywhere in the graph's Changes

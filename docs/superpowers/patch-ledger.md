@@ -173,6 +173,14 @@ the fourth is the residual human F5 smoke the e2e suite can't drive.
   `App.svelte`.
 
 ### S3b — `graph/webview-ui/src/components/commit/CommitDetails.svelte` (folder + uncommitted Copy Full Source — 4 blocks)
+> Update (0.3.2): the shared helper block also defines `snipcodeTreeHash()` (returns
+> `commit.hash`, else `uiStore.compareRef2 ?? 'UNCOMMITTED'` when comparing, else
+> null). The committed **file** menu (S3) and committed **folder** menu both call it
+> instead of gating on `if (commit)`, so Copy Full Source now appears for
+> compare/multi-commit selections too (reads each file at the newer ref). The folder
+> menu no longer early-returns when `commit` is null; Create Patch stays gated on a
+> concrete `commit`, and the menu only opens when it has at least one item.
+
 - **Intent:** make **Copy Full Source** consistent across every file-list context
   in the Changes panel (the original S3 only covered committed-commit *files*).
   Adds it to: committed-commit **folders**, **uncommitted** files, and
