@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.12
+
+- **Multi-select in the graph's working-tree Changes tree.** The uncommitted
+  Changes list now supports the same multi-select as the committed file tree:
+  Shift-click to select a range, Ctrl/Cmd-click to add/remove files or folders,
+  and "Copy Full Source (N)" copies the whole selection at once. Previously you
+  could only select (and copy) one file or folder there at a time.
+
 ## 0.3.11
 
 - **Deterministic folder-level alignment on restore.** Copy now records the source

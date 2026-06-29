@@ -61,6 +61,9 @@
   let selectedFile = $state<string | null>(null);
   // Files Ctrl/Cmd-clicked for "Create Patch from selected" (committed view only).
   let selectedPatchFiles = $state<Set<string>>(new Set());
+  // Multi-selection in the uncommitted (working-tree) Changes tree. Keys are
+  // prefixed `staged:`/`unstaged:` like selectedFile, so staged/unstaged never mix.
+  let selectedUncommittedFiles = $state<Set<string>>(new Set());
   let uncommittedFiles = $state<{ staged: CommitFile[]; unstaged: CommitFile[] } | null>(null);
   let uncommittedDiffCache = $state(new Map<string, DiffData>());
   let lfsFiles = $state<Array<{ oid: string; path: string }>>([]);
@@ -264,6 +267,7 @@
       sections = [];
       selectedFile = null;
       selectedPatchFiles = new Set();
+      selectedUncommittedFiles = new Set();
       uncommittedFiles = null;
       uncommittedDiffCache = new Map();
       signature = null;
@@ -295,6 +299,7 @@
       sections = [];
       selectedFile = null;
       selectedPatchFiles = new Set();
+      selectedUncommittedFiles = new Set();
     }
   });
 
@@ -541,6 +546,60 @@
     return filesUnder.length > 0 && filesUnder.every(p => selectedPatchFiles.has(p));
   }
 
+  // --- Uncommitted (working-tree) Changes multi-select, mirroring the committed
+  // tree's selectPatchRange/isFolderSelected but over prefixed keys. ---
+  const uncommittedPrefix = (staged: boolean) => (staged ? 'staged:' : 'unstaged:');
+  const stripPrefix = (key: string) => key.replace(/^(staged|unstaged):/, '');
+
+  // Ordered prefixed keys for the currently shown tab, so a shift range resolves
+  // the same way it does for commits.
+  function uncommittedOrder(staged: boolean): string[] {
+    const prefix = uncommittedPrefix(staged);
+    return (staged ? stagedTree : unstagedTree).flatMap(collectFilePaths).map(p => prefix + p);
+  }
+
+  // Fetch the diff for the preview pane when a new key becomes the active file
+  // (skips untracked 'N' files, which render a hint pane instead of a diff).
+  function fetchUncommittedDiffForKey(key: string | null) {
+    if (!key || uncommittedDiffCache.has(key)) return;
+    const staged = key.startsWith('staged:');
+    const path = stripPrefix(key);
+    const list = staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged;
+    if (list?.find(f => f.path === path)?.status !== 'N') {
+      vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: path, staged } });
+    }
+  }
+
+  function selectUncommittedRange(keys: string[], staged: boolean) {
+    const order = uncommittedOrder(staged);
+    const anchor = selectedFile && order.includes(selectedFile)
+      ? selectedFile
+      : [...selectedUncommittedFiles].find(k => order.includes(k));
+    if (!anchor) {
+      selectedUncommittedFiles = new Set(keys);
+      selectedFile = keys[keys.length - 1] ?? null;
+      fetchUncommittedDiffForKey(selectedFile);
+      return;
+    }
+    const indexes = keys.map(k => order.indexOf(k)).filter(i => i >= 0);
+    if (indexes.length === 0) return;
+    const anchorIdx = order.indexOf(anchor);
+    const first = Math.min(...indexes);
+    const last = Math.max(...indexes);
+    const targetIdx = anchorIdx <= first ? last : first;
+    const [lo, hi] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+    selectedUncommittedFiles = new Set(order.slice(lo, hi + 1));
+    selectedFile = order[targetIdx] ?? null;
+    fetchUncommittedDiffForKey(selectedFile);
+  }
+
+  function isUncommittedFolderSelected(node: FileTreeNode, staged: boolean): boolean {
+    const prefix = uncommittedPrefix(staged);
+    if (expandedDirs.has(prefix + node.path)) return false;
+    const keysUnder = collectFilePaths(node).map(p => prefix + p);
+    return keysUnder.length > 0 && keysUnder.every(k => selectedUncommittedFiles.has(k));
+  }
+
   let fileTree = $derived(buildFileTree(files));
   // Memoize the uncommitted trees too. They were rebuilt inline in the
   // template ({@render renderUncommittedTree(buildFileTree(...))}), so any
@@ -566,6 +625,7 @@
       lastClearSignal = signal;
       selectedFile = null;
       selectedPatchFiles = new Set();
+      selectedUncommittedFiles = new Set();
       // The clicked file/dir button still holds focus; Esc is a keyboard event,
       // so :focus-visible would draw an outline on it after deselecting. Blur it.
       const active = document.activeElement as HTMLElement | null;
@@ -652,10 +712,10 @@
   <!-- Top tabs -->
   <div class="top-tabs">
     {#if commit?.hash === 'UNCOMMITTED'}
-      <button class="top-tab" class:active={uncommittedTab === 'staged'} onclick={() => { uncommittedTab = 'staged'; selectedFile = null; }}>
+      <button class="top-tab" class:active={uncommittedTab === 'staged'} onclick={() => { uncommittedTab = 'staged'; selectedFile = null; selectedUncommittedFiles = new Set(); }}>
         Staged <span class="tab-count">{uncommittedFiles?.staged.length ?? 0}</span>
       </button>
-      <button class="top-tab" class:active={uncommittedTab === 'unstaged'} onclick={() => { uncommittedTab = 'unstaged'; selectedFile = null; }}>
+      <button class="top-tab" class:active={uncommittedTab === 'unstaged'} onclick={() => { uncommittedTab = 'unstaged'; selectedFile = null; selectedUncommittedFiles = new Set(); }}>
         Unstaged <span class="tab-count">{uncommittedFiles?.unstaged.length ?? 0}</span>
       </button>
     {:else}
@@ -858,15 +918,38 @@
                 {#if node.isFile}
                   <button
                     class="file-item"
-                    class:selected={selectedFile === `${staged ? 'staged' : 'unstaged'}:${node.path}`}
+                    class:selected={selectedUncommittedFiles.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}
                     style="padding-left: {8 + depth * 16 + 18}px;"
-                    onclick={() => {
+                    onclick={(e) => {
                       const key = `${staged ? 'staged' : 'unstaged'}:${node.path}`;
-                      selectedFile = selectedFile === key ? null : key;
-                      // Nested repos can't be diffed from the parent — skip the fetch
-                      // and let the UI render the dedicated hint pane instead.
-                      if (selectedFile && node.status !== 'N' && !uncommittedDiffCache.has(key)) {
-                        vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: node.path, staged } });
+                      if (e.shiftKey) {
+                        selectUncommittedRange([key], staged);
+                        return;
+                      }
+                      if (e.ctrlKey || e.metaKey) {
+                        // Add/remove this file from the selection; reassign for reactivity.
+                        const next = new Set(selectedUncommittedFiles);
+                        if (next.has(key)) {
+                          next.delete(key);
+                          if (selectedFile === key) selectedFile = next.size > 0 ? [...next][next.size - 1] : null;
+                        } else {
+                          next.add(key);
+                          selectedFile = key;
+                          fetchUncommittedDiffForKey(key);
+                        }
+                        selectedUncommittedFiles = next;
+                        return;
+                      }
+                      // Plain click: select just this file (toggle off if it's the sole selection).
+                      if (selectedFile === key && selectedUncommittedFiles.size <= 1) {
+                        selectedFile = null;
+                        selectedUncommittedFiles = new Set();
+                      } else {
+                        selectedFile = key;
+                        selectedUncommittedFiles = new Set([key]);
+                        // Nested repos can't be diffed from the parent — skip the fetch
+                        // and let the UI render the dedicated hint pane instead.
+                        fetchUncommittedDiffForKey(key);
                       }
                     }}
                     ondblclick={() => {
@@ -890,15 +973,20 @@
                         });
                       }
                       /* SNIPCODE-HOOK start: Copy Full Source (uncommitted file, S3) — working-tree content */
-                      items.push({
-                        label: 'Copy Full Source',
-                        action: () => snipcodeCopyFiles(
-                          'UNCOMMITTED',
-                          [node.path],
-                          (p) => (staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find((cf) => cf.path === p),
-                          uiStore.activeRepo,
-                        ),
-                      });
+                      {
+                        const key = `${staged ? 'staged' : 'unstaged'}:${node.path}`;
+                        const csMulti = selectedUncommittedFiles.has(key) && selectedUncommittedFiles.size >= 2;
+                        const csPaths = csMulti ? [...selectedUncommittedFiles].map(stripPrefix) : [node.path];
+                        items.push({
+                          label: csMulti ? `Copy Full Source (${csPaths.length})` : 'Copy Full Source',
+                          action: () => snipcodeCopyFiles(
+                            'UNCOMMITTED',
+                            csPaths,
+                            (p) => (staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find((cf) => cf.path === p),
+                            uiStore.activeRepo,
+                          ),
+                        });
+                      }
                       /* SNIPCODE-HOOK end */
                       fileContextMenu = { x: e.clientX, y: e.clientY, items };
                     }}
@@ -912,16 +1000,46 @@
                 {:else}
                   <button
                     class="dir-item"
+                    class:selected={isUncommittedFolderSelected(node, staged)}
                     style="padding-left: {8 + depth * 16}px;"
-                    onclick={() => toggleDir(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}
+                    onclick={(e) => {
+                      const keysUnder = collectFilePaths(node).map(p => `${staged ? 'staged' : 'unstaged'}:${p}`);
+                      if (e.shiftKey) {
+                        selectUncommittedRange(keysUnder, staged);
+                        return;
+                      }
+                      if (e.ctrlKey || e.metaKey) {
+                        // Add/remove every changed file under this folder.
+                        const next = new Set(selectedUncommittedFiles);
+                        const allSelected = keysUnder.length > 0 && keysUnder.every(k => next.has(k));
+                        if (allSelected) {
+                          for (const k of keysUnder) next.delete(k);
+                          if (selectedFile && keysUnder.includes(selectedFile)) {
+                            selectedFile = next.size > 0 ? [...next][next.size - 1] : null;
+                          }
+                        } else {
+                          for (const k of keysUnder) next.add(k);
+                          if (keysUnder.length > 0) { selectedFile = keysUnder[keysUnder.length - 1]; fetchUncommittedDiffForKey(selectedFile); }
+                        }
+                        selectedUncommittedFiles = next;
+                        return;
+                      }
+                      toggleDir(`${staged ? 'staged' : 'unstaged'}:${node.path}`);
+                    }}
                     oncontextmenu={(e) => {
                       e.preventDefault();
-                      /* SNIPCODE-HOOK start: Copy Full Source (uncommitted folder, S3) — all files under, working-tree */
+                      /* SNIPCODE-HOOK start: Copy Full Source (uncommitted folder, S3) — all files under, working-tree.
+                         Honors a multi-selection that extends past this folder. */
+                      const keysUnder = collectFilePaths(node).map(p => `${staged ? 'staged' : 'unstaged'}:${p}`);
+                      const csMulti = keysUnder.length > 0
+                        && keysUnder.every(k => selectedUncommittedFiles.has(k))
+                        && selectedUncommittedFiles.size > keysUnder.length;
+                      const csPaths = (csMulti ? [...selectedUncommittedFiles] : keysUnder).map(stripPrefix);
                       fileContextMenu = { x: e.clientX, y: e.clientY, items: [{
-                        label: 'Copy Full Source',
+                        label: csMulti ? `Copy Full Source (${csPaths.length})` : 'Copy Full Source',
                         action: () => snipcodeCopyFiles(
                           'UNCOMMITTED',
-                          collectFilePaths(node),
+                          csPaths,
                           (p) => (staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find((cf) => cf.path === p),
                           uiStore.activeRepo,
                         ),
