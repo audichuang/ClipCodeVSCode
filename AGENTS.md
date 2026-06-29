@@ -16,12 +16,19 @@ Both sides must agree on:
 - a per-file header built from a `headerFormat` with a `$FILE_PATH` placeholder
 - change labels `[NEW] [MODIFIED] [DELETED] [MOVED]` prefixed onto the path
 - pre/post text wrapping + the blank-line-between-files option
+- the `//clipcode-esc: ` escape prefix (`ESCAPE_MARKER`): a content line that
+  itself parses as a header is escaped on copy and unescaped on paste, so a file
+  containing a literal `// file: …` line round-trips instead of splitting into a
+  phantom file. The marker MUST be byte-identical on both sides.
 
-Format authority on this side: `src/clipboardFormat.ts` (build + parse). The
-IntelliJ mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ChangeTypeLabel.kt`
-(+ `GitClipboardFormatter.kt` / `ClipboardRestoreParser.kt`). **Change labels,
-bracket syntax, or header rules on one side → update the other, or cross-tool
-restore silently breaks.** No test guards this interop — verify by hand.
+Format authority on this side: `src/clipboardFormat.ts` — `buildPayloadInternal`
++ `escapeContent` (build), `parseClipboard` + `unescapeContent` + `joinContent`
+(parse). The IntelliJ mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ChangeTypeLabel.kt`
+(+ `GitClipboardFormatter.kt` / `CopyFileContentAction.kt` / `ClipboardRestoreParser.kt`).
+**Change labels, bracket syntax, header rules, or the escape marker on one side →
+update the other, or cross-tool restore silently breaks.** Round-trip is guarded
+by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
+`test-e2e/suite/roundtrip.test.ts`.
 
 ## Two parts of this repo
 

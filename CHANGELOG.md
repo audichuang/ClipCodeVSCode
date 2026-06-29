@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.5
+
+- **Reliable copy → restore round-trip.** A file whose own content contained a
+  line that looked like a ClipCode header (e.g. a literal `// file: …`) used to be
+  split into a phantom file on paste; such lines are now escaped on copy and
+  restored verbatim. Pasting recreates exactly what was copied. (The clipboard
+  format is shared with the IntelliJ ClipCode plugin; both sides were updated in
+  lock-step.)
+- **Restore preserves content whitespace.** Restoring no longer trims a file's own
+  leading indentation / interior blank lines (only the structural blank lines the
+  format inserts between files are dropped).
+- **Faster multi-file restore.** Restoring many files now writes them with bounded
+  concurrency instead of one at a time (mirrors the earlier copy-side speedup);
+  files that depend on each other (same path / parent dir) still write in order.
+- Added an end-to-end copy→restore round-trip test.
+
 ## 0.3.4
 
 - **Faster copying of many files.** "Copy Full Source" (from the graph) and

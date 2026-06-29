@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { collectCopyFiles, collectCopyTextFiles } from '../src/copy.js';
-import { executeRestorePlan, planRestore, type RestoreEntry } from '../src/restore.js';
+import { executeRestorePlan, hasPathDependencies, planRestore, type RestoreEntry } from '../src/restore.js';
 import { defaultSettings } from '../src/settings.js';
 
 test('copies folders recursively while skipping empty files', async () => {
@@ -123,6 +123,59 @@ test('restore creates, skips, overwrites, and deletes under workspace root', asy
     await executeRestorePlan({ ...plan, createOperations: [] }, { overwriteExisting: false, skipExisting: false });
     await assert.rejects(readFile(path.join(root, 'src', 'delete.ts'), 'utf8'));
   });
+});
+
+test('restore writes a large multi-file batch identically (parallelized creates)', async () => {
+  await withTempDir(async root => {
+    const count = 50;
+    const entries: RestoreEntry[] = [];
+    for (let i = 0; i < count; i++) {
+      entries.push({ path: `src/file-${i}.ts`, content: `content-${i}`, changeTypes: new Set<string>() });
+    }
+    // One pre-existing file to exercise the skip/overwrite branch under concurrency.
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await writeFile(path.join(root, 'src', 'file-0.ts'), 'stale');
+
+    const plan = await planRestore(root, entries);
+    assert.equal(plan.createOperations.length, count);
+
+    const result = await executeRestorePlan(plan, { overwriteExisting: true, skipExisting: false });
+    assert.equal(result.createdCount, count - 1);
+    assert.equal(result.overwrittenCount, 1);
+    assert.equal(result.skippedExistingCount, 0);
+    assert.equal(result.errors.length, 0);
+
+    for (let i = 0; i < count; i++) {
+      assert.equal(await readFile(path.join(root, 'src', `file-${i}.ts`), 'utf8'), `content-${i}`);
+    }
+  });
+});
+
+test('duplicate-path create ops keep sequential overwrite/skip semantics under parallelism', async () => {
+  await withTempDir(async root => {
+    // Two entries resolving to the SAME path: the serial loop creates once then
+    // overwrites; parallel creates must not both see "absent" and double-count.
+    const entries: RestoreEntry[] = [
+      { path: 'src/dup.ts', content: 'first', changeTypes: new Set<string>() },
+      { path: 'src/dup.ts', content: 'second', changeTypes: new Set<string>() }
+    ];
+    const plan = await planRestore(root, entries);
+    assert.equal(plan.createOperations.length, 2);
+
+    const result = await executeRestorePlan(plan, { overwriteExisting: true, skipExisting: false });
+    assert.equal(result.createdCount, 1);
+    assert.equal(result.overwrittenCount, 1);
+    assert.equal(result.errors.length, 0);
+    assert.equal(await readFile(path.join(root, 'src', 'dup.ts'), 'utf8'), 'second');
+  });
+});
+
+test('hasPathDependencies flags duplicates and ancestor/descendant paths, not prefix lookalikes', () => {
+  assert.equal(hasPathDependencies(['/r/a.ts', '/r/b.ts']), false);
+  assert.equal(hasPathDependencies(['/r/a.ts', '/r/a.ts']), true);            // exact duplicate
+  assert.equal(hasPathDependencies(['/r/src', '/r/src/a.ts']), true);         // ancestor dir written as a file
+  assert.equal(hasPathDependencies(['/r/src', '/r/srcfoo']), false);          // prefix lookalike, not a real ancestor
+  assert.equal(hasPathDependencies(['/r/a/b/c.ts', '/r/a']), true);           // deep descendant
 });
 
 test('restore uses sibling root labels and skips ambiguous legacy paths', async () => {

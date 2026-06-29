@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { mapInOrder } from './concurrency.js';
 import { deleteFile, pathExists, writeTextFile } from './fileSystem.js';
 import { resolveDeleteTarget, resolveWriteTarget } from './pathResolver.js';
 
@@ -102,24 +103,20 @@ export async function executeRestorePlan(
     errors: []
   };
 
-  for (const operation of plan.createOperations) {
-    try {
-      const existing = await existingKind(operation.absolutePath);
-      if (existing === 'directory') {
-        result.skippedExistingCount++;
-      } else if (existing === 'file' && options.skipExisting) {
-        result.skippedExistingCount++;
-      } else if (existing === 'file' && options.overwriteExisting) {
-        await writeTextFile(operation.absolutePath, operation.content);
-        result.overwrittenCount++;
-      } else if (existing === 'file') {
-        result.skippedExistingCount++;
-      } else {
-        await writeTextFile(operation.absolutePath, operation.content);
-        result.createdCount++;
-      }
-    } catch (error) {
-      result.errors.push(`${operation.relativePath}: ${errorMessage(error)}`);
+  // Fan out the per-file existence-check + write; mapInOrder yields outcomes in
+  // input order, so folding them keeps counts and error order deterministic.
+  // When one op's result depends on another's — two ops on the SAME path
+  // (create-then-overwrite/skip), or one path being an ancestor directory of
+  // another (writeTextFile auto-creates parent dirs) — fall back to serial for
+  // that rare case so the outcome is deterministic; otherwise both would race.
+  const paths = plan.createOperations.map(op => op.absolutePath);
+  const concurrency = hasPathDependencies(paths) ? 1 : 16;
+  for await (const outcome of mapInOrder(plan.createOperations, concurrency, runCreate(options))) {
+    switch (outcome.kind) {
+      case 'created': result.createdCount++; break;
+      case 'overwritten': result.overwrittenCount++; break;
+      case 'skipped': result.skippedExistingCount++; break;
+      case 'error': result.errors.push(outcome.message); break;
     }
   }
 
@@ -135,6 +132,50 @@ export async function executeRestorePlan(
   }
 
   return result;
+}
+
+// True if any create target equals another, or is an ancestor directory of
+// another (e.g. a file at "src" plus a file at "src/a.ts"): those outcomes are
+// order-dependent, so the caller serializes them instead of racing. Exported for
+// unit testing the boundary logic (e.g. "src" vs "srcfoo" must NOT conflict).
+export function hasPathDependencies(paths: string[]): boolean {
+  const set = new Set(paths);
+  if (set.size !== paths.length) return true;
+  return paths.some(p => {
+    for (let i = 0; i < p.length; i++) {
+      if ((p[i] === '/' || p[i] === '\\') && set.has(p.slice(0, i))) return true;
+    }
+    return false;
+  });
+}
+
+type CreateOutcome =
+  | { kind: 'created' | 'overwritten' | 'skipped' }
+  | { kind: 'error'; message: string };
+
+function runCreate(
+  options: { overwriteExisting: boolean; skipExisting: boolean }
+): (operation: CreateOperation) => Promise<CreateOutcome> {
+  return async operation => {
+    try {
+      const existing = await existingKind(operation.absolutePath);
+      if (existing === 'directory') {
+        return { kind: 'skipped' };
+      } else if (existing === 'file' && options.skipExisting) {
+        return { kind: 'skipped' };
+      } else if (existing === 'file' && options.overwriteExisting) {
+        await writeTextFile(operation.absolutePath, operation.content);
+        return { kind: 'overwritten' };
+      } else if (existing === 'file') {
+        return { kind: 'skipped' };
+      } else {
+        await writeTextFile(operation.absolutePath, operation.content);
+        return { kind: 'created' };
+      }
+    } catch (error) {
+      return { kind: 'error', message: `${operation.relativePath}: ${errorMessage(error)}` };
+    }
+  };
 }
 
 async function existingKind(filePath: string): Promise<'file' | 'directory' | undefined> {

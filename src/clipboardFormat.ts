@@ -25,6 +25,11 @@ const LABELS: ChangeTypeLabel[] = ['NEW', 'MODIFIED', 'DELETED', 'MOVED'];
 const LABEL_PATTERN = new RegExp(`\\[(${LABELS.join('|')})\\]`, 'g');
 const LEADING_LABEL_PATTERN = new RegExp(`^(?:\\[(${LABELS.join('|')})\\]\\s*)+`);
 const GENERIC_FILE_HEADER = /^\s*(?:(\/\/|#|\/\*)\s*)?file:\s*(.+?)\s*(?:\*\/)?$/i;
+// Scheme A marker — MUST match the Kotlin side byte-for-byte (see notes).
+// Distinctive enough that a real source line virtually never starts with it, so
+// the unconditional strip on read can't corrupt foreign/old clipboards. Must be
+// byte-identical to the Kotlin ClipCode mirror or cross-tool restore breaks.
+const ESCAPE_MARKER = '//clipcode-esc: ';
 
 export function formatHeader(
   headerFormat: string,
@@ -44,17 +49,48 @@ export function buildGitPayload(options: BuildPayloadOptions): string {
 }
 
 function buildPayloadInternal(options: BuildPayloadOptions, includeEmptyWrappers: boolean): string {
+  const customRegex = toHeaderPattern(options.headerFormat);
   const lines: string[] = [];
-  if (includeEmptyWrappers || options.preText) lines.push(options.preText);
+  // Escape pre/post text too, so a header-shaped wrapper can't read back as a file.
+  if (includeEmptyWrappers || options.preText) lines.push(escapeContent(options.preText, customRegex));
 
   for (const file of options.files) {
     lines.push(formatHeader(options.headerFormat, file.path, file.changeType));
-    lines.push(file.skippedReason ? `// File skipped: ${file.skippedReason}` : file.content ?? '');
+    const body = file.skippedReason ? `// File skipped: ${file.skippedReason}` : file.content ?? '';
+    lines.push(escapeContent(body, customRegex));
     if (options.addExtraLineBetweenFiles) lines.push('');
   }
 
-  if (includeEmptyWrappers || options.postText) lines.push(options.postText);
+  if (includeEmptyWrappers || options.postText) lines.push(escapeContent(options.postText, customRegex));
   return lines.join('\n');
+}
+
+// Scheme A escape: prefix any content line that would parse as a header with
+// ESCAPE_MARKER so it round-trips as content, not a phantom file boundary.
+function escapeContent(text: string, customRegex?: RegExp): string {
+  if (!text) return text;
+  return text
+    .split('\n')
+    .map(line => (needsEscape(line, customRegex) ? ESCAPE_MARKER + line : line))
+    .join('\n');
+}
+
+// Escape a line if it would parse as a header (must be hidden) or already starts
+// with the marker (so unescape stays a true inverse). Skip it when prefixing the
+// marker wouldn't stop it parsing as a header anyway — a degenerate headerFormat
+// that matches everything — so we don't mark every single content line.
+function needsEscape(line: string, customRegex?: RegExp): boolean {
+  if (line.startsWith(ESCAPE_MARKER)) return true;
+  if (findHeaderPath(line, customRegex) === undefined) return false;
+  return findHeaderPath(ESCAPE_MARKER + line, customRegex) === undefined;
+}
+
+// Inverse of escapeContent: strip exactly one leading marker per line.
+function unescapeContent(text: string): string {
+  return text
+    .split('\n')
+    .map(line => (line.startsWith(ESCAPE_MARKER) ? line.slice(ESCAPE_MARKER.length) : line))
+    .join('\n');
 }
 
 export function parseClipboard(content: string, headerFormat: string): ParsedEntry[] {
@@ -70,7 +106,7 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
       if (currentPath !== undefined) {
         entries.push({
           path: currentPath,
-          content: currentContent.join('\n').trim(),
+          content: unescapeContent(joinContent(currentContent)),
           changeTypes: currentLabels
         });
       }
@@ -85,12 +121,27 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
   if (currentPath !== undefined) {
     entries.push({
       path: currentPath,
-      content: currentContent.join('\n').trim(),
+      content: unescapeContent(joinContent(currentContent)),
       changeTypes: currentLabels
     });
   }
 
   return entries;
+}
+
+// Join accumulated content lines, dropping only the structural blank lines the
+// builder injects (empty pre/post wrapper slots and the addExtraLineBetweenFiles
+// separator) while preserving the file's own whitespace: leading indentation,
+// interior blank lines, and trailing spaces on real lines.
+// ponytail: a single content trailing '\n' is indistinguishable on the wire from
+// the separator blank, so it is stripped with the structure — lossless requires a
+// length/escape token in the header, which would break the cross-tool format.
+function joinContent(lines: string[]): string {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && /^\s*$/.test(lines[start])) start++;
+  while (end > start && /^\s*$/.test(lines[end - 1])) end--;
+  return lines.slice(start, end).join('\n');
 }
 
 export function extractLeadingLabels(path: string): Set<ChangeTypeLabel> {
