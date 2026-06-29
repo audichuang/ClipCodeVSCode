@@ -56,6 +56,50 @@ test('no suggestion from root-level-only paths (no subdir signal)', () => {
   assert.equal(s, undefined);
 });
 
+test('metadata: nests under the named source repo when that folder exists here', () => {
+  // Copied with repo "sample-web-shop" as root; restoring into the parent /work
+  // which contains it → deterministically add that prefix (no guessing).
+  const p = probe(['/work/sample-web-shop'], ['sample-web-shop', 'other']);
+  const s = suggestRestoreBase('/work', ['src/a.ts', 'lib/b.ts'], p, 'sample-web-shop');
+  assert.deepEqual(s?.base, { kind: 'add', prefix: 'sample-web-shop' });
+});
+
+test('metadata: works for a single file and for root-level-only paths (deterministic add)', () => {
+  const p = probe(['/work/sample-web-shop'], ['sample-web-shop']);
+  // single subdir file
+  assert.deepEqual(
+    suggestRestoreBase('/work', ['src/a.ts'], p, 'sample-web-shop')?.base,
+    { kind: 'add', prefix: 'sample-web-shop' }
+  );
+  // root-level-only file (no subdir signal, but metadata is deterministic)
+  assert.deepEqual(
+    suggestRestoreBase('/work', ['README.md'], p, 'sample-web-shop')?.base,
+    { kind: 'add', prefix: 'sample-web-shop' }
+  );
+});
+
+test('metadata: strips the redundant repo wrapper when the workspace IS that repo', () => {
+  // Copied with the parent as root (paths carry sample-web-shop/...); restoring
+  // into /work/sample-web-shop → strip it. sourceRoot here is the parent name.
+  const p = probe([], []);
+  const s = suggestRestoreBase('/work/sample-web-shop', ['sample-web-shop/src/a.ts', 'sample-web-shop/lib/b.ts'], p, 'work');
+  assert.deepEqual(s?.base, { kind: 'strip', segment: 'sample-web-shop' });
+});
+
+test('metadata: no suggestion when the workspace is the same-named root (already aligned)', () => {
+  const p = probe(['/work/sample-web-shop/src'], ['src']);
+  const s = suggestRestoreBase('/work/sample-web-shop', ['src/a.ts', 'lib/b.ts'], p, 'sample-web-shop');
+  assert.equal(s, undefined);
+});
+
+test('metadata: no guess when the named repo folder is not present (different location)', () => {
+  // sourceRoot "foo" but target is a different repo "bar" with no foo/ child →
+  // don't nest under foo; leave as-is.
+  const p = probe(['/work/bar/src'], ['src']);
+  const s = suggestRestoreBase('/work/bar', ['src/a.ts', 'lib/b.ts'], p, 'foo');
+  assert.equal(s, undefined);
+});
+
 test('no suggestion when two child dirs match equally well (ambiguous add)', () => {
   // /work contains repo-a/src and repo-b/src; clipboard src/... fits both → ambiguous.
   const p = probe(['/work/repo-a', '/work/repo-a/src', '/work/repo-b', '/work/repo-b/src'], ['repo-a', 'repo-b']);

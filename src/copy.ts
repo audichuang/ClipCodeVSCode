@@ -57,7 +57,7 @@ export async function collectCopyFiles(
     }
   }
 
-  return buildCopyResult(files, state, settings);
+  return buildCopyResult(files, state, settings, roots);
 }
 
 export async function collectCopyTextFiles(
@@ -88,7 +88,7 @@ export async function collectCopyTextFiles(
     if (!shouldContinue) break;
   }
 
-  return buildCopyResult(files, state, settings);
+  return buildCopyResult(files, state, settings, roots);
 }
 
 async function appendCopyCandidate(options: {
@@ -144,7 +144,8 @@ async function appendCopyCandidate(options: {
 function buildCopyResult(
   files: PayloadFile[],
   state: CopyState,
-  settings: ClipCodeSettings
+  settings: ClipCodeSettings,
+  roots: string[]
 ): CopyResult {
   return {
     files,
@@ -153,7 +154,10 @@ function buildCopyResult(
       preText: settings.preText,
       postText: settings.postText,
       addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
-      files
+      files,
+      // Only a single-root copy has an unambiguous source root; multi-root paths
+      // carry per-root labels, so omit metadata there.
+      sourceRoot: roots.length === 1 ? path.basename(roots[0]) : undefined
     }),
     copiedFileCount: state.copiedFileCount,
     skippedFileSizeCount: state.skippedFileSizeCount,

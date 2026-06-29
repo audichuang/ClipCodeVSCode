@@ -70,6 +70,16 @@ function batchKey(repoRootFsPath: string, relativePath: string): string {
   return `${repoRootFsPath}\n${relativePath}`;
 }
 
+function baseNameOf(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? '';
+}
+
+// The repo folder name shared by every file, or undefined if they span repos.
+function singleRepoRoot(files: GraphCopyFile[]): string | undefined {
+  const roots = new Set(files.map(f => f.repoRootFsPath));
+  return roots.size === 1 ? baseNameOf([...roots][0]) : undefined;
+}
+
 // Prefetch committed blob contents up front with one `git cat-file --batch` per
 // repo (parallel across repos). For the uncommitted view or when no readBatch is
 // provided this returns an empty map and prepareFile falls back to per-file reads.
@@ -193,7 +203,11 @@ export async function buildGraphCopyPayload(
     preText: settings.preText,
     postText: settings.postText,
     addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
-    files
+    files,
+    // Paths are relative to the commit's repo root; record its folder name so
+    // restore can align folder levels. Only when every file is from one repo —
+    // a multi-repo selection has no single source root.
+    sourceRoot: singleRepoRoot(payload.files)
   });
 
   return { text, copiedFileCount, skippedFileSizeCount, fileLimitReached, missingRepoCount };

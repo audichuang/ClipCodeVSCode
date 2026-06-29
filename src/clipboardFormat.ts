@@ -19,6 +19,10 @@ interface BuildPayloadOptions {
   postText: string;
   addExtraLineBetweenFiles: boolean;
   files: PayloadFile[];
+  // Basename of the folder the paths are relative to (source repo/workspace root).
+  // Emitted as a leading metadata line so Paste & Restore can align folder levels
+  // deterministically instead of guessing. Optional; omitted = no metadata line.
+  sourceRoot?: string;
 }
 
 const LABELS: ChangeTypeLabel[] = ['NEW', 'MODIFIED', 'DELETED', 'MOVED'];
@@ -30,6 +34,19 @@ const GENERIC_FILE_HEADER = /^\s*(?:(\/\/|#|\/\*)\s*)?file:\s*(.+?)\s*(?:\*\/)?$
 // the unconditional strip on read can't corrupt foreign/old clipboards. Must be
 // byte-identical to the Kotlin ClipCode mirror or cross-tool restore breaks.
 const ESCAPE_MARKER = '//clipcode-esc: ';
+
+// Leading metadata line: records the source root folder name so restore can align
+// folder levels. It sits before the first file header, so the parser ignores it as
+// pre-header text; only extractSourceRoot() reads it (from line 1).
+const SOURCE_ROOT_MARKER = '// clipcode-root: ';
+
+/** Read the source-root metadata from the first line, if present. */
+export function extractSourceRoot(clipboardText: string): string | undefined {
+  const firstLine = clipboardText.slice(0, clipboardText.indexOf('\n') === -1 ? undefined : clipboardText.indexOf('\n'));
+  if (!firstLine.startsWith(SOURCE_ROOT_MARKER)) return undefined;
+  const value = firstLine.slice(SOURCE_ROOT_MARKER.length).trim();
+  return value || undefined;
+}
 
 export function formatHeader(
   headerFormat: string,
@@ -51,6 +68,14 @@ export function buildGitPayload(options: BuildPayloadOptions): string {
 function buildPayloadInternal(options: BuildPayloadOptions, includeEmptyWrappers: boolean): string {
   const customRegex = toHeaderPattern(options.headerFormat);
   const lines: string[] = [];
+  // Metadata line first (before any header) so the parser drops it as pre-header
+  // text and only extractSourceRoot() reads it. Skip it if the configured header
+  // is permissive enough to parse the marker line as a file (e.g. "$FILE_PATH"),
+  // which would make it a phantom entry for parsers that don't special-case it.
+  if (options.sourceRoot) {
+    const metaLine = `${SOURCE_ROOT_MARKER}${options.sourceRoot}`;
+    if (findHeaderPath(metaLine, customRegex) === undefined) lines.push(metaLine);
+  }
   // Escape pre/post text too, so a header-shaped wrapper can't read back as a file.
   if (includeEmptyWrappers || options.preText) lines.push(escapeContent(options.preText, customRegex));
 
@@ -100,7 +125,12 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
   let currentLabels = new Set<ChangeTypeLabel>();
   const currentContent: string[] = [];
 
-  for (const line of content.split(/\r?\n/)) {
+  const lines = content.split(/\r?\n/);
+  // Drop a leading source-root metadata line so a permissive headerFormat can't
+  // turn it into a phantom file. extractSourceRoot() reads it separately.
+  if (lines[0]?.startsWith(SOURCE_ROOT_MARKER)) lines.shift();
+
+  for (const line of lines) {
     const rawPath = findHeaderPath(line, customRegex);
     if (rawPath !== undefined) {
       if (currentPath !== undefined) {

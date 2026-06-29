@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { collectCopyFiles, collectCopyTextFiles } from '../src/copy.js';
+import { extractSourceRoot } from '../src/clipboardFormat.js';
 import { executeRestorePlan, hasPathDependencies, planRestore, type RestoreEntry } from '../src/restore.js';
 import { defaultSettings } from '../src/settings.js';
 
@@ -37,7 +38,10 @@ test('copies oversized files as skipped markers and preserves wrappers', async (
 
     assert.equal(result.copiedFileCount, 0);
     assert.equal(result.skippedFileSizeCount, 1);
-    assert.equal(result.payload, `<files>
+    // Leading line is source-root metadata (root basename); the rest is the body.
+    assert.equal(extractSourceRoot(result.payload), path.basename(root));
+    const body = result.payload.slice(result.payload.indexOf('\n') + 1);
+    assert.equal(body, `<files>
 // file: large.txt
 // File skipped: size exceeds limit (1100 bytes)
 
