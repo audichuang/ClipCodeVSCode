@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6
+
+- **Stop showing a spurious Git LFS error in the graph.** Some TFS / Azure DevOps
+  LFS endpoints reject HTTP/2 on the lock-status API and return
+  `HTTP_1_1_REQUIRED`. Opening a commit's details runs `git lfs locks`, so that
+  reply used to surface as a Git Graph+ error. It is now treated as a benign,
+  ignorable LFS lock-query failure — it only affects the LFS lock badge, never the
+  commit graph, diffs, or `git log`.
+
 ## 0.3.5
 
 - **Reliable copy → restore round-trip.** A file whose own content contained a

@@ -2021,6 +2021,7 @@ export class GitService {
       s.includes("'origin' does not appear to be a git repository") ||
       s.includes('lfs.url') ||                            // unconfigured lock server
       s.includes('this operation requires existing locks') ||
+      s.includes('http_1_1_required') ||                  // TFS/Azure DevOps LFS locks may reject HTTP/2
       s.includes('is not a git command') ||              // git-lfs not installed
       s.includes('not a git repository')
     );

@@ -156,6 +156,10 @@ describe('GitService — LFS', () => {
     expect(await service.lfsLocks()).toEqual([]);
     expect(warn).not.toHaveBeenCalled();
 
+    mockExec(service, async (args) => { throw new GitError('Error while retrieving locks: stream error: stream ID 1; HTTP_1_1_REQUIRED; received from peer', 1, args); });
+    expect(await service.lfsLocks()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+
     mockExec(service, async (args) => { throw new GitError('unexpected error condition', 1, args); });
     expect(await service.lfsLocks()).toEqual([]);
     expect(warn).toHaveBeenCalled();
