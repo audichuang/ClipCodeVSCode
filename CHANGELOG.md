@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.8
+
+- **Much faster "Copy Full Source" for many files.** Content for every file in a
+  commit is now read in a single `git cat-file --batch` process instead of one
+  `git show` per file. VS Code's Git API serializes per-repo reads, so the earlier
+  concurrency didn't fully help — ~86 files took ~5s. Batching collapses that to a
+  single read pass. Falls back to per-file reads if the batch process can't start;
+  output is unchanged.
+
 ## 0.3.7
 
 - **No spurious Git error on first open in a parent-folder workspace.** When the

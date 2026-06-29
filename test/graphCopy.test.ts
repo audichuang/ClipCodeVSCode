@@ -148,3 +148,49 @@ test('UNCOMMITTED deleted file still uses marker (no working read)', async () =>
   assert.match(r.text, /\[DELETED\] gone\.ts/);
   assert.match(r.text, /This file has been deleted/);
 });
+
+test('committed view reads all content via one readBatch call, not per-file show', async () => {
+  let showCalls = 0;
+  let batchCalls = 0;
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async () => { showCalls++; return 'SHOULD-NOT-BE-USED'; }
+  };
+  const d: GraphCopyDeps = {
+    resolveRepo: () => repo,
+    readBatch: async (_root, _hash, paths) => { batchCalls++; return new Map(paths.map(p => [p, `batched ${p}`])); },
+    settings
+  };
+  const r = await buildGraphCopyPayload(d, {
+    hash: 'abc',
+    files: [
+      { repoRootFsPath: '/repo', relativePath: 'a.ts', status: 'M' },
+      { repoRootFsPath: '/repo', relativePath: 'b.ts', status: 'M' }
+    ]
+  });
+  assert.equal(batchCalls, 1);   // one cat-file batch for the whole repo
+  assert.equal(showCalls, 0);    // no per-file git show
+  assert.equal(r.copiedFileCount, 2);
+  assert.match(r.text, /batched a\.ts/);
+  assert.match(r.text, /batched b\.ts/);
+});
+
+test('falls back to per-file show when readBatch yields nothing (spawn failure)', async () => {
+  let showCalls = 0;
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async (_ref: string, p: string) => { showCalls++; return `shown ${p}`; }
+  };
+  const d: GraphCopyDeps = {
+    resolveRepo: () => repo,
+    readBatch: async () => new Map(), // cat-file spawn failed → empty → fall back
+    settings
+  };
+  const r = await buildGraphCopyPayload(d, {
+    hash: 'abc',
+    files: [{ repoRootFsPath: '/repo', relativePath: 'a.ts', status: 'M' }]
+  });
+  assert.equal(showCalls, 1);
+  assert.equal(r.copiedFileCount, 1);
+  assert.match(r.text, /shown a\.ts/);
+});
