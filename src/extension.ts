@@ -3,6 +3,7 @@ import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, ty
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
+import { mapInOrder } from './concurrency.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
@@ -325,6 +326,18 @@ async function getGitApi(): Promise<GitAPI | undefined> {
   return extension.getAPI(1);
 }
 
+// Each git change's content comes from one `git show` subprocess (staged /
+// deleted files); fan them out instead of awaiting one at a time.
+const GIT_READ_CONCURRENCY = 16;
+
+interface GitChangeCandidate {
+  repository: GitRepository;
+  change: GitChange;
+  clipboardPath: string;
+  changeType: ChangeTypeLabel;
+  forceIndexContent: boolean;
+}
+
 async function collectGitPayloadFiles(
   repositories: GitRepository[],
   workspaceRoots: string[],
@@ -344,15 +357,12 @@ async function collectGitPayloadFiles(
   let fileLimitReached = false;
   let usesFallbackGitPayload = false;
 
-  repositoryLoop:
+  // Phase 1 — selection / dedup / filter (no I/O, so order + dedup stay
+  // deterministic). Produces the ordered candidate list.
+  const candidates: GitChangeCandidate[] = [];
   for (const repository of repositories) {
     for (const change of repositoryChanges(repository, selected.length === 0)) {
       if (selected.length > 0 && !gitChangeMatchesSelection(change, selected)) continue;
-
-      if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
-        fileLimitReached = true;
-        break repositoryLoop;
-      }
 
       const absolutePath = gitChangePath(change);
       const key = normalizeFsPath(absolutePath);
@@ -377,27 +387,48 @@ async function collectGitPayloadFiles(
       const forceIndexContent = selected.some(item =>
         item.uriKey === key && item.status !== undefined && sameStatus(item.status, change.status) && isStagedGitStatus(change.status)
       );
-      const content = await readGitChangeContent(repository, change, changeType, forceIndexContent);
-      if (content === undefined) continue;
-
-      if (changeType === 'DELETED' || forceIndexContent) {
-        usesFallbackGitPayload = true;
-      }
-
-      const size = Buffer.byteLength(content, 'utf8');
-      if (size > settings.maxFileSizeKB * 1024) {
-        skippedFileSizeCount++;
-        files.push({
-          path: clipboardPath,
-          changeType,
-          skippedReason: `size exceeds limit (${size} bytes)`
-        });
-        continue;
-      }
-
-      files.push({ path: clipboardPath, content, changeType });
-      copiedFileCount++;
+      candidates.push({ repository, change, clipboardPath, changeType, forceIndexContent });
     }
+  }
+
+  // Phase 2 — fetch each candidate's content concurrently (the slow per-file
+  // `git show`); Phase 3 — apply limit/size/order bookkeeping over the in-order
+  // results so the payload is byte-identical to the old serial version. As with
+  // the graph copy, tripping the limit mid-batch discards up to a batch of
+  // already-issued reads (bounded over-fetch).
+  const fetched = mapInOrder(candidates, GIT_READ_CONCURRENCY, async candidate => ({
+    candidate,
+    content: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent)
+  }));
+  for await (const { candidate, content } of fetched) {
+    // The limit now trips only when a real candidate (post dedup/filter) is left
+    // unread — so `fileLimitReached` reflects whether the limit actually dropped
+    // a copyable file. The old serial loop checked before dedup/filter and could
+    // flag the limit even when every remaining change was a dup/filtered no-op;
+    // dropping that false positive is intentional.
+    if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
+      fileLimitReached = true;
+      break;
+    }
+    if (content === undefined) continue;
+
+    if (candidate.changeType === 'DELETED' || candidate.forceIndexContent) {
+      usesFallbackGitPayload = true;
+    }
+
+    const size = Buffer.byteLength(content, 'utf8');
+    if (size > settings.maxFileSizeKB * 1024) {
+      skippedFileSizeCount++;
+      files.push({
+        path: candidate.clipboardPath,
+        changeType: candidate.changeType,
+        skippedReason: `size exceeds limit (${size} bytes)`
+      });
+      continue;
+    }
+
+    files.push({ path: candidate.clipboardPath, content, changeType: candidate.changeType });
+    copiedFileCount++;
   }
 
   return {

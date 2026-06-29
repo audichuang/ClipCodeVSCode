@@ -105,6 +105,35 @@ test('UNCOMMITTED hash reads working-tree content via readWorking, not git show'
   assert.doesNotMatch(r.text, /COMMITTED/);
 });
 
+test('reads run concurrently and preserve input order (no per-file serialization)', async () => {
+  // The slow part of a real copy is one `git show` subprocess per file. With many
+  // files those reads must overlap, not run strictly one-after-another.
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const files = Array.from({ length: 8 }, (_, i) => ({
+    repoRootFsPath: '/repo',
+    relativePath: `f${i}.ts`,
+    status: 'M'
+  }));
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async (_ref: string, p: string) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      inFlight--;
+      return `body-${p}`;
+    }
+  };
+  const r = await buildGraphCopyPayload(deps(repo), { hash: 'abc', files });
+
+  assert.equal(r.copiedFileCount, 8);
+  assert.ok(maxInFlight >= 2, `expected overlapping reads, but max in-flight was ${maxInFlight}`);
+  // Concurrency must not reorder the output.
+  const order = [...r.text.matchAll(/\[MODIFIED\] (f\d+\.ts)/g)].map(m => m[1]);
+  assert.deepEqual(order, files.map(f => f.relativePath));
+});
+
 test('UNCOMMITTED deleted file still uses marker (no working read)', async () => {
   const repo = fakeRepo('/repo', {});
   const d: GraphCopyDeps = {

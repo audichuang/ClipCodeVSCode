@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.4
+
+- **Faster copying of many files.** "Copy Full Source" (from the graph) and
+  "Copy Git Changes" used to read each file's content with one `git show`
+  subprocess at a time, run strictly one after another — copying ~90 files took
+  10+ seconds. Those reads now run with bounded concurrency (16 at a time), so a
+  large selection copies in ~1–2s. Output (order, content, labels, limits) is
+  unchanged.
+
 ## 0.3.3
 
 - **Shift-click range selection** in the commit Changes panel: hold **Shift** and

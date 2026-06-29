@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> **Vendored sub-project.** This is a copy of git-graph-plus bundled inside the
+> Snipcode (`clipcode-vscode`) extension. For the host extension and how this
+> folder is bundled, see `../AGENTS.md`. This file documents the graph webview
+> itself.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
