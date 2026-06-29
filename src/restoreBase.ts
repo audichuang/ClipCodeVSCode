@@ -52,14 +52,53 @@ function baseNameOf(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? '';
 }
 
+// Deterministic alignment when the clipboard carries the source root name.
+// `rels` is every plain relative path (any depth, may be empty).
+function suggestFromSourceRoot(
+  primaryRoot: string,
+  rels: string[],
+  probe: DirProbe,
+  sourceRoot: string
+): RestoreBaseSuggestion | undefined {
+  if (rels.length === 0) return undefined;
+  const targetName = baseNameOf(primaryRoot);
+  // Target is the same-named root → paths are already correctly anchored.
+  if (targetName === sourceRoot) return undefined;
+
+  // The bundle was copied from the parent (subdir-bearing paths carry this repo's
+  // own folder name as a redundant leading segment) → strip it.
+  const multi = rels.filter(p => p.includes('/'));
+  const firstSegments = new Set(multi.map(p => p.slice(0, p.indexOf('/'))));
+  if (multi.length > 0 && firstSegments.size === 1 && [...firstSegments][0] === targetName) {
+    return { base: { kind: 'strip', segment: targetName }, label: `remove the leading "${targetName}/"`, matched: rels.length, total: rels.length };
+  }
+
+  // The bundle was copied with the repo as root, and that repo folder exists here
+  // (workspace opened one level up) → nest everything under it.
+  if (probe.isDir(`${primaryRoot.replace(/\/+$/, '')}/${sourceRoot}`)) {
+    return { base: { kind: 'add', prefix: sourceRoot }, label: `place everything under "${sourceRoot}/"`, matched: rels.length, total: rels.length };
+  }
+
+  // Different root name, no matching wrapper here → likely a genuinely different
+  // location; don't guess (leave paths as-is).
+  return undefined;
+}
+
 export function suggestRestoreBase(
   primaryRoot: string,
   relativePaths: string[],
-  probe: DirProbe
+  probe: DirProbe,
+  sourceRoot?: string
 ): RestoreBaseSuggestion | undefined {
-  // Only plain relative, subdir-bearing paths carry an offset signal; require at
-  // least two so a single coincidental path can't drive a relocation.
-  const multi = relativePaths.filter(p => isRelative(p) && p.includes('/'));
+  const rels = relativePaths.filter(isRelative);
+
+  // With source-root metadata we can align deterministically — even for a single
+  // file or root-level-only paths — so this runs before the heuristic's threshold.
+  if (sourceRoot) return suggestFromSourceRoot(primaryRoot, rels, probe, sourceRoot);
+
+  // The heuristic needs ≥2 subdir-bearing paths so one coincidental path can't
+  // drive a relocation.
+  const multi = rels.filter(p => p.includes('/'));
   if (multi.length < 2) return undefined;
 
   const parentExists = (rel: string): boolean => {

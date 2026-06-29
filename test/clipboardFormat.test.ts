@@ -4,6 +4,7 @@ import {
   buildGitPayload,
   buildPayload,
   extractLeadingLabels,
+  extractSourceRoot,
   formatHeader,
   parseClipboard,
   stripLeadingLabels
@@ -163,6 +164,60 @@ test('parses old unescaped clipboards unchanged (backward compatible read)', () 
   // No marker present: content unescapes to itself.
   const parsed = parseClipboard('// file: src/a.ts\nplain\ncontent', '// file: $FILE_PATH');
   assert.equal(parsed[0].content, 'plain\ncontent');
+});
+
+test('sourceRoot metadata round-trips and is ignored by the file parser', () => {
+  const payload = buildPayload({
+    headerFormat: '// file: $FILE_PATH',
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: true,
+    files: [{ path: 'src/a.ts', content: 'x' }],
+    sourceRoot: 'inv-svc-console'
+  });
+  assert.ok(payload.startsWith('// clipcode-root: inv-svc-console\n'));
+  assert.equal(extractSourceRoot(payload), 'inv-svc-console');
+  // The metadata line must not become a phantom file or alter parsed content.
+  const parsed = parseClipboard(payload, '// file: $FILE_PATH');
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].path, 'src/a.ts');
+  assert.equal(parsed[0].content, 'x');
+});
+
+test('a permissive headerFormat does not turn the metadata line into a phantom file', () => {
+  // "// $FILE_PATH" matches almost any "// ..." line, including the metadata line.
+  const payload = buildPayload({
+    headerFormat: '// $FILE_PATH',
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: true,
+    files: [{ path: 'src/a.ts', content: 'x' }],
+    sourceRoot: 'repo'
+  });
+  // Build side must NOT emit a metadata line it can't safely hide.
+  assert.doesNotMatch(payload, /clipcode-root/);
+  const parsed = parseClipboard(payload, '// $FILE_PATH');
+  assert.equal(parsed.filter(e => e.path.includes('clipcode-root')).length, 0);
+});
+
+test('parser drops a leading metadata line even under a permissive header', () => {
+  const text = '// clipcode-root: repo\n// $FILE_PATH-shaped? no\n// file: src/a.ts\nx';
+  const parsed = parseClipboard(text, '// file: $FILE_PATH');
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].path, 'src/a.ts');
+});
+
+test('extractSourceRoot returns undefined when no metadata line is present', () => {
+  const payload = buildPayload({
+    headerFormat: '// file: $FILE_PATH',
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: true,
+    files: [{ path: 'src/a.ts', content: 'x' }]
+  });
+  assert.equal(extractSourceRoot(payload), undefined);
+  // A header-shaped first line must not be mistaken for metadata.
+  assert.equal(extractSourceRoot('// file: src/a.ts\nx'), undefined);
 });
 
 test('a degenerate headerFormat that matches every line does not get every content line marked', () => {

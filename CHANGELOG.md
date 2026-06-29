@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.11
+
+- **Deterministic folder-level alignment on restore.** Copy now records the source
+  folder name in a leading metadata line (ignored by older pastes), so Paste &
+  Restore can align an off-by-one folder level *exactly* instead of guessing —
+  e.g. it knows to nest under the source repo's folder, or strip a redundant
+  wrapper, even when restoring into an empty target. It still asks first and shows
+  a concrete `before → after` example. Falls back to the previous on-disk
+  heuristic when a bundle has no metadata. Single-root workspaces / single repo.
+
 ## 0.3.10
 
 - **Paste & Restore handles an off-by-one folder level.** If a bundle was copied

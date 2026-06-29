@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
-import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
+import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
@@ -241,7 +241,10 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
     preText: settings.preText,
     postText: settings.postText,
     addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
-    files: result.files
+    files: result.files,
+    // Single-root only: multi-root paths carry per-root labels, so a single
+    // source-root basename would be wrong for files from other roots.
+    sourceRoot: roots.length === 1 ? folderName(roots[0]) : undefined
   };
   const payload = result.usesRegularSpacing
     ? buildPayload(payloadOptions)
@@ -260,12 +263,18 @@ function isRelativeEntryPath(p: string): boolean {
   return !!p && !p.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(p) && !p.startsWith('\\');
 }
 
-// Detect an off-by-one folder offset between the clipboard and this workspace and,
+function folderName(p: string): string {
+  return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+}
+
+// Detect a folder-level offset between the clipboard and this workspace — using
+// the source-root metadata when present, otherwise an on-disk heuristic — and,
 // only with the user's confirmation, return the base transform to apply to every
 // path. Returns undefined to leave paths untouched, or 'cancel' to abort the paste.
 async function confirmRestoreBaseOffset(
   primaryRoot: string,
-  entries: Array<{ path: string }>
+  entries: Array<{ path: string }>,
+  sourceRoot: string | undefined
 ): Promise<RestoreBase | undefined | 'cancel'> {
   const probe: DirProbe = {
     isDir: p => { try { return statSync(p).isDirectory(); } catch { return false; } },
@@ -274,11 +283,14 @@ async function confirmRestoreBaseOffset(
       catch { return []; }
     }
   };
-  const suggestion = suggestRestoreBase(primaryRoot, entries.map(e => e.path), probe);
+  const suggestion = suggestRestoreBase(primaryRoot, entries.map(e => e.path), probe, sourceRoot);
   if (!suggestion) return undefined;
 
+  // Show a concrete before → after example so the choice is unambiguous.
+  const sample = entries.map(e => e.path).find(p => isRelativeEntryPath(p) && p.includes('/'));
+  const example = sample ? `\n\nExample: ${sample} → ${applyRestoreBase(suggestion.base, sample)}` : '';
   const choice = await vscode.window.showWarningMessage(
-    `These paths don't match this workspace's layout, but ${suggestion.matched} of ${suggestion.total} line up if I ${suggestion.label}. Adjust all restored paths?`,
+    `These paths look like they belong elsewhere in this workspace. I can ${suggestion.label} for all ${suggestion.total} file(s).${example}`,
     { modal: true },
     'Adjust Paths',
     'Use As-Is'
@@ -314,7 +326,7 @@ async function pasteAndRestoreFiles(): Promise<void> {
   // to single-root workspaces; multi-root relies on its sibling-root label scheme,
   // where a leading segment can legitimately be a root label, not a wrapper.
   if (roots.length === 1) {
-    const adjusted = await confirmRestoreBaseOffset(roots[0], entries);
+    const adjusted = await confirmRestoreBaseOffset(roots[0], entries, extractSourceRoot(clipboardText));
     if (adjusted === 'cancel') return;
     if (adjusted) {
       entries = entries.map(e => ({ ...e, path: isRelativeEntryPath(e.path) ? applyRestoreBase(adjusted, e.path) : e.path }));
