@@ -175,6 +175,49 @@ test('committed view reads all content via one readBatch call, not per-file show
   assert.match(r.text, /batched b\.ts/);
 });
 
+test('a path containing a newline is kept out of the batch and read per-file', async () => {
+  // cat-file --batch is newline-delimited; a path with a line break would corrupt
+  // request/response alignment, so it must go to the per-file reader instead.
+  const requestedBatches: string[][] = [];
+  let showCalls = 0;
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async (_ref: string, p: string) => { showCalls++; return `shown ${p.replace(/\n/g, '<NL>')}`; }
+  };
+  const d: GraphCopyDeps = {
+    resolveRepo: () => repo,
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, `batched ${p}`])); },
+    settings
+  };
+  const r = await buildGraphCopyPayload(d, {
+    hash: 'abc',
+    files: [
+      { repoRootFsPath: '/repo', relativePath: 'ok.ts', status: 'M' },
+      { repoRootFsPath: '/repo', relativePath: 'weird\nname.ts', status: 'M' }
+    ]
+  });
+  assert.deepEqual(requestedBatches, [['ok.ts']]);     // newline path excluded from the batch
+  assert.equal(showCalls, 1);                          // it fell back to a per-file read
+  assert.match(r.text, /batched ok\.ts/);
+  assert.match(r.text, /shown weird<NL>name\.ts/);
+});
+
+test('batch request is capped at the file-count limit (no reading past it)', async () => {
+  const requestedBatches: string[][] = [];
+  const repo: ContentRepo = { rootUri: { fsPath: '/repo' }, show: async () => 'x' };
+  const limited: GraphCopySettings = { ...settings, setMaxFileCount: true, fileCountLimit: 2 };
+  const d: GraphCopyDeps = {
+    resolveRepo: () => repo,
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, p])); },
+    settings: limited
+  };
+  await buildGraphCopyPayload(d, {
+    hash: 'abc',
+    files: Array.from({ length: 5 }, (_, i) => ({ repoRootFsPath: '/repo', relativePath: `f${i}.ts`, status: 'M' }))
+  });
+  assert.deepEqual(requestedBatches, [['f0.ts', 'f1.ts']]); // only up to the limit was fetched
+});
+
 test('falls back to per-file show when readBatch yields nothing (spawn failure)', async () => {
   let showCalls = 0;
   const repo: ContentRepo = {

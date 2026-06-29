@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.9
+
+- **Hardening for the batched Copy Full Source (from a code audit).** A repo path
+  containing a line break could misalign the `git cat-file --batch` request/response
+  stream and copy wrong content; such paths are now excluded from the batch and read
+  individually. And when a file-count limit is set, the batch no longer reads the
+  whole commit's blobs past the limit. No user-visible behaviour change otherwise.
+
 ## 0.3.8
 
 - **Much faster "Copy Full Source" for many files.** Content for every file in a
