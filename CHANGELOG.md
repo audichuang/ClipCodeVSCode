@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.10
+
+- **Paste & Restore handles an off-by-one folder level.** If a bundle was copied
+  from a different folder depth than the current workspace (e.g. copied with the
+  repo as root but restored into the parent that contains it, or vice-versa),
+  restore now detects the consistent level offset by matching the paths against
+  folders that already exist, and **asks you to confirm** before adjusting every
+  path ("Adjust Paths" / "Use As-Is" / cancel). It only suggests a change when it's
+  confident and unambiguous, and never moves files silently. Single-root
+  workspaces only.
+
 ## 0.3.9
 
 - **Hardening for the batched Copy Full Source (from a code audit).** A repo path
