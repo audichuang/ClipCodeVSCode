@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
+import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
@@ -253,6 +255,39 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   }
 }
 
+function isRelativeEntryPath(p: string): boolean {
+  // Reject POSIX absolutes, Windows drive paths (C:/ or C:\) and UNC (\\server).
+  return !!p && !p.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(p) && !p.startsWith('\\');
+}
+
+// Detect an off-by-one folder offset between the clipboard and this workspace and,
+// only with the user's confirmation, return the base transform to apply to every
+// path. Returns undefined to leave paths untouched, or 'cancel' to abort the paste.
+async function confirmRestoreBaseOffset(
+  primaryRoot: string,
+  entries: Array<{ path: string }>
+): Promise<RestoreBase | undefined | 'cancel'> {
+  const probe: DirProbe = {
+    isDir: p => { try { return statSync(p).isDirectory(); } catch { return false; } },
+    childDirs: root => {
+      try { return readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name); }
+      catch { return []; }
+    }
+  };
+  const suggestion = suggestRestoreBase(primaryRoot, entries.map(e => e.path), probe);
+  if (!suggestion) return undefined;
+
+  const choice = await vscode.window.showWarningMessage(
+    `These paths don't match this workspace's layout, but ${suggestion.matched} of ${suggestion.total} line up if I ${suggestion.label}. Adjust all restored paths?`,
+    { modal: true },
+    'Adjust Paths',
+    'Use As-Is'
+  );
+  if (choice === 'Adjust Paths') return suggestion.base;
+  if (choice === 'Use As-Is') return undefined;
+  return 'cancel';
+}
+
 async function pasteAndRestoreFiles(): Promise<void> {
   const roots = workspaceRootPaths();
   if (roots.length === 0) {
@@ -267,10 +302,23 @@ async function pasteAndRestoreFiles(): Promise<void> {
     return;
   }
 
-  const entries = parseClipboard(clipboardText, settings.headerFormat);
+  let entries = parseClipboard(clipboardText, settings.headerFormat);
   if (entries.length === 0) {
     vscode.window.showWarningMessage('No Snipcode file headers found in clipboard.');
     return;
+  }
+
+  // The bundle may have been copied from a different folder level than this
+  // workspace (off by one wrapper dir). Detect that against the on-disk layout and
+  // — only after the user confirms — adjust every path by the same offset. Limited
+  // to single-root workspaces; multi-root relies on its sibling-root label scheme,
+  // where a leading segment can legitimately be a root label, not a wrapper.
+  if (roots.length === 1) {
+    const adjusted = await confirmRestoreBaseOffset(roots[0], entries);
+    if (adjusted === 'cancel') return;
+    if (adjusted) {
+      entries = entries.map(e => ({ ...e, path: isRelativeEntryPath(e.path) ? applyRestoreBase(adjusted, e.path) : e.path }));
+    }
   }
 
   const plan = await planRestore(roots, entries);
