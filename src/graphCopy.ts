@@ -70,18 +70,28 @@ function batchKey(repoRootFsPath: string, relativePath: string): string {
   return `${repoRootFsPath}\n${relativePath}`;
 }
 
-// Prefetch all committed blob contents up front with one `git cat-file --batch`
-// per repo (parallel across repos). For the uncommitted view or when no readBatch
-// is provided this returns an empty map and prepareFile falls back to per-file reads.
+// Prefetch committed blob contents up front with one `git cat-file --batch` per
+// repo (parallel across repos). For the uncommitted view or when no readBatch is
+// provided this returns an empty map and prepareFile falls back to per-file reads.
 async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Promise<Map<string, string | undefined>> {
   const lookup = new Map<string, string | undefined>();
   if (payload.hash === UNCOMMITTED_HASH || !deps.readBatch) return lookup;
+  const { settings } = deps;
 
   const byRepo = new Map<string, string[]>();
+  let requested = 0;
   for (const file of payload.files) {
+    // Don't batch past the file-count limit — the bookkeeping loop would discard
+    // the rest anyway, so reading them would be wasted work/memory. (Files dropped
+    // here just fall back to a per-file read if the limit math later needs them.)
+    if (settings.setMaxFileCount && requested >= settings.fileCountLimit) break;
     const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
     if (changeType === 'DELETED' || !deps.resolveRepo(file.repoRootFsPath)) continue;
+    // `cat-file --batch` is newline-delimited, so a path containing a line break
+    // would corrupt request/response alignment — route those to the per-file reader.
+    if (file.relativePath.includes('\n') || file.relativePath.includes('\r')) continue;
     (byRepo.get(file.repoRootFsPath) ?? byRepo.set(file.repoRootFsPath, []).get(file.repoRootFsPath)!).push(file.relativePath);
+    requested++;
   }
 
   await Promise.all([...byRepo].map(async ([root, paths]) => {
