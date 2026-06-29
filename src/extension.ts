@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { spawn } from 'node:child_process';
+import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { buildGitPayload, buildPayload, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
@@ -17,6 +19,7 @@ interface GitExtension {
 
 interface GitAPI {
   repositories: GitRepository[];
+  git?: { path?: string };
 }
 
 interface GitRepository {
@@ -80,7 +83,37 @@ export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCo
   return { copyFullSourceAtCommit };
 }
 
+// Read every requested blob at `hash` in ONE `git cat-file --batch` process.
+// vscode.git serializes per-repo show() calls, so this single process is far
+// faster than N show() calls for a large "Copy Full Source". On any spawn error
+// it resolves to an empty map and the caller falls back to per-file reads.
+function readCommittedBatch(
+  gitPath: string,
+  repoRoot: string,
+  hash: string,
+  relativePaths: string[]
+): Promise<Map<string, string | undefined>> {
+  return new Promise(resolve => {
+    if (relativePaths.length === 0) { resolve(new Map()); return; }
+    let settled = false;
+    const done = (v: Map<string, string | undefined>) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const child = spawn(gitPath, ['-C', repoRoot, 'cat-file', '--batch'], { stdio: ['pipe', 'pipe', 'ignore'] });
+      const chunks: Buffer[] = [];
+      child.on('error', () => done(new Map()));
+      child.stdout.on('data', (d: Buffer) => chunks.push(d));
+      child.stdout.on('error', () => done(new Map()));
+      child.on('close', () => done(parseCatFileBatch(Buffer.concat(chunks), relativePaths)));
+      child.stdin.on('error', () => {}); // ignore EPIPE if git exits early
+      child.stdin.end(formatBatchRequest(hash, relativePaths));
+    } catch {
+      done(new Map());
+    }
+  });
+}
+
 function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDeps {
+  const gitPath = api.git?.path ?? 'git';
   return {
     resolveRepo(repoRootFsPath: string): ContentRepo | undefined {
       const target = normalizeFsPath(repoRootFsPath);
@@ -90,6 +123,8 @@ function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDe
     },
     // Working-tree read for the UNCOMMITTED view (no commit to `git show`).
     readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
+    readBatch: (repoRootFsPath, hash, relativePaths) =>
+      readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths),
     settings,
   };
 }

@@ -39,6 +39,11 @@ export interface GraphCopyDeps {
   // Reads working-tree content for the UNCOMMITTED view (absolute fsPath).
   // Optional: commit-mode callers (a real hash) never need it.
   readWorking?(absolutePath: string): Promise<string | undefined>;
+  // Reads many committed blobs at a hash in ONE `git cat-file --batch` process,
+  // bypassing the vscode.git per-repo operation queue that throttles N concurrent
+  // show() calls. Returns relativePath -> content (undefined for missing/binary).
+  // Optional: when absent (or on spawn failure) the per-file reader is used.
+  readBatch?(repoRootFsPath: string, hash: string, relativePaths: string[]): Promise<Map<string, string | undefined>>;
   settings: GraphCopySettings;
 }
 
@@ -61,13 +66,40 @@ interface PreparedFile {
   content?: string;
 }
 
-// Per-file resolution with no shared state — safe to run concurrently. The slow
-// `git show` (or working-tree read) lives here; the caller does the ordered,
+function batchKey(repoRootFsPath: string, relativePath: string): string {
+  return `${repoRootFsPath}\n${relativePath}`;
+}
+
+// Prefetch all committed blob contents up front with one `git cat-file --batch`
+// per repo (parallel across repos). For the uncommitted view or when no readBatch
+// is provided this returns an empty map and prepareFile falls back to per-file reads.
+async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Promise<Map<string, string | undefined>> {
+  const lookup = new Map<string, string | undefined>();
+  if (payload.hash === UNCOMMITTED_HASH || !deps.readBatch) return lookup;
+
+  const byRepo = new Map<string, string[]>();
+  for (const file of payload.files) {
+    const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
+    if (changeType === 'DELETED' || !deps.resolveRepo(file.repoRootFsPath)) continue;
+    (byRepo.get(file.repoRootFsPath) ?? byRepo.set(file.repoRootFsPath, []).get(file.repoRootFsPath)!).push(file.relativePath);
+  }
+
+  await Promise.all([...byRepo].map(async ([root, paths]) => {
+    const contents = await deps.readBatch!(root, payload.hash, paths).catch(() => new Map<string, string | undefined>());
+    for (const [path, content] of contents) lookup.set(batchKey(root, path), content);
+  }));
+  return lookup;
+}
+
+// Per-file resolution with no shared state — safe to run concurrently. Committed
+// content comes from the prefetched batch; only the uncommitted view or a batch
+// miss (spawn failure) falls back to a per-file read. The caller does the ordered,
 // stateful bookkeeping over the results.
 async function prepareFile(
   deps: GraphCopyDeps,
   payload: GraphCopyPayload,
-  file: GraphCopyFile
+  file: GraphCopyFile,
+  batch: Map<string, string | undefined>
 ): Promise<PreparedFile> {
   // §5.0:R/C 帶相似度時截到字首後再對應
   const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
@@ -83,9 +115,15 @@ async function prepareFile(
   }
 
   const absolutePath = joinFsPath(file.repoRootFsPath, file.relativePath);
-  const content = payload.hash === UNCOMMITTED_HASH && deps.readWorking
-    ? await deps.readWorking(absolutePath)            // working-tree (uncommitted) view
-    : await readRefContent(repo, payload.hash, absolutePath); // `git show <hash>:<path>`
+  const key = batchKey(file.repoRootFsPath, file.relativePath);
+  let content: string | undefined;
+  if (payload.hash === UNCOMMITTED_HASH && deps.readWorking) {
+    content = await deps.readWorking(absolutePath);            // working-tree (uncommitted) view
+  } else if (batch.has(key)) {
+    content = batch.get(key);                                  // resolved by the single cat-file batch
+  } else {
+    content = await readRefContent(repo, payload.hash, absolutePath); // fallback: `git show <hash>:<path>`
+  }
   return { clipboardPath, changeType, kind: 'content', content };
 }
 
@@ -100,13 +138,15 @@ export async function buildGraphCopyPayload(
   let missingRepoCount = 0;
   let fileLimitReached = false;
 
-  // Resolve each file's content concurrently (the slow `git show` per file),
-  // then apply the limit/size/order bookkeeping sequentially over the in-order
-  // results so the payload is byte-identical to the old serial version.
-  // ponytail: when the file-count limit trips mid-batch, up to READ_CONCURRENCY-1
-  // extra reads were already issued and are discarded — bounded over-fetch in
-  // exchange for not serializing the common no-limit case.
-  const prepared = mapInOrder(payload.files, READ_CONCURRENCY, file => prepareFile(deps, payload, file));
+  // Fetch every committed blob in one `git cat-file --batch` per repo, then apply
+  // the limit/size/order bookkeeping sequentially over the in-order results so the
+  // payload is byte-identical to the old per-file version. mapInOrder still bounds
+  // the rare fallback (uncommitted reads / batch spawn failure) concurrency.
+  // ponytail: when the file-count limit trips mid-batch, the cat-file already read
+  // every blob (cheap) — only fallback per-file reads are wasted, bounded to one
+  // READ_CONCURRENCY window.
+  const batch = await prefetchBatch(deps, payload);
+  const prepared = mapInOrder(payload.files, READ_CONCURRENCY, file => prepareFile(deps, payload, file, batch));
   for await (const file of prepared) {
     if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
       fileLimitReached = true;
