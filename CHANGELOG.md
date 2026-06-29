@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.13
+
+- **Click a folder row to select it; only the chevron expands/collapses.** In the
+  graph's Changes file trees, clicking a folder now selects it (and everything
+  under it) instead of toggling open/close — only the ▸/▾ chevron toggles. This
+  makes multi-selecting folders convenient: click one, Shift-click another for a
+  range, or Ctrl/Cmd-click to add/remove, then "Copy Full Source (N)". Matches the
+  IntelliJ ClipCode tree behavior. Applies to both the committed and working-tree
+  (uncommitted) Changes trees.
+
 ## 0.3.12
 
 - **Multi-select in the graph's working-tree Changes tree.** The uncommitted
