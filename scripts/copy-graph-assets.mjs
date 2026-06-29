@@ -1,13 +1,14 @@
 import { cp, mkdir, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Collect the vendored Svelte webview bundle + its codicon dependency into one
 // host-owned asset dir (dist/graph-webview). MainPanel's SNIPCODE-HOOK resolves
 // every webview resource (main.js, main.css, codicon.css + font) and the CSP
 // localResourceRoots from this single dir — so it is the ONLY thing the VSIX
 // must ship for the graph to render (node_modules is excluded by .vscodeignore).
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(repoRoot, 'dist', 'graph-webview');
 const viteDist = path.join(repoRoot, 'graph', 'webview-ui', 'dist');
 const codiconsDist = path.join(repoRoot, 'graph', 'node_modules', '@vscode', 'codicons', 'dist');

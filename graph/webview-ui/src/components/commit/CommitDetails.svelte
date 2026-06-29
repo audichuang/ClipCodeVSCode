@@ -478,6 +478,27 @@
     return node.isFile ? [node.path] : node.children.flatMap(collectFilePaths);
   }
 
+  function selectPatchRange(paths: string[]) {
+    const order = fileTree.flatMap(collectFilePaths);
+    const anchor = selectedFile && order.includes(selectedFile)
+      ? selectedFile
+      : [...selectedPatchFiles].find(p => order.includes(p));
+    if (!anchor) {
+      selectedPatchFiles = new Set(paths);
+      selectedFile = paths[paths.length - 1] ?? null;
+      return;
+    }
+    const indexes = paths.map(p => order.indexOf(p)).filter(i => i >= 0);
+    if (indexes.length === 0) return;
+    const anchorIdx = order.indexOf(anchor);
+    const first = Math.min(...indexes);
+    const last = Math.max(...indexes);
+    const targetIdx = anchorIdx <= first ? last : first;
+    const [lo, hi] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+    selectedPatchFiles = new Set(order.slice(lo, hi + 1));
+    selectedFile = order[targetIdx] ?? null;
+  }
+
   /* SNIPCODE-HOOK start: Copy Full Source payload builder (S3).
      Shared by every "Copy Full Source" menu (committed file/folder + uncommitted
      file/folder). Maps each repo-relative path to a GraphCopyFile via `lookup`
@@ -940,6 +961,10 @@
                   class:selected={selectedPatchFiles.has(node.path)}
                   style="padding-left: {8 + depth * 16 + 18}px;"
                   onclick={(e) => {
+                    if (e.shiftKey && commit) {
+                      selectPatchRange([node.path]);
+                      return;
+                    }
                     if ((e.ctrlKey || e.metaKey) && commit) {
                       // Add/remove this file from the selection; reassign for reactivity.
                       const next = new Set(selectedPatchFiles);
@@ -1104,6 +1129,10 @@
                   class:selected={isFolderSelected(node)}
                   style="padding-left: {8 + depth * 16}px;"
                   onclick={(e) => {
+                    if (e.shiftKey && commit) {
+                      selectPatchRange(collectFilePaths(node));
+                      return;
+                    }
                     if ((e.ctrlKey || e.metaKey) && commit) {
                       // Add/remove every changed file under this folder.
                       const filesUnder = collectFilePaths(node);

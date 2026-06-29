@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+- **Shift-click range selection** in the commit Changes panel: hold **Shift** and
+  click a changed file (or a folder) to select the whole range from the current
+  anchor to the clicked item, alongside the existing Ctrl/Cmd-click toggle. Works
+  in the committed-commit view; folders extend the range across every file under
+  them.
+- Fix `scripts/copy-graph-assets.mjs` to resolve its own path via `fileURLToPath`
+  instead of `new URL(...).pathname` — the latter produced a broken `/C:/…` path
+  with percent-encoded spaces on Windows, breaking the webview asset copy step.
+
 ## 0.3.2
 
 - **Copy Full Source** now also works when **multiple commits are selected**

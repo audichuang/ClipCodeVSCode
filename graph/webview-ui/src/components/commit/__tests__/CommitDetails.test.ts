@@ -867,6 +867,27 @@ describe('CommitDetails — folder selection highlight', () => {
       expect(sub.classList.contains('selected')).toBe(true);
     });
   });
+
+  it('Shift-clicking from a file to a collapsed folder selects the range', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', [
+      { path: 'src/a.ts', status: 'M' },
+      { path: 'src/b.ts', status: 'M' },
+      { path: 'pom.xml', status: 'M' },
+    ]);
+    await openChanges(container);
+    const src = Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'))
+      .find(d => /src/.test(d.textContent ?? ''))!;
+    await fireEvent.click(src); // collapse src so it behaves like the screenshot row.
+    const pom = Array.from(container.querySelectorAll<HTMLButtonElement>('.file-item'))
+      .find(f => /pom\.xml/.test(f.textContent ?? ''))!;
+    await fireEvent.click(pom);
+    await fireEvent.click(src, { shiftKey: true });
+    await waitFor(() => {
+      expect(src.classList.contains('selected')).toBe(true);
+      expect(pom.classList.contains('selected')).toBe(true);
+    });
+  });
 });
 
 describe('CommitDetails — Esc-driven file deselection', () => {
