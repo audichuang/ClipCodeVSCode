@@ -1094,11 +1094,11 @@
                   class:selected={selectedPatchFiles.has(node.path)}
                   style="padding-left: {8 + depth * 16 + 18}px;"
                   onclick={(e) => {
-                    if (e.shiftKey && commit) {
+                    if (e.shiftKey) {
                       selectPatchRange([node.path]);
                       return;
                     }
-                    if ((e.ctrlKey || e.metaKey) && commit) {
+                    if (e.ctrlKey || e.metaKey) {
                       // Add/remove this file from the selection; reassign for reactivity.
                       const next = new Set(selectedPatchFiles);
                       if (next.has(node.path)) {
@@ -1268,11 +1268,11 @@
                       toggleDir(node.path);
                       return;
                     }
-                    if (e.shiftKey && commit) {
+                    if (e.shiftKey) {
                       selectPatchRange(collectFilePaths(node));
                       return;
                     }
-                    if ((e.ctrlKey || e.metaKey) && commit) {
+                    if (e.ctrlKey || e.metaKey) {
                       // Add/remove every changed file under this folder.
                       const filesUnder = collectFilePaths(node);
                       const next = new Set(selectedPatchFiles);

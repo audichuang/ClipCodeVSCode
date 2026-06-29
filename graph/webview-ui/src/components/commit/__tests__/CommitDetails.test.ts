@@ -929,6 +929,30 @@ describe('CommitDetails — folder selection highlight', () => {
       expect(pom.classList.contains('selected')).toBe(true);
     });
   });
+
+  // Compare mode has no single `commit`; multi-select must still work there
+  // (it drives "Copy Full Source", which reads the compare ref, not a commit).
+  it('multi-selects with Shift in compare mode (no commit)', async () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaa';
+    uiStore.compareRef2 = 'bbbb';
+    const { container } = render(CommitDetails); // no commit prop = compare mode
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'commitDiffData',
+      payload: { hash: '', files: [
+        { path: 'src/a.ts', status: 'M' },
+        { path: 'src/b.ts', status: 'M' },
+        { path: 'pom.xml', status: 'M' },
+      ], diffs: [] },
+    }}));
+    await waitFor(() => container.querySelector('.file-item'));
+    const files = () => Array.from(container.querySelectorAll<HTMLButtonElement>('.file-item'));
+    await fireEvent.click(files().find(f => /a\.ts/.test(f.textContent ?? ''))!);
+    await fireEvent.click(files().find(f => /pom\.xml/.test(f.textContent ?? ''))!, { shiftKey: true });
+    await waitFor(() => {
+      expect(files().filter(f => f.classList.contains('selected')).length).toBe(3);
+    });
+  });
 });
 
 describe('CommitDetails — Esc-driven file deselection', () => {
