@@ -845,6 +845,19 @@ describe('GitService', () => {
       expect(execCalls).toBe(1);
     });
 
+    it('does not warn when remote names are requested outside a git repo', async () => {
+      // First-open race: Git Graph+ tries the workspace folder before
+      // RepoDiscoveryService finds the real child repo, so `git remote` runs in a
+      // non-repo parent. That is expected, not a failure to surface in the UI.
+      const warn = vi.fn();
+      service.setWarningHandler(warn);
+      mockExec(service, async (args) => {
+        throw new GitError('fatal: not a git repository (or any of the parent directories): .git', 128, args);
+      });
+      expect(await (service as any).getRemoteNames()).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('addRemote invalidates the cache', async () => {
       // Pre-populate as if cached.
       (service as any).cachedRemoteNames = ['origin'];

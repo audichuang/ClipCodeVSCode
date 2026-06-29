@@ -642,7 +642,10 @@ export class GitService {
         this.remoteNamesCacheTime = Date.now();
         return names;
       } catch (err) {
-        this.warn(`failed to get remote names: ${err instanceof Error ? err.message : err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.toLowerCase().includes('not a git repository')) {
+          this.warn(`failed to get remote names: ${message}`);
+        }
         return [];
       } finally {
         this.pendingRemoteNames = null;

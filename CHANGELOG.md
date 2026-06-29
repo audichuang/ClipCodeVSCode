@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.7
+
+- **No spurious Git error on first open in a parent-folder workspace.** When the
+  workspace root isn't itself a git repo (the real repo is a subfolder, e.g.
+  `inv-svc-console/`), Git Graph+'s initial remote-name lookup briefly ran
+  `git remote` in the non-repo parent and surfaced `not a git repository` until
+  repo discovery switched to the child repo. That transient lookup failure is now
+  silent (empty remote list); the commit graph, diffs, and `git log` are
+  unaffected.
+
 ## 0.3.6
 
 - **Stop showing a spurious Git LFS error in the graph.** Some TFS / Azure DevOps
