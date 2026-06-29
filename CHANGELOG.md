@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.14
+
+- **Fix: Shift/Ctrl multi-select now works in compare mode.** Selecting a range
+  (Shift-click) or toggling files/folders (Ctrl/Cmd-click) in the Changes tree was
+  silently disabled whenever you were comparing two refs (or a ref against the
+  working tree) instead of viewing a single commit — the gate required a concrete
+  commit. Multi-select now works regardless, so "Copy Full Source (N)" works while
+  comparing too.
+
 ## 0.3.13
 
 - **Click a folder row to select it; only the chevron expands/collapses.** In the
