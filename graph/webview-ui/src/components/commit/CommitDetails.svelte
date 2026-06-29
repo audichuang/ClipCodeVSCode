@@ -1003,6 +1003,12 @@
                     class:selected={isUncommittedFolderSelected(node, staged)}
                     style="padding-left: {8 + depth * 16}px;"
                     onclick={(e) => {
+                      // IntelliJ-style: only the chevron expands/collapses; clicking
+                      // the row selects the folder so multi-select is convenient.
+                      if ((e.target as HTMLElement).closest('.dir-chevron')) {
+                        toggleDir(`${staged ? 'staged' : 'unstaged'}:${node.path}`);
+                        return;
+                      }
                       const keysUnder = collectFilePaths(node).map(p => `${staged ? 'staged' : 'unstaged'}:${p}`);
                       if (e.shiftKey) {
                         selectUncommittedRange(keysUnder, staged);
@@ -1024,7 +1030,16 @@
                         selectedUncommittedFiles = next;
                         return;
                       }
-                      toggleDir(`${staged ? 'staged' : 'unstaged'}:${node.path}`);
+                      // Plain click: select just this folder (toggle off if it's the sole selection).
+                      const allSelected = keysUnder.length > 0 && keysUnder.every(k => selectedUncommittedFiles.has(k));
+                      if (allSelected && selectedUncommittedFiles.size === keysUnder.length) {
+                        selectedUncommittedFiles = new Set();
+                        selectedFile = null;
+                      } else {
+                        selectedUncommittedFiles = new Set(keysUnder);
+                        selectedFile = keysUnder[keysUnder.length - 1] ?? null;
+                        fetchUncommittedDiffForKey(selectedFile);
+                      }
                     }}
                     oncontextmenu={(e) => {
                       e.preventDefault();
@@ -1047,7 +1062,7 @@
                       /* SNIPCODE-HOOK end */
                     }}
                   >
-                    <i class="codicon" class:codicon-chevron-right={!expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)} class:codicon-chevron-down={expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}></i>
+                    <i class="codicon dir-chevron" class:codicon-chevron-right={!expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)} class:codicon-chevron-down={expandedDirs.has(`${staged ? 'staged' : 'unstaged'}:${node.path}`)}></i>
                     <i class="codicon codicon-folder"></i>
                     <span class="dir-name">{node.name}</span>
                   </button>
@@ -1247,6 +1262,12 @@
                   class:selected={isFolderSelected(node)}
                   style="padding-left: {8 + depth * 16}px;"
                   onclick={(e) => {
+                    // IntelliJ-style: only the chevron expands/collapses; clicking
+                    // the row selects the folder so multi-select is convenient.
+                    if ((e.target as HTMLElement).closest('.dir-chevron')) {
+                      toggleDir(node.path);
+                      return;
+                    }
                     if (e.shiftKey && commit) {
                       selectPatchRange(collectFilePaths(node));
                       return;
@@ -1268,7 +1289,16 @@
                       selectedPatchFiles = next;
                       return;
                     }
-                    toggleDir(node.path);
+                    // Plain click: select just this folder (toggle off if it's the sole selection).
+                    const filesUnder = collectFilePaths(node);
+                    const allSelected = filesUnder.length > 0 && filesUnder.every(p => selectedPatchFiles.has(p));
+                    if (allSelected && selectedPatchFiles.size === filesUnder.length) {
+                      selectedPatchFiles = new Set();
+                      selectedFile = null;
+                    } else {
+                      selectedPatchFiles = new Set(filesUnder);
+                      selectedFile = filesUnder[filesUnder.length - 1] ?? null;
+                    }
                   }}
                   oncontextmenu={(e) => {
                     e.preventDefault();
@@ -1306,7 +1336,7 @@
                     if (folderItems.length > 0) fileContextMenu = { x: e.clientX, y: e.clientY, items: folderItems };
                   }}
                 >
-                  <i class="codicon" class:codicon-chevron-right={!expandedDirs.has(node.path)} class:codicon-chevron-down={expandedDirs.has(node.path)}></i>
+                  <i class="codicon dir-chevron" class:codicon-chevron-right={!expandedDirs.has(node.path)} class:codicon-chevron-down={expandedDirs.has(node.path)}></i>
                   <i class="codicon codicon-folder"></i>
                   <span class="dir-name">{node.name}</span>
                 </button>
@@ -1832,6 +1862,10 @@
 
   .file-name { font-weight: normal; min-width: 0; }
   .dir-name { min-width: 0; }
+  /* Enlarge the chevron's click target without shifting layout — only the
+     chevron toggles expand/collapse; the rest of the row selects. */
+  .dir-chevron { padding: 4px; margin: -4px; border-radius: 3px; }
+  .dir-chevron:hover { background: var(--bg-hover); }
   .file-status {
     margin-left: auto;
     font-size: 0.85em;

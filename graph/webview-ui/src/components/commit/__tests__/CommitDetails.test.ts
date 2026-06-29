@@ -624,6 +624,47 @@ describe('CommitDetails — uncommitted (staged/unstaged)', () => {
       expect(text.toLowerCase()).toContain('open changes');
     });
   });
+
+  // The reported case: in the working-tree Changes tree, clicking a folder ROW
+  // selects it (so multi-select is convenient) and only the chevron toggles.
+  it('clicking a folder row selects it; the chevron toggles expand/collapse', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'UNCOMMITTED' }) });
+    deliverUncommitted([], [{ path: 'docs/a.md', status: 'M' }, { path: 'src/b.ts', status: 'M' }]);
+    const unstagedTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /unstaged/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(unstagedTab);
+    await waitFor(() => container.querySelector('.dir-item'));
+    const docs = Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'))
+      .find(d => /docs/.test(d.textContent ?? ''))!;
+    // Collapse docs via its chevron so it renders as a single row (like the screenshot).
+    await fireEvent.click(docs.querySelector<HTMLElement>('.dir-chevron')!);
+    await waitFor(() => {
+      expect(Array.from(container.querySelectorAll('.file-name')).map(el => el.textContent)).not.toContain('a.md');
+    });
+    // Plain click on the row selects the (collapsed) folder — it does NOT re-expand.
+    await fireEvent.click(docs);
+    await waitFor(() => expect(docs.classList.contains('selected')).toBe(true));
+    expect(Array.from(container.querySelectorAll('.file-name')).map(el => el.textContent)).not.toContain('a.md');
+  });
+
+  it('Shift-clicking from one folder to another selects the whole range', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'UNCOMMITTED' }) });
+    deliverUncommitted([], [{ path: 'docs/a.md', status: 'M' }, { path: 'src/b.ts', status: 'M' }]);
+    const unstagedTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /unstaged/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(unstagedTab);
+    await waitFor(() => container.querySelector('.dir-item'));
+    const dirs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'));
+    const docs = dirs().find(d => /docs/.test(d.textContent ?? ''))!;
+    await fireEvent.click(docs);
+    const src = dirs().find(d => /src/.test(d.textContent ?? ''))!;
+    await fireEvent.click(src, { shiftKey: true });
+    await waitFor(() => {
+      const selectedFiles = Array.from(container.querySelectorAll('.file-item'))
+        .filter(f => f.classList.contains('selected')).length;
+      expect(selectedFiles).toBe(2); // a.md and b.ts both in range
+    });
+  });
 });
 
 describe('CommitDetails — LFS badges', () => {
@@ -819,13 +860,13 @@ describe('CommitDetails — directory toggle', () => {
     const dirs = container.querySelectorAll<HTMLButtonElement>('.dir-item');
     // Auto-expand effect makes all dirs expanded initially.
     expect(container.querySelectorAll('.file-item').length).toBeGreaterThan(0);
-    // Click the top dir to collapse → files disappear
-    await fireEvent.click(dirs[0]);
+    // Only the chevron toggles expand/collapse (clicking the row selects). Collapse → files disappear.
+    await fireEvent.click(dirs[0].querySelector<HTMLElement>('.dir-chevron')!);
     await waitFor(() => {
       expect(container.querySelectorAll('.file-item').length).toBe(0);
     });
-    // Click again to re-expand
-    await fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.dir-item')[0]);
+    // Click the chevron again to re-expand
+    await fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.dir-item')[0].querySelector<HTMLElement>('.dir-chevron')!);
     await waitFor(() => {
       expect(container.querySelectorAll('.file-item').length).toBeGreaterThan(0);
     });
@@ -858,9 +899,9 @@ describe('CommitDetails — folder selection highlight', () => {
     deliverCommitDiff('h1', [{ path: 'src/sub/only.ts', status: 'M' }]);
     await openChanges(container);
     await fireEvent.click(container.querySelector<HTMLButtonElement>('.file-item')!);
-    // Collapse the innermost folder (src/sub); its only file stays selected.
+    // Collapse the innermost folder (src/sub) via its chevron; its only file stays selected.
     const dirs = Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'));
-    await fireEvent.click(dirs[dirs.length - 1]);
+    await fireEvent.click(dirs[dirs.length - 1].querySelector<HTMLElement>('.dir-chevron')!);
     await waitFor(() => {
       const sub = Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'))
         .find(d => /sub/.test(d.textContent ?? ''))!;
@@ -878,7 +919,7 @@ describe('CommitDetails — folder selection highlight', () => {
     await openChanges(container);
     const src = Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'))
       .find(d => /src/.test(d.textContent ?? ''))!;
-    await fireEvent.click(src); // collapse src so it behaves like the screenshot row.
+    await fireEvent.click(src.querySelector<HTMLElement>('.dir-chevron')!); // collapse src via chevron so it behaves like the screenshot row.
     const pom = Array.from(container.querySelectorAll<HTMLButtonElement>('.file-item'))
       .find(f => /pom\.xml/.test(f.textContent ?? ''))!;
     await fireEvent.click(pom);
