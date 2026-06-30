@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.16
+
+- **Fix: "No source copied" when the repo path didn't exactly match VS Code's
+  Git.** Copy Full Source bailed out whenever the graph's repo root didn't string-
+  match a `vscode.git` repository — common on SSH remotes, symlinked paths, or case
+  differences — so it copied nothing even though the files were right there. Content
+  is now read directly via `git -C <root> cat-file` (committed) or from disk
+  (working tree); VS Code's Git is only consulted for the rare per-file fallback.
+
 ## 0.3.15
 
 - **Fix: "Copy Full Source" on a folder now respects a multi-folder selection.**

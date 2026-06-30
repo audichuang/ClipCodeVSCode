@@ -96,7 +96,12 @@ async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Pr
     // here just fall back to a per-file read if the limit math later needs them.)
     if (settings.setMaxFileCount && requested >= settings.fileCountLimit) break;
     const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
-    if (changeType === 'DELETED' || !deps.resolveRepo(file.repoRootFsPath)) continue;
+    // The batch reads via `git -C <root> cat-file` directly, so it does NOT need
+    // a matching vscode.git repo. Don't gate on resolveRepo here — the graph
+    // already proved <root> is a real repo by showing its commits, and requiring
+    // an exact path match against vscode.git's discovery fails on SSH/symlink/
+    // case differences (→ "No source copied" even though the files exist).
+    if (changeType === 'DELETED') continue;
     // `cat-file --batch` is newline-delimited, so a path containing a line break
     // would corrupt request/response alignment — route those to the per-file reader.
     if (file.relativePath.includes('\n') || file.relativePath.includes('\r')) continue;
@@ -129,19 +134,22 @@ async function prepareFile(
     return { clipboardPath, changeType, kind: 'deleted' };
   }
 
-  const repo = deps.resolveRepo(file.repoRootFsPath);
-  if (!repo) {
-    return { clipboardPath, changeType, kind: 'missing' };
-  }
-
   const absolutePath = joinFsPath(file.repoRootFsPath, file.relativePath);
   const key = batchKey(file.repoRootFsPath, file.relativePath);
   let content: string | undefined;
   if (payload.hash === UNCOMMITTED_HASH && deps.readWorking) {
-    content = await deps.readWorking(absolutePath);            // working-tree (uncommitted) view
+    content = await deps.readWorking(absolutePath);            // working-tree (uncommitted) view — reads disk
   } else if (batch.has(key)) {
-    content = batch.get(key);                                  // resolved by the single cat-file batch
+    content = batch.get(key);                                  // resolved by the single cat-file batch (git -C root)
   } else {
+    // Only the per-file `git show` fallback needs the vscode.git repo object.
+    // Reaching here means the working-tree/batch reads above didn't apply (no
+    // readWorking, or the cat-file batch failed/was skipped). If vscode.git also
+    // doesn't know this repo, there's nothing left to try → missing.
+    const repo = deps.resolveRepo(file.repoRootFsPath);
+    if (!repo) {
+      return { clipboardPath, changeType, kind: 'missing' };
+    }
     content = await readRefContent(repo, payload.hash, absolutePath); // fallback: `git show <hash>:<path>`
   }
   return { clipboardPath, changeType, kind: 'content', content };

@@ -237,3 +237,34 @@ test('falls back to per-file show when readBatch yields nothing (spawn failure)'
   assert.equal(r.copiedFileCount, 1);
   assert.match(r.text, /shown a\.ts/);
 });
+
+test('committed copy works via readBatch even when resolveRepo cannot match (SSH/symlink path mismatch)', async () => {
+  // The graph proved the repo by showing its commits; the cat-file batch reads
+  // `git -C <root>` directly, so a vscode.git path mismatch must NOT block the copy.
+  const d: GraphCopyDeps = {
+    resolveRepo: () => undefined, // vscode.git knows the repo under a different path → no match
+    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, `batched ${p}`])),
+    settings
+  };
+  const r = await buildGraphCopyPayload(d, {
+    hash: 'abc',
+    files: [{ repoRootFsPath: '/realpath/repo', relativePath: 'a.ts', status: 'M' }]
+  });
+  assert.equal(r.copiedFileCount, 1);
+  assert.equal(r.missingRepoCount, 0);
+  assert.match(r.text, /batched a\.ts/);
+});
+
+test('uncommitted copy works via readWorking even when resolveRepo cannot match', async () => {
+  const d: GraphCopyDeps = {
+    resolveRepo: () => undefined,
+    readWorking: async (abs: string) => (abs === '/realpath/repo/a.ts' ? 'WORKING' : undefined),
+    settings
+  };
+  const r = await buildGraphCopyPayload(d, {
+    hash: UNCOMMITTED_HASH,
+    files: [{ repoRootFsPath: '/realpath/repo', relativePath: 'a.ts', status: 'M' }]
+  });
+  assert.equal(r.copiedFileCount, 1);
+  assert.match(r.text, /WORKING/);
+});
