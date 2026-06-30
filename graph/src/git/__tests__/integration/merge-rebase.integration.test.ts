@@ -773,6 +773,23 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
       commit(repo.path, 'second', { 'a.txt': 'A\n' });
       await expect(svc.rewordCommit(root, 'new root')).rejects.toThrow(/root commit/i);
     });
+
+    it('refuses to reword when a merge commit lies between the target and HEAD (no silent flatten)', async () => {
+      commit(repo.path, 'init');
+      const target = commit(repo.path, 'target subject', { 'a.txt': 'A\n' });
+      const main = currentBranch(repo.path);
+      runGit(repo.path, ['checkout', '-b', 'feature']);
+      commit(repo.path, 'feature work', { 'f.txt': 'F\n' });
+      runGit(repo.path, ['checkout', main]);
+      commit(repo.path, 'main work', { 'm.txt': 'M\n' });
+      runGit(repo.path, ['merge', '--no-ff', 'feature', '-m', 'merge feature']); // creates a merge commit after target
+
+      await expect(svc.rewordCommit(target, 'reworded target')).rejects.toThrow(/merge/i);
+      // History untouched: the target keeps its original subject and the merge survives.
+      const subjects = runGit(repo.path, ['log', '--format=%s']).trim();
+      expect(subjects).toContain('target subject');
+      expect(subjects).toContain('merge feature');
+    });
   });
 
   describe('getRebaseCommits', () => {
