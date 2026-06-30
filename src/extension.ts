@@ -161,17 +161,21 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
     const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
     // Offer the actual skipped paths/sizes behind a button so the toast stays short.
+    // Fire-and-forget: do NOT await — an action-button notification never
+    // auto-dismisses, so awaiting it would block the copy from returning (hangs
+    // headless e2e and leaves the caller waiting on a toast).
     const actions = result.skippedFiles.length > 0 ? ['Show skipped'] : [];
-    const picked = await vscode.window.showInformationMessage(message, ...actions);
-    if (picked === 'Show skipped') {
-      const list = result.skippedFiles
-        .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
-        .join('\n');
-      vscode.window.showInformationMessage(
-        `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
-        { modal: true, detail: list }
-      );
-    }
+    void vscode.window.showInformationMessage(message, ...actions).then(picked => {
+      if (picked === 'Show skipped') {
+        const list = result.skippedFiles
+          .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
+          .join('\n');
+        void vscode.window.showInformationMessage(
+          `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
+          { modal: true, detail: list }
+        );
+      }
+    });
   }
 }
 
