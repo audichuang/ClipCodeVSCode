@@ -953,6 +953,42 @@ describe('CommitDetails — folder selection highlight', () => {
       expect(files().filter(f => f.classList.contains('selected')).length).toBe(3);
     });
   });
+
+  // Right-clicking ONE selected folder must copy the whole multi-selection, not
+  // just that folder's files (the reported "selected 2 folders, only got 2 files").
+  it('Copy Full Source on a folder honors a multi-folder selection', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', [
+      { path: 'mobile/app/a.ts', status: 'M' },
+      { path: 'mobile/app/b.ts', status: 'M' },
+      { path: 'mobile/src/c.ts', status: 'M' },
+      { path: 'mobile/src/d.ts', status: 'M' },
+    ]);
+    const changesTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /change/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(changesTab);
+    await waitFor(() => container.querySelector('.dir-item'));
+    const dirs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('.dir-item'));
+    const app = dirs().find(d => /^app$/.test((d.textContent ?? '').trim()))!;
+    const src = dirs().find(d => /^src$/.test((d.textContent ?? '').trim()))!;
+    await fireEvent.click(app);                       // select app's 2 files
+    await fireEvent.click(src, { ctrlKey: true });    // add src's 2 files → 4 selected
+    globalThis.__postedMessages = [];
+    await fireEvent.contextMenu(src, { clientX: 10, clientY: 10 });
+    const item = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll('.menu-item'))
+        .find(m => /Copy Full Source/.test(m.textContent ?? ''));
+      if (!el) throw new Error('menu not ready');
+      return el as HTMLElement;
+    });
+    expect(item.textContent).toMatch(/Copy Full Source \(4\)/);
+    await fireEvent.click(item);
+    const msg = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'snipcodeCopyFullSource'
+    );
+    expect(msg).toBeDefined();
+    expect((msg!.data as { payload: { files: unknown[] } }).payload.files).toHaveLength(4);
+  });
 });
 
 describe('CommitDetails — Esc-driven file deselection', () => {

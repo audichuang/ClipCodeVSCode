@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.15
+
+- **Fix: "Copy Full Source" on a folder now respects a multi-folder selection.**
+  Right-clicking one selected folder copied only that folder's files (e.g. you
+  selected two folders but got just one folder's worth). The committed/compare
+  folder menu now copies the whole selection and shows the `(N)` count, matching
+  the file and working-tree menus.
+
 ## 0.3.14
 
 - **Fix: Shift/Ctrl multi-select now works in compare mode.** Selecting a range

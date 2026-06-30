@@ -1314,12 +1314,18 @@
                       });
                     }
                     /* SNIPCODE-HOOK start: Copy Full Source (committed folder, S3) — all files under,
-                       at snipcodeTreeHash() (single commit OR compare/multi-commit newer ref). */
+                       at snipcodeTreeHash() (single commit OR compare/multi-commit newer ref).
+                       Honors a multi-selection that extends past this folder. */
                     const csHash = snipcodeTreeHash();
                     if (csHash !== null) {
+                      const filesUnderFolder = collectFilePaths(node);
+                      const csMulti = filesUnderFolder.length > 0
+                        && filesUnderFolder.every(p => selectedPatchFiles.has(p))
+                        && selectedPatchFiles.size > filesUnderFolder.length;
+                      const csPaths = csMulti ? [...selectedPatchFiles] : filesUnderFolder;
                       folderItems.push({
-                        label: 'Copy Full Source',
-                        action: () => snipcodeCopyFiles(csHash, collectFilePaths(node), (p) => files.find((cf) => cf.path === p), filesRepoRoot),
+                        label: csMulti ? `Copy Full Source (${csPaths.length})` : 'Copy Full Source',
+                        action: () => snipcodeCopyFiles(csHash, csPaths, (p) => files.find((cf) => cf.path === p), filesRepoRoot),
                       });
                     }
                     /* SNIPCODE-HOOK end */
