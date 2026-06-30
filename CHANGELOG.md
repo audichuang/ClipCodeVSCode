@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.17
+
+- **Fix: "No source copied" on SSH-remote (and other non-PATH git) setups.** Copy
+  Full Source read commit content with a bare `git` in a bare environment, which
+  can be unspawnable on a remote host even though the diff panel renders fine — so
+  it copied nothing. It now reads with the exact git binary and environment the
+  graph already uses for everything else. Also: a `cat-file` "missing" result no
+  longer blocks the per-file fallback (it was silently swallowing content).
+
 ## 0.3.16
 
 - **Fix: "No source copied" when the repo path didn't exactly match VS Code's

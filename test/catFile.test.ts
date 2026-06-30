@@ -40,13 +40,15 @@ test('content with embedded newlines is parsed by byte count, not by lines', () 
   assert.equal(map.get('y.ts'), 'next');
 });
 
-test('missing object maps to undefined and following entries still align', () => {
+test('missing object omits the key (so prepareFile falls back) and following entries still align', () => {
   const out = batchOutput([
     { missing: 'abc:gone.ts' },
     { oid: '3333', content: 'still here' }
   ]);
   const map = parseCatFileBatch(out, ['gone.ts', 'here.ts']);
-  assert.equal(map.get('gone.ts'), undefined);
+  // Key omitted — not stored as undefined — so a batch `has()` check lets the
+  // per-file `git show` fallback run instead of treating it as a resolved miss.
+  assert.equal(map.has('gone.ts'), false);
   assert.equal(map.get('here.ts'), 'still here');
 });
 

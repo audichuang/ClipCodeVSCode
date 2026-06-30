@@ -28,7 +28,8 @@ export function parseCatFileBatch(stdout: Buffer, relativePaths: string[]): Map<
     offset = lineEnd + 1;
 
     if (header.endsWith(' missing')) {
-      result.set(path, undefined);
+      // Omit the key entirely (don't store undefined): a contentless `has()` hit
+      // would stop prepareFile from trying the per-file `git show` fallback.
       continue;
     }
 
