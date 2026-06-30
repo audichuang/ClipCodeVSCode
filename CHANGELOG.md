@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.21
+
+- **Reword safety hardening** (from a code review of 0.3.20):
+  - Refuses to reword when a merge commit sits between the target and HEAD,
+    instead of silently flattening the merge history.
+  - No longer shows "Commit message updated" when the reword rebase pauses on a
+    conflict — the rebase banner now guides you to resolve/continue or abort.
+
 ## 0.3.20
 
 - **Reword any commit (edit its message), like IntelliJ.** Right-click a commit →

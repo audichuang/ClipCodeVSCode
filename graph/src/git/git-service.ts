@@ -1559,6 +1559,16 @@ export class GitService {
     if (!commits.some(c => c.hash === hash)) {
       throw new GitError('That commit is not on the current branch (not reachable from HEAD).', null, ['reword', hash]);
     }
+    // `rebase -i` (without --rebase-merges) flattens merge commits. Rather than
+    // silently rewrite the branch's topology, refuse when a merge sits in the
+    // range that would be replayed (the target or any of its descendants).
+    if (commits.some(c => c.parents.length > 1)) {
+      throw new GitError(
+        'Cannot reword: a merge commit lies between this commit and HEAD, and rewording would flatten the merge history. Reword from the latest commit, or rebase first.',
+        null,
+        ['reword', hash]
+      );
+    }
     const todos = commits.map(c => ({
       action: c.hash === hash ? 'reword' : 'pick',
       hash: c.hash,

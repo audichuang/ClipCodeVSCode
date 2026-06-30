@@ -831,11 +831,18 @@ export class MainPanel {
         }
         case 'rewordCommit': {
           await this.gitService.rewordCommit(message.payload.hash, message.payload.message);
+          // The reword may run as a rebase that pauses on a conflict. Only claim
+          // success when no rebase is left in progress — otherwise the banner
+          // (from refreshAll) guides the user to resolve/continue or abort, and a
+          // premature "message updated" toast would be misleading.
+          const paused = (await this.gitService.getOperationState()).type === 'rebase';
           this.post({
             type: 'operationComplete',
-            payload: { operation: 'rewordCommit', success: true },
+            payload: { operation: 'rewordCommit', success: !paused },
           });
-          vscode.window.showInformationMessage(vscode.l10n.t('commitReworded'));
+          if (!paused) {
+            vscode.window.showInformationMessage(vscode.l10n.t('commitReworded'));
+          }
           await this.refreshAll();
           break;
         }
