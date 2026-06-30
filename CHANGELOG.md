@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.20
+
+- **Reword any commit (edit its message), like IntelliJ.** Right-click a commit →
+  "Reword…" opens a message editor. The latest commit is reworded instantly
+  (`git commit --amend --only`, leaving staged/working changes untouched); an
+  earlier commit is reworded via a rebase that rewrites history from that commit
+  forward (with `--autostash`, so a dirty working tree doesn't block it). The
+  dialog warns when the rewrite will need a force-push.
+
 ## 0.3.19
 
 - **Copy notification can list the skipped files.** When "Copy Full Source" skips

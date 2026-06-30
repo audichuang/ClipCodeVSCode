@@ -1100,14 +1100,22 @@
       // Both fold the currently-staged changes into an existing commit, so they
       // live together. Amend only applies to HEAD.
       const modifyOps: any[] = [];
+      const fullMessage = commit.body ? `${commit.subject}\n\n${commit.body}` : commit.subject;
+      const cur = branchStore.currentBranch;
+      // Fully pushed = nothing ahead of the upstream, so every commit up to HEAD
+      // (this one included) is on the remote → a reword needs a force-push.
+      const fullyPushed = !!cur?.upstream && !cur?.upstreamGone && (cur?.ahead ?? 0) === 0;
+      // Reword: edit just this commit's message (HEAD → fast amend --only; an older
+      // commit → a rebase that rewords it, rewriting history from there forward).
+      modifyOps.push({
+        label: t('graph.reword'),
+        action: () => modalStore.openReword({ hash: commit.hash, message: fullMessage, isHead, isPushed: fullyPushed }),
+      });
       if (isHead) {
-        const fullMessage = commit.body ? `${commit.subject}\n\n${commit.body}` : commit.subject;
-        const cur = branchStore.currentBranch;
-        const isPushed = !!cur?.upstream && !cur?.upstreamGone && (cur?.ahead ?? 0) === 0;
         modifyOps.push({
           label: t('graph.amendCommit'),
           action: () => {
-            modalStore.openAmend({ hash: commit.hash, subject: commit.subject, message: fullMessage, isPushed });
+            modalStore.openAmend({ hash: commit.hash, subject: commit.subject, message: fullMessage, isPushed: fullyPushed });
             vscode.postMessage({ type: 'openScmView', payload: { returnFocus: true } });
           },
         });

@@ -26,6 +26,7 @@
   import StashRenameModal from './components/modals/StashRenameModal.svelte';
   import StashSaveModal from './components/modals/StashSaveModal.svelte';
 import AmendModal from './components/modals/AmendModal.svelte';
+import RewordModal from './components/modals/RewordModal.svelte';
   import RenameBranchModal from './components/modals/RenameBranchModal.svelte';
   import DeleteRemoteBranchModal from './components/modals/DeleteRemoteBranchModal.svelte';
   import DeleteRemoteTagModal from './components/modals/DeleteRemoteTagModal.svelte';
@@ -616,6 +617,17 @@ import AmendModal from './components/modals/AmendModal.svelte';
     isPushed={modalStore.amend.isPushed}
     onClose={() => { modalStore.closeAmend(); }}
     onAmend={(opts) => { modalStore.closeAmend(); vscode.postMessage({ type: 'amendCommit', payload: opts }); }}
+  />
+{/if}
+
+{#if modalStore.reword.show}
+  <RewordModal
+    hash={modalStore.reword.hash}
+    message={modalStore.reword.message}
+    isHead={modalStore.reword.isHead}
+    isPushed={modalStore.reword.isPushed}
+    onClose={() => { modalStore.closeReword(); }}
+    onReword={(message) => { const hash = modalStore.reword.hash; modalStore.closeReword(); vscode.postMessage({ type: 'rewordCommit', payload: { hash, message } }); }}
   />
 {/if}
 

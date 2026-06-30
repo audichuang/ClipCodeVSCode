@@ -1527,9 +1527,51 @@ export class GitService {
    * Interactive rebase: takes a list of todo entries and applies them.
    * Each entry: { action: 'pick'|'squash'|'fixup'|'edit'|'reword'|'drop', hash: string }
    */
+  /**
+   * Change a single commit's message, IntelliJ-style. HEAD is reworded with
+   * `git commit --amend --only` (fast, leaves staged/working changes untouched);
+   * an older commit is reworded by a one-shot interactive rebase that picks every
+   * commit from its parent to HEAD and rewords just the target. `--autostash`
+   * keeps a dirty working tree from blocking it. Rewriting a non-HEAD commit
+   * changes its hash and every descendant's — a pushed branch then needs force-push.
+   */
+  async rewordCommit(hash: string, message: string): Promise<void> {
+    if (!/^[0-9a-f]+$/i.test(hash)) {
+      throw new GitError(`Invalid commit hash: ${hash}`, null, ['reword']);
+    }
+    const msg = message.trim();
+    if (!msg) {
+      throw new GitError('Commit message is required to reword', null, ['reword']);
+    }
+    const head = (await this.exec(['rev-parse', 'HEAD'])).trim();
+    if (head === hash) {
+      await this.amendCommit({ message: msg, only: true });
+      return;
+    }
+    // `<hash>^` is the rebase base; it fails for the root commit (no parent).
+    let base: string;
+    try {
+      base = (await this.exec(['rev-parse', '--verify', `${hash}^`], { silent: true })).trim();
+    } catch {
+      throw new GitError('Cannot reword the root commit.', null, ['reword', hash]);
+    }
+    const commits = await this.getRebaseCommits(base); // oldest→newest (rebase todo order)
+    if (!commits.some(c => c.hash === hash)) {
+      throw new GitError('That commit is not on the current branch (not reachable from HEAD).', null, ['reword', hash]);
+    }
+    const todos = commits.map(c => ({
+      action: c.hash === hash ? 'reword' : 'pick',
+      hash: c.hash,
+      subject: c.subject,
+      message: c.hash === hash ? msg : undefined,
+    }));
+    await this.interactiveRebase(base, todos, { autostash: true });
+  }
+
   async interactiveRebase(
     base: string,
-    todos: Array<{ action: string; hash: string; subject: string; message?: string }>
+    todos: Array<{ action: string; hash: string; subject: string; message?: string }>,
+    opts?: { autostash?: boolean }
   ): Promise<void> {
     this.assertSafeRef(base, 'rebase -i');
     // Validate inputs to prevent injection
@@ -1613,7 +1655,8 @@ export class GitService {
       // that cmd.exe / sh expansion handles repo paths containing &, |, (, ),
       // ^, etc. safely without manual escaping.
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn(getGitBinaryPath(), ['rebase', '-i', base], {
+        const rebaseArgs = ['rebase', '-i', ...(opts?.autostash ? ['--autostash'] : []), base];
+        const proc = spawn(getGitBinaryPath(), rebaseArgs, {
           cwd: this.repoPath,
           env: {
             ...process.env,

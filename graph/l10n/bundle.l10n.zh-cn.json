@@ -10,6 +10,7 @@
   "pushFailed": "推送失败：{0}",
   "checkedOut": "已检出 {0}",
   "commitAmended": "已修正上一次提交",
+  "commitReworded": "已更新提交讯息",
   "commitAmendedAndPushed": "已修正上一次提交并完成 push",
   "pushAfterAmendFailed": "修正成功，但后续 push 失败：{0}",
   "checkoutFailed": "检出失败：{0}",

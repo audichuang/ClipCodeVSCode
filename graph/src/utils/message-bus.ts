@@ -69,6 +69,7 @@ export type WebviewMessage =
   | { type: 'openFile'; payload: { file: string } }
   | { type: 'openScmView'; payload?: { returnFocus?: boolean } }
   | { type: 'amendCommit'; payload: { message?: string; keepMessage?: boolean; resetDate?: boolean; resetAuthor?: boolean; only?: boolean; pushAfter?: boolean } }
+  | { type: 'rewordCommit'; payload: { hash: string; message: string } }
   | { type: 'stashDrop'; payload: { index: number } }
   | { type: 'stashRename'; payload: { index: number; message: string } }
   | { type: 'worktreeAdd'; payload: { path: string; branch?: string; newBranch?: string } }

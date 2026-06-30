@@ -727,6 +727,54 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
     });
   });
 
+  describe('rewordCommit', () => {
+    it('rewords HEAD via amend without touching descendants or staged changes', async () => {
+      commit(repo.path, 'init');
+      commit(repo.path, 'old head subject', { 'a.txt': 'A\n' });
+      const headBefore = head(repo.path);
+
+      await svc.rewordCommit(headBefore, 'new head subject');
+
+      expect(runGit(repo.path, ['log', '-1', '--format=%s']).trim()).toBe('new head subject');
+      // amend keeps the tree, so a.txt is unchanged.
+      expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('A\n');
+    });
+
+    it('rewords an older commit and keeps later commits intact', async () => {
+      commit(repo.path, 'init');
+      const target = commit(repo.path, 'old middle subject', { 'a.txt': 'A\n' });
+      commit(repo.path, 'newer subject', { 'b.txt': 'B\n' });
+
+      await svc.rewordCommit(target, 'reworded middle subject');
+
+      const subjects = runGit(repo.path, ['log', '--format=%s']).trim().split('\n');
+      expect(subjects[0]).toBe('newer subject');     // descendant preserved
+      expect(subjects[1]).toBe('reworded middle subject');
+      // The later commit's file is still present (history replayed, not lost).
+      expect(existsSync(join(repo.path, 'b.txt'))).toBe(true);
+    });
+
+    it('rewords an older commit even with a dirty working tree (autostash)', async () => {
+      commit(repo.path, 'init');
+      const target = commit(repo.path, 'old subject', { 'a.txt': 'A\n' });
+      commit(repo.path, 'newer', { 'b.txt': 'B\n' });
+      // Uncommitted change present — a plain rebase would refuse; autostash saves it.
+      writeFile(repo.path, 'dirty.txt', 'work in progress\n');
+
+      await svc.rewordCommit(target, 'reworded with dirty tree');
+
+      expect(runGit(repo.path, ['log', '--format=%s']).trim().split('\n')[1]).toBe('reworded with dirty tree');
+      // The uncommitted change is restored after the rebase.
+      expect(readFileSync(join(repo.path, 'dirty.txt'), 'utf8')).toBe('work in progress\n');
+    });
+
+    it('rejects rewording the root commit', async () => {
+      const root = commit(repo.path, 'root');
+      commit(repo.path, 'second', { 'a.txt': 'A\n' });
+      await expect(svc.rewordCommit(root, 'new root')).rejects.toThrow(/root commit/i);
+    });
+  });
+
   describe('getRebaseCommits', () => {
     it('lists commits that would be rebased onto base', async () => {
       commit(repo.path, 'init');
