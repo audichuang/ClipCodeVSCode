@@ -76,6 +76,7 @@ test('oversize file is skipped with reason', async () => {
   });
   assert.equal(r.skippedFileSizeCount, 1);
   assert.match(r.text, /File skipped: size exceeds limit/);
+  assert.deepEqual(r.skippedFiles, [{ path: 'b.ts', bytes: 2 * 1024 }]);
 });
 
 test('binary/unreadable (undefined content) is skipped silently', async () => {

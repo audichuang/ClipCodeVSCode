@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.18
+
+- **Copy notification can list the skipped files.** When "Copy Full Source" skips
+  files for exceeding the size limit, the toast now has a "Show skipped" button
+  that lists each skipped file and its size, instead of only showing a count.
+
 ## 0.3.17
 
 - **Fix: "No source copied" on SSH-remote (and other non-PATH git) setups.** Copy
