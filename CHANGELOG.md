@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.3.18
+## 0.3.19
 
 - **Copy notification can list the skipped files.** When "Copy Full Source" skips
   files for exceeding the size limit, the toast now has a "Show skipped" button
   that lists each skipped file and its size, instead of only showing a count.
+  (The notification is shown fire-and-forget so the copy never blocks on it.)
 
 ## 0.3.17
 
