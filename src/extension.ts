@@ -159,7 +159,19 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${skipped}.${limit}`);
+    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
+    // Offer the actual skipped paths/sizes behind a button so the toast stays short.
+    const actions = result.skippedFiles.length > 0 ? ['Show skipped'] : [];
+    const picked = await vscode.window.showInformationMessage(message, ...actions);
+    if (picked === 'Show skipped') {
+      const list = result.skippedFiles
+        .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
+        .join('\n');
+      vscode.window.showInformationMessage(
+        `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
+        { modal: true, detail: list }
+      );
+    }
   }
 }
 

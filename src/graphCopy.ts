@@ -51,6 +51,9 @@ export interface GraphCopyResult {
   text: string;
   copiedFileCount: number;
   skippedFileSizeCount: number;
+  // The files dropped for exceeding maxFileSizeKB, so the caller can list them
+  // instead of only showing a count.
+  skippedFiles: Array<{ path: string; bytes: number }>;
   fileLimitReached: boolean;
   missingRepoCount: number;
 }
@@ -161,6 +164,7 @@ export async function buildGraphCopyPayload(
 ): Promise<GraphCopyResult> {
   const { settings } = deps;
   const files: PayloadFile[] = [];
+  const skippedFiles: Array<{ path: string; bytes: number }> = [];
   let copiedFileCount = 0;
   let skippedFileSizeCount = 0;
   let missingRepoCount = 0;
@@ -198,6 +202,7 @@ export async function buildGraphCopyPayload(
     const size = Buffer.byteLength(content, 'utf8');
     if (size > settings.maxFileSizeKB * 1024) {
       skippedFileSizeCount++;
+      skippedFiles.push({ path: file.clipboardPath, bytes: size });
       files.push({ path: file.clipboardPath, changeType: file.changeType, skippedReason: `size exceeds limit (${size} bytes)` });
       continue;
     }
@@ -218,5 +223,5 @@ export async function buildGraphCopyPayload(
     sourceRoot: singleRepoRoot(payload.files)
   });
 
-  return { text, copiedFileCount, skippedFileSizeCount, fileLimitReached, missingRepoCount };
+  return { text, copiedFileCount, skippedFileSizeCount, skippedFiles, fileLimitReached, missingRepoCount };
 }
