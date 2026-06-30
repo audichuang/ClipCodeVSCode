@@ -1,4 +1,5 @@
 node_modules/**
+.codegraph/**
 src/**
 test/**
 test-e2e/**

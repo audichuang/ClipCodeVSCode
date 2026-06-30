@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { readFile, access } from 'fs/promises';
 import { GitService, GitError } from '../git/git-service';
+import { getGitBinaryPath } from '../git/git-binary';
 import { formatGitError, isAuthFailure, transportFromRemoteUrl } from '../git/git-error-formatter';
 import { splitUpstreamRef } from '../git/git-parser';
 import { samePath } from '../utils/path';
@@ -47,7 +48,13 @@ export class MainPanel {
   // Mirrors src/graphCopy.ts GraphCopyPayload (redeclared inline to keep the
   // vendored tree from importing host code; Task 3 finalizes the field types).
   public static copyFullSourceAtCommit:
-    | ((payload: { hash: string; files: unknown[] }) => Promise<void>)
+    | ((
+        payload: { hash: string; files: unknown[] },
+        // The graph's resolved git binary + env, so the host copy reads with the
+        // SAME git the diff used (bare 'git' / a bare env can be unspawnable on
+        // SSH-remote hosts → "No source copied" even though the files exist).
+        runtime?: { gitPath?: string; gitEnv?: Record<string, string> },
+      ) => Promise<void>)
     | undefined = undefined;
   /* SNIPCODE-HOOK end */
 
@@ -1584,7 +1591,10 @@ export class MainPanel {
            MainPanel.copyFullSourceAtCommit by activateGraph; its body lives in
            src/graphCopy.ts (wired by host src/extension.ts). */
         case 'snipcodeCopyFullSource': {
-          await MainPanel.copyFullSourceAtCommit?.(message.payload);
+          await MainPanel.copyFullSourceAtCommit?.(message.payload, {
+            gitPath: getGitBinaryPath(),
+            gitEnv: MainPanel.extraEnv,
+          });
           return;
         }
         /* SNIPCODE-HOOK end */

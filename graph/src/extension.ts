@@ -47,7 +47,10 @@ export function activateGraph(
     assetRootUri: vscode.Uri;
     // Mirrors src/graphCopy.ts GraphCopyPayload (inline so vendored stays
     // host-import-free; Task 3 tightens the payload field types).
-    copyFullSourceAtCommit: (payload: { hash: string; files: unknown[] }) => Promise<void>;
+    copyFullSourceAtCommit: (
+      payload: { hash: string; files: unknown[] },
+      runtime?: { gitPath?: string; gitEnv?: Record<string, string> },
+    ) => Promise<void>;
   },
 ): void {
   MainPanel.assetRootUri = opts.assetRootUri;

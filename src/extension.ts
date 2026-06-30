@@ -93,14 +93,18 @@ function readCommittedBatch(
   gitPath: string,
   repoRoot: string,
   hash: string,
-  relativePaths: string[]
+  relativePaths: string[],
+  gitEnv?: Record<string, string>
 ): Promise<Map<string, string | undefined>> {
   return new Promise(resolve => {
     if (relativePaths.length === 0) { resolve(new Map()); return; }
     let settled = false;
     const done = (v: Map<string, string | undefined>) => { if (!settled) { settled = true; resolve(v); } };
     try {
-      const child = spawn(gitPath, ['-C', repoRoot, 'cat-file', '--batch'], { stdio: ['pipe', 'pipe', 'ignore'] });
+      // Mirror the graph's git env so the binary spawns identically (LC_ALL=C
+      // keeps output byte-stable; gitEnv carries any host-specific git config).
+      const env = { ...process.env, ...gitEnv, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+      const child = spawn(gitPath, ['-C', repoRoot, 'cat-file', '--batch'], { stdio: ['pipe', 'pipe', 'ignore'], env });
       const chunks: Buffer[] = [];
       child.on('error', () => done(new Map()));
       child.stdout.on('data', (d: Buffer) => chunks.push(d));
@@ -114,8 +118,11 @@ function readCommittedBatch(
   });
 }
 
-function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDeps {
-  const gitPath = api.git?.path ?? 'git';
+function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runtime?: CopyRuntime): GraphCopyDeps {
+  // Prefer the graph's resolved binary (validated git.path / VS Code Git's path)
+  // over a bare 'git' that may not be on the extension-host PATH.
+  const gitPath = runtime?.gitPath ?? api.git?.path ?? 'git';
+  const gitEnv = runtime?.gitEnv;
   return {
     resolveRepo(repoRootFsPath: string): ContentRepo | undefined {
       const target = normalizeFsPath(repoRootFsPath);
@@ -126,19 +133,24 @@ function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings): GraphCopyDe
     // Working-tree read for the UNCOMMITTED view (no commit to `git show`).
     readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
     readBatch: (repoRootFsPath, hash, relativePaths) =>
-      readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths),
+      readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths, gitEnv),
     settings,
   };
 }
 
-async function copyFullSourceAtCommit(payload: GraphCopyPayload): Promise<void> {
+// The graph passes the git binary + env it actually uses for its own (working)
+// git calls. Reading committed blobs with that same git is what makes the copy
+// succeed on SSH-remote hosts where bare 'git' isn't on the spawn PATH.
+interface CopyRuntime { gitPath?: string; gitEnv?: Record<string, string>; }
+
+async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyRuntime): Promise<void> {
   const api = await getGitApi();
   if (!api || api.repositories.length === 0) {
     vscode.window.showWarningMessage('No Git repositories found.');
     return;
   }
   const settings = readSettings();
-  const result = await buildGraphCopyPayload(makeGraphCopyDeps(api, settings), payload);
+  const result = await buildGraphCopyPayload(makeGraphCopyDeps(api, settings, runtime), payload);
   if (result.copiedFileCount === 0 && result.skippedFileSizeCount === 0) {
     vscode.window.showWarningMessage('No source copied.');
     return;
