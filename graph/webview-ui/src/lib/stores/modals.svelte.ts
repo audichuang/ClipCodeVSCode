@@ -75,6 +75,12 @@ class ModalStore {
   openAmend(p: { hash: string; subject: string; message: string; isPushed: boolean }) { this.amend = { show: true, ...p }; }
   closeAmend() { this.amend = { show: false, hash: '', subject: '', message: '', isPushed: false }; }
 
+  // Reword: edit any commit's message. isHead → fast amend; otherwise a rebase
+  // rewrites history (isPushed warns that a force-push will be needed).
+  reword = $state<{ show: boolean; hash: string; message: string; isHead: boolean; isPushed: boolean }>({ show: false, hash: '', message: '', isHead: false, isPushed: false });
+  openReword(p: { hash: string; message: string; isHead: boolean; isPushed: boolean }) { this.reword = { show: true, ...p }; }
+  closeReword() { this.reword = { show: false, hash: '', message: '', isHead: false, isPushed: false }; }
+
   // ── Set Upstream ──
   setUpstream = $state({ show: false, branchName: '', currentUpstream: '' });
   openSetUpstream(branchName: string, currentUpstream?: string) { this.setUpstream = { show: true, branchName, currentUpstream: currentUpstream ?? '' }; }
@@ -123,7 +129,7 @@ class ModalStore {
   private static readonly MODAL_KEYS = [
     'deleteBranch', 'deleteTag', 'createBranch', 'createTag', 'merge', 'checkoutRemote',
     'renameBranch', 'deleteRemoteBranch', 'removeWorktree', 'stashApply', 'stashRename',
-    'stashSave', 'stashRestore', 'amend', 'setUpstream', 'fetch', 'pull', 'push',
+    'stashSave', 'stashRestore', 'amend', 'reword', 'setUpstream', 'fetch', 'pull', 'push',
     'flowInit', 'flowStart', 'flowFinish', 'pushTag',
   ] as const;
 
@@ -156,6 +162,7 @@ class ModalStore {
       stashRename: () => this.closeStashRename(),
       stashSave: () => this.closeStashSave(),
       amendCommit: () => this.closeAmend(),
+      rewordCommit: () => this.closeReword(),
       setUpstream: () => this.closeSetUpstream(),
       fetch: () => this.closeFetch(),
       pull: () => this.closePull(),
@@ -190,6 +197,7 @@ class ModalStore {
     this.closeStashSave();
     this.closeStashRestore();
     this.closeAmend();
+    this.closeReword();
     this.closeSetUpstream();
     this.closeFetch();
     this.closePull();

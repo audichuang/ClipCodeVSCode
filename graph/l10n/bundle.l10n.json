@@ -10,6 +10,7 @@
   "pushFailed": "Push failed: {0}",
   "checkedOut": "Checked out {0}",
   "commitAmended": "Last commit amended",
+  "commitReworded": "Commit message updated",
   "commitAmendedAndPushed": "Last commit amended and pushed",
   "pushAfterAmendFailed": "Amend succeeded, but the follow-up push failed: {0}",
   "checkoutFailed": "Checkout failed: {0}",

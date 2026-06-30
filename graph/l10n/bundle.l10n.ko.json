@@ -10,6 +10,7 @@
   "pushFailed": "Push 실패: {0}",
   "checkedOut": "{0}(으)로 checkout 완료",
   "commitAmended": "마지막 커밋을 amend 했습니다",
+  "commitReworded": "커밋 메시지를 수정했습니다",
   "commitAmendedAndPushed": "마지막 커밋을 amend 후 push 했습니다",
   "pushAfterAmendFailed": "Amend는 성공했지만 이후 push에 실패했습니다: {0}",
   "checkoutFailed": "Checkout 실패: {0}",

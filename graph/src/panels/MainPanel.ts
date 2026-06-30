@@ -829,6 +829,16 @@ export class MainPanel {
           await this.refreshAll();
           break;
         }
+        case 'rewordCommit': {
+          await this.gitService.rewordCommit(message.payload.hash, message.payload.message);
+          this.post({
+            type: 'operationComplete',
+            payload: { operation: 'rewordCommit', success: true },
+          });
+          vscode.window.showInformationMessage(vscode.l10n.t('commitReworded'));
+          await this.refreshAll();
+          break;
+        }
         case 'fetch': {
           await this.gitService.fetch(message.payload.remote, { prune: message.payload.prune });
           this.post({
