@@ -50,7 +50,9 @@ describe('PrView — default base selection', () => {
     ];
     render(PrView);
     const req = lastMessageOf('getCommitsBetween');
-    expect(req?.payload).toEqual({ base: 'origin/feat', head: 'HEAD', requestId: currentRequestId() });
+    // head now defaults to the current branch's own name (selectable/swappable),
+    // not a hardcoded 'HEAD'.
+    expect(req?.payload).toEqual({ base: 'origin/feat', head: 'feat', requestId: currentRequestId() });
   });
 
   it('falls back to origin/main when the current branch has no upstream', () => {
@@ -60,7 +62,7 @@ describe('PrView — default base selection', () => {
     ];
     render(PrView);
     const req = lastMessageOf('getCommitsBetween');
-    expect(req?.payload).toEqual({ base: 'origin/main', head: 'HEAD', requestId: currentRequestId() });
+    expect(req?.payload).toEqual({ base: 'origin/main', head: 'feat', requestId: currentRequestId() });
   });
 
   it('ignores an upstream marked gone and falls back', () => {
@@ -70,7 +72,15 @@ describe('PrView — default base selection', () => {
     ];
     render(PrView);
     const req = lastMessageOf('getCommitsBetween');
-    expect(req?.payload).toEqual({ base: 'origin/main', head: 'HEAD', requestId: currentRequestId() });
+    expect(req?.payload).toEqual({ base: 'origin/main', head: 'feat', requestId: currentRequestId() });
+  });
+
+  it('does not request getCommitsBetween until a head is available (no current branch marked)', () => {
+    branchStore.branches = [branch({ name: 'origin/main', remote: 'origin' })];
+    const { container } = render(PrView);
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    expect(pills[1].textContent).toContain('HEAD');
   });
 });
 
@@ -120,7 +130,7 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     });
     await fireEvent.click(row);
     const req = lastMessageOf('openDiff');
-    expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: 'src/old.ts', ref1: 'mb', ref2: 'HEAD' });
+    expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: 'src/old.ts', ref1: 'mb', ref2: 'feat' });
   });
 
   it('ignores a commitsBetween response whose requestId no longer matches (Important 2)', async () => {
@@ -194,7 +204,7 @@ describe('PrView — Copy Full Source', () => {
     await fireEvent.click(btn);
     const req = lastMessageOf('snipcodeCopyFullSource');
     expect(req?.payload).toEqual({
-      hash: 'HEAD',
+      hash: 'feat',
       files: [
         { repoRootFsPath: '/repo', relativePath: 'src/a.ts', oldRelativePath: undefined, status: 'M' },
         { repoRootFsPath: '/repo', relativePath: 'src/old.ts', oldRelativePath: 'src/older.ts', status: 'R' },
@@ -262,7 +272,102 @@ describe('PrView — repo switch resets PR state (Important 2 + repo-switch race
       branch({ name: 'origin/dev', remote: 'origin' }),
     ];
     await waitFor(() => {
-      expect(lastMessageOf('getCommitsBetween')?.payload.base).toBe('origin/dev');
+      // head resets on repo switch too and is re-picked from the NEW repo's
+      // current branch ('dev'), never carried over from the old repo ('feat').
+      expect(lastMessageOf('getCommitsBetween')?.payload).toEqual({
+        base: 'origin/dev', head: 'dev', requestId: currentRequestId(),
+      });
     });
+  });
+});
+
+describe('PrView — head selectable + swap', () => {
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+      branch({ name: 'dev' }),
+    ];
+    return render(PrView);
+  }
+
+  function openHeadDropdown(container: HTMLElement) {
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    return fireEvent.click(pills[1]);
+  }
+
+  function findDropdownItem(container: HTMLElement, name: string) {
+    return waitFor(() => {
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.repo-dropdown-item'))
+        .find((b) => b.textContent?.includes(name));
+      expect(btn).toBeDefined();
+      return btn!;
+    });
+  }
+
+  it('selecting a different head re-requests getCommitsBetween with the new head, same base', async () => {
+    const { container } = setup();
+    globalThis.__postedMessages = [];
+    await openHeadDropdown(container);
+    const devBtn = await findDropdownItem(container, 'dev');
+    await fireEvent.click(devBtn);
+    await waitFor(() => {
+      const req = lastMessageOf('getCommitsBetween');
+      expect(req?.payload).toEqual({ base: 'origin/main', head: 'dev', requestId: currentRequestId() });
+    });
+  });
+
+  it('swap exchanges base and head and re-requests getCommitsBetween with them swapped', async () => {
+    const { container } = setup();
+    globalThis.__postedMessages = [];
+    const swapBtn = container.querySelector<HTMLButtonElement>('.pr-swap-btn');
+    expect(swapBtn).toBeTruthy();
+    await fireEvent.click(swapBtn!);
+    await waitFor(() => {
+      const req = lastMessageOf('getCommitsBetween');
+      expect(req?.payload).toEqual({ base: 'feat', head: 'origin/main', requestId: currentRequestId() });
+    });
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    expect(pills[0].textContent).toContain('feat');
+    expect(pills[1].textContent).toContain('origin/main');
+  });
+
+  it('copyAll sends the selected head, not a hardcoded HEAD', async () => {
+    const { container } = setup();
+    await openHeadDropdown(container);
+    const devBtn = await findDropdownItem(container, 'dev');
+    await fireEvent.click(devBtn);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/b.ts', status: 'M' }],
+    });
+    const btn = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.pr-copy-btn');
+      expect(b?.disabled).toBe(false);
+      return b!;
+    });
+    await fireEvent.click(btn);
+    const req = lastMessageOf('snipcodeCopyFullSource');
+    expect(req?.payload.hash).toBe('dev');
+  });
+
+  it('openFile sends the selected head as ref2', async () => {
+    const { container } = setup();
+    await openHeadDropdown(container);
+    const devBtn = await findDropdownItem(container, 'dev');
+    await fireEvent.click(devBtn);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/new.ts', status: 'M' }],
+    });
+    const row = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('src/new.ts'));
+      expect(btn).toBeDefined();
+      return btn!;
+    });
+    await fireEvent.click(row);
+    const req = lastMessageOf('openDiff');
+    expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: undefined, ref1: 'mb', ref2: 'dev' });
   });
 });
