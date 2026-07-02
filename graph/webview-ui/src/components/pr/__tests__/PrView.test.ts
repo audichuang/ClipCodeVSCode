@@ -279,6 +279,55 @@ describe('PrView — repo switch resets PR state (Important 2 + repo-switch race
       });
     });
   });
+
+  // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — proves
+  // the pickers are inert during the awaitingBranches window: a pick made
+  // while the OLD repo's branches are still rendered must not set base/head
+  // or fire getCommitsBetween, and once the new branches land the normal
+  // default-selection flow still fires exactly one request from the NEW list.
+  it('blocks selectBase/selectHead while awaitingBranches, then picks defaults from the NEW repo once branches arrive', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }],
+    });
+    await waitFor(() => expect(container.textContent).toContain('src/a.ts'));
+
+    // Trigger the switch: activeRepo changes first, branchStore.branches is
+    // still the OLD repo's list (real host ordering — repoList before
+    // branchData) — this is the awaitingBranches window.
+    globalThis.__postedMessages = [];
+    uiStore.activeRepo = '/other-repo';
+    await waitFor(() => expect(container.textContent).toContain('Select base branch'));
+
+    // Both pickers must be disabled while awaitingBranches, and a direct call
+    // must be a no-op even if something still reaches them (e.g. a dropdown
+    // left open across the switch).
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    expect(pills[0].disabled).toBe(true);
+    expect(pills[1].disabled).toBe(true);
+    await fireEvent.click(pills[0]);
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+
+    // New repo's branches arrive as a fresh array reference — awaitingBranches
+    // clears, pickers re-enable, and defaults pick from the NEW list only.
+    branchStore.branches = [
+      branch({ name: 'dev', current: true, upstream: 'origin/dev' }),
+      branch({ name: 'origin/dev', remote: 'origin' }),
+    ];
+    await waitFor(() => {
+      expect(pills[0].disabled).toBe(false);
+      expect(lastMessageOf('getCommitsBetween')?.payload).toEqual({
+        base: 'origin/dev', head: 'dev', requestId: currentRequestId(),
+      });
+    });
+  });
 });
 
 describe('PrView — head selectable + swap', () => {
