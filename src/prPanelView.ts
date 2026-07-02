@@ -108,7 +108,7 @@ export function registerPrPanel(context: vscode.ExtensionContext): void {
     const gp = gitPath();
     const generation = ++reloadGeneration;
     currentBase = baseRef;
-    const status = await remoteStatus(gp, root, doFetch);
+    const status = await remoteStatus(gp, root, doFetch, baseRef);
     const diff = await diffNameStatus(gp, root, baseRef);
     if (generation !== reloadGeneration || currentBase !== baseRef) return;
     currentDiff = diff;

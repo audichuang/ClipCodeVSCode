@@ -25,7 +25,7 @@ export function toGraphCopyPayload(
 export function formatBanner(status: RemoteStatus): string {
   let message: string;
   if (status.behind > 0) {
-    message = `⚠ origin 有 ${status.behind} 個新 commit,建議 pull`;
+    message = `⚠ ${status.upstream ?? 'origin'} 有 ${status.behind} 個新 commit,建議 pull`;
   } else if (status.upstream) {
     message = `✓ 與 ${status.upstream} 同步(ahead ${status.ahead})`;
   } else {
