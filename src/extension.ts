@@ -11,6 +11,7 @@ import { mapInOrder } from './concurrency.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
+import { registerPrPanel } from './prPanelView.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -64,6 +65,7 @@ export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCo
     })
   );
   registerHistoryView(context);
+  registerPrPanel(context);
 
   // Vendored git-graph-plus host adapter (S5). Imported lazily so `tsc -p ./`
   // (which emits out/ for node:test of the pure-logic modules) never pulls the
@@ -118,7 +120,7 @@ function readCommittedBatch(
   });
 }
 
-function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runtime?: CopyRuntime): GraphCopyDeps {
+export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runtime?: CopyRuntime): GraphCopyDeps {
   // Prefer the graph's resolved binary (validated git.path / VS Code Git's path)
   // over a bare 'git' that may not be on the extension-host PATH.
   const gitPath = runtime?.gitPath ?? api.git?.path ?? 'git';

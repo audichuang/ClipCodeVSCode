@@ -21,6 +21,7 @@
     "onCommand:clipcode.copyGitChanges",
     "onCommand:clipcode.pasteAndRestoreFiles",
     "onView:clipcode.history",
+    "onView:clipcode.prPanel",
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
@@ -60,6 +61,30 @@
         "command": "clipcode.history.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "clipcode.pr.selectBase",
+        "title": "Snipcode PR: Select Base Branch",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "clipcode.pr.fetch",
+        "title": "Snipcode PR: Fetch",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "clipcode.pr.refresh",
+        "title": "Snipcode PR: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "clipcode.pr.copyAll",
+        "title": "Snipcode PR: Copy All Checked Files",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "clipcode.pr.copySelected",
+        "title": "Snipcode PR: Copy Selected"
       },
       {
         "command": "gitGraphPlus.open",
@@ -210,6 +235,11 @@
           "icon": "$(history)"
         },
         {
+          "id": "clipcode.prPanel",
+          "name": "Snipcode PR",
+          "icon": "$(git-pull-request)"
+        },
+        {
           "id": "gitGraphPlus.branches",
           "name": "Branches",
           "icon": "$(git-branch)",
@@ -299,6 +329,26 @@
           "group": "navigation@20"
         },
         {
+          "command": "clipcode.pr.selectBase",
+          "when": "view == clipcode.prPanel",
+          "group": "navigation@10"
+        },
+        {
+          "command": "clipcode.pr.copyAll",
+          "when": "view == clipcode.prPanel",
+          "group": "navigation@20"
+        },
+        {
+          "command": "clipcode.pr.fetch",
+          "when": "view == clipcode.prPanel",
+          "group": "navigation@30"
+        },
+        {
+          "command": "clipcode.pr.refresh",
+          "when": "view == clipcode.prPanel",
+          "group": "navigation@40"
+        },
+        {
           "command": "gitGraphPlus.open",
           "when": "view =~ /^gitGraphPlus/",
           "group": "navigation@1"
@@ -363,6 +413,11 @@
         {
           "command": "clipcode.history.copyFullSource",
           "when": "view == clipcode.history && viewItem =~ /^(commit|folder|file)$/",
+          "group": "navigation@10"
+        },
+        {
+          "command": "clipcode.pr.copySelected",
+          "when": "view == clipcode.prPanel && viewItem =~ /^(prFile|prFolder)$/",
           "group": "navigation@10"
         },
         {
