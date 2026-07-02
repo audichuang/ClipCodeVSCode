@@ -493,6 +493,80 @@ describe('GitService', () => {
     it('rejects head ref starting with -', async () => {
       await expect(service.commitsBetween('main', '-foo')).rejects.toThrow("must not start with '-'");
     });
+
+    it('returns a rename/encoding-correct file list from -M -z --name-status against mergeBase..head', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff') {
+          // Must be a rename-detecting, NUL-delimited, mergeBase..head diff.
+          expect(args).toEqual(['diff', '-M', '-z', '--name-status', 'base123', 'feature']);
+          return 'M\0a.ts\0R100\0old.ts\0new.ts\0';
+        }
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.files).toEqual([
+        { path: 'a.ts', status: 'M' },
+        { path: 'new.ts', status: 'R', oldPath: 'old.ts' },
+      ]);
+    });
+
+    it('falls back to base (not mergeBase) for the file diff when there is no common ancestor', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') throw new GitError('fatal: no merge base', 1, args);
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff') {
+          expect(args).toEqual(['diff', '-M', '-z', '--name-status', 'main', 'unrelated']);
+          return '';
+        }
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'unrelated');
+      expect(result.files).toEqual([]);
+    });
+
+    it('degrades files to [] when the diff command fails', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff') throw new GitError('fatal: bad revision', 128, args);
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.files).toEqual([]);
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (Important 1) — parseNameStatusZ NUL-rename parser */
+  describe('parseNameStatusZ (private) — NUL-delimited rename-aware parser', () => {
+    it('parses normal and rename/copy records, exposing oldPath for renames/copies', () => {
+      const raw = 'M\0src/foo.ts\0R100\0old.ts\0new.ts\0C50\0lib/a.ts\0lib/b.ts\0D\0gone.ts\0';
+      const result = (service as any).parseNameStatusZ(raw);
+      expect(result).toEqual([
+        { path: 'src/foo.ts', status: 'M' },
+        { path: 'new.ts', status: 'R', oldPath: 'old.ts' },
+        { path: 'lib/b.ts', status: 'C', oldPath: 'lib/a.ts' },
+        { path: 'gone.ts', status: 'D' },
+      ]);
+    });
+
+    it('preserves paths containing tabs/newlines that would corrupt the tab/newline parser', () => {
+      const raw = 'M\0weird\tname\nwith\nnewlines.ts\0';
+      const result = (service as any).parseNameStatusZ(raw);
+      expect(result).toEqual([{ path: 'weird\tname\nwith\nnewlines.ts', status: 'M' }]);
+    });
+
+    it('returns an empty array for empty input', () => {
+      expect((service as any).parseNameStatusZ('')).toEqual([]);
+    });
   });
   /* SNIPCODE-HOOK end */
 

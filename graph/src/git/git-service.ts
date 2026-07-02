@@ -1720,6 +1720,7 @@ export class GitService {
     mergeBase: string | null;
     ahead: number;
     behind: number;
+    files: Array<{ path: string; status: string; oldPath?: string }>;
   }> {
     this.assertSafeRef(base, 'commitsBetween');
     this.assertSafeRef(head, 'commitsBetween');
@@ -1755,7 +1756,52 @@ export class GitService {
       this.warn(`commitsBetween: rev-list failed: ${err instanceof Error ? err.message : err}`);
     }
 
-    return { commits, mergeBase, ahead, behind };
+    /* SNIPCODE-HOOK start: PR tab (Important 1) — rename/encoding-correct file list.
+       The generic diffFiles()/parseNameStatus() path (`git diff --name-status`,
+       no `-M`, no `-z`) turns renames into delete+add pairs and corrupts any
+       path containing a tab, newline, or non-ASCII byte once core.quotePath
+       kicks in. `-M -z --name-status <mergeBase ?? base> HEAD` forces rename
+       detection and NUL-delimited records instead — parsed by parseNameStatusZ
+       below, ported from the deleted src/branchDiff.ts parseNameStatus (the
+       pre-G2 SCM PR panel already solved this exact problem). Falls back to
+       `base` itself when there's no merge-base, matching the mergeBase-or-base
+       fallback the webview already uses for its Files diff. */
+    let files: Array<{ path: string; status: string; oldPath?: string }> = [];
+    try {
+      const diffBase = mergeBase ?? base;
+      const raw = await this.exec(['diff', '-M', '-z', '--name-status', diffBase, head], { silent: true });
+      files = this.parseNameStatusZ(raw);
+    } catch (err) {
+      this.warn(`commitsBetween: diff failed: ${err instanceof Error ? err.message : err}`);
+    }
+
+    return { commits, mergeBase, ahead, behind, files };
+  }
+
+  /** NUL-delimited `--name-status -z` parser: a normal record is
+   *  `<status>\0<path>\0`; rename/copy (status starts with R/C, carries a
+   *  similarity suffix like `R100`) is `<status>\0<oldpath>\0<newpath>\0`.
+   *  Unlike the tab/newline parseNameStatus() above, this never misreads a
+   *  path that itself contains a tab or newline, and pairs correctly with
+   *  `-M` rename detection. Ported from the deleted src/branchDiff.ts. */
+  private parseNameStatusZ(raw: string): Array<{ path: string; status: string; oldPath?: string }> {
+    const fields = raw.split('\0');
+    const files: Array<{ path: string; status: string; oldPath?: string }> = [];
+    let i = 0;
+    while (i < fields.length) {
+      const statusToken = fields[i++];
+      if (!statusToken) continue; // trailing empty field from the final \0
+      const status = statusToken[0];
+      if (status === 'R' || status === 'C') {
+        const oldPath = fields[i++];
+        const path = fields[i++];
+        files.push({ path, status, oldPath });
+      } else {
+        const path = fields[i++];
+        files.push({ path, status });
+      }
+    }
+    return files;
   }
   /* SNIPCODE-HOOK end */
 

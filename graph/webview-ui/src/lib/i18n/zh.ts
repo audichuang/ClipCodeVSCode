@@ -16,7 +16,9 @@ export const zh: Record<string, string> = {
   'toolbar.noRemotes': '未配置远程仓库。请先添加一个远程仓库。',
   'toolbar.addRemote': '添加远程仓库',
   'toolbar.detachedHead': '（分离头指针）',
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   'toolbar.pr': 'PR',
+  /* SNIPCODE-HOOK end */
 
   // Push modal
   'push.title': '推送',
@@ -674,6 +676,7 @@ export const zh: Record<string, string> = {
   'setUpstream.typeManually': '手动输入',
   'setUpstream.selectFromList': '从列表选择',
 
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   // PR tab (Task G3)
   'pr.selectBase': '选择基础分支',
   'pr.filesTab': '文件',
@@ -682,4 +685,5 @@ export const zh: Record<string, string> = {
   'pr.noCommits': '没有提交',
   'pr.behindWarning': '落后 {base} {count} 个提交',
   'pr.aheadInfo': '领先 {base} {count} 个提交',
+  /* SNIPCODE-HOOK end */
 };

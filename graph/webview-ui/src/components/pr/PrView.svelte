@@ -1,8 +1,9 @@
 <!-- SNIPCODE-HOOK: PR tab (Task G3) — this entire file is new, added for the PR tab.
-     Base-ref dropdown -> host `getCommitsBetween` (commits + merge-base + ahead/behind)
-     -> `compareCommits(mergeBase ?? base, 'HEAD')` for the three-dot Files diff ->
-     Copy Full Source via the existing `snipcodeCopyFullSource` channel. Kept as its
-     own component (not wired into CommitGraph/CommitDetails) per plan constraints. -->
+     Base-ref dropdown -> host `getCommitsBetween` (commits + merge-base + ahead/behind
+     + the rename/encoding-correct `-M -z --name-status` file list, all in one round-trip) ->
+     Copy Full Source via the existing `snipcodeCopyFullSource` channel. Per-file diffs open
+     via `openDiff` (ref1/ref2, with oldPath for renames). Kept as its own component (not
+     wired into CommitGraph/CommitDetails) per plan constraints. -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getVsCodeApi } from '../../lib/vscode-api';
@@ -42,6 +43,15 @@
   // produced it rather than reading uiStore.activeRepo at click time).
   let filesRepoRoot = $state('');
 
+  /* SNIPCODE-HOOK start: PR tab (Important 2) — stale-response guard.
+     `requestId` (a monotonic counter as a string) is echoed by MainPanel in
+     the `commitsBetween` response; a response whose requestId doesn't match
+     the in-flight request is from a base/repo the user has since navigated
+     away from and must not overwrite the current selection. */
+  let requestSeq = 0;
+  let currentRequestId: string | null = null;
+  /* SNIPCODE-HOOK end */
+
   // Default base: current branch's upstream, else a remote branch literally
   // named "origin/main", else the first remote branch, else null (dropdown
   // stays unselected — no remotes configured).
@@ -54,13 +64,20 @@
   }
 
   function loadCommits(newBase: string) {
+    /* SNIPCODE-HOOK start: PR tab (Important 2) — tag this request so a late
+       response for a base we've since left can be told apart from the one
+       that's still current. */
+    const reqId = String(++requestSeq);
+    currentRequestId = reqId;
+    /* SNIPCODE-HOOK end */
     loadingCommits = true;
+    loadingFiles = true;
     commits = [];
     mergeBase = null;
     ahead = 0;
     behind = 0;
     files = [];
-    vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: 'HEAD' } });
+    vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: 'HEAD', requestId: reqId } });
   }
 
   function selectBase(b: string) {
@@ -79,10 +96,34 @@
     }
   });
 
+  /* SNIPCODE-HOOK start: PR tab (Important 2) — reset all PR state when the
+     active repo changes. Without this, a repo switch while the PR tab is open
+     leaves the previous repo's base/commits/files/banner on screen (and lets
+     an in-flight response for the old repo land on the new one, since
+     `currentRequestId` is invalidated below but `base` alone wouldn't be). */
+  let lastActiveRepo = uiStore.activeRepo;
+  $effect(() => {
+    if (uiStore.activeRepo !== lastActiveRepo) {
+      lastActiveRepo = uiStore.activeRepo;
+      currentRequestId = null;
+      base = null;
+      commits = [];
+      files = [];
+      mergeBase = null;
+      ahead = 0;
+      behind = 0;
+      loadingCommits = false;
+      loadingFiles = false;
+    }
+  });
+  /* SNIPCODE-HOOK end */
+
   function openFile(file: PrFile) {
     vscode.postMessage({
       type: 'openDiff',
-      payload: { file: file.path, ref1: mergeBase ?? base ?? undefined, ref2: 'HEAD' },
+      // SNIPCODE-HOOK: PR tab (Important 3) — carry oldPath so a rename's
+      // diff resolves its base (left) side from the old name.
+      payload: { file: file.path, oldPath: file.oldPath, ref1: mergeBase ?? base ?? undefined, ref2: 'HEAD' },
     });
   }
 
@@ -138,28 +179,36 @@
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
       if (msg.type === 'commitsBetween') {
-        // Discard a response for a base the user has since navigated away from.
-        if (msg.payload.base !== base) return;
+        /* SNIPCODE-HOOK start: PR tab (Important 1 & 2)
+           Important 2: discard a response for a request we've since moved on
+           from (base switch, repo switch, or just a slow git call racing a
+           fast re-click) — requestId is the authoritative check; the base
+           comparison is defense in depth for older hosts/tests that omit it.
+           Important 1: `files` now comes straight from commitsBetween's own
+           `-M -z --name-status` diff (rename/encoding-correct), not a
+           separate compareCommits()/diffFiles() round-trip — that path had no
+           rename detection and split every rename into a delete+add. */
+        if (msg.payload.requestId !== currentRequestId || msg.payload.base !== base) return;
         commits = msg.payload.commits;
         mergeBase = msg.payload.mergeBase;
         ahead = msg.payload.ahead;
         behind = msg.payload.behind;
-        loadingCommits = false;
-        loadingFiles = true;
-        vscode.postMessage({
-          type: 'compareCommits',
-          payload: { ref1: mergeBase ?? base, ref2: 'HEAD' },
-        });
-      }
-      // compareCommits always responds on the shared commitDiffData channel
-      // with hash: '' (see MainPanel.ts). CommitDetails (the only other
-      // listener) is unmounted while the PR tab is active, so there is no
-      // cross-talk between the two consumers of this channel.
-      if (msg.type === 'commitDiffData' && msg.payload.hash === '') {
-        files = msg.payload.files;
+        files = msg.payload.files ?? [];
         filesRepoRoot = uiStore.activeRepo;
+        loadingCommits = false;
+        loadingFiles = false;
+        /* SNIPCODE-HOOK end */
+      }
+      /* SNIPCODE-HOOK start: Minor 1 — a host error while a getCommitsBetween
+         request is in flight (e.g. an invalid ref thrown before MainPanel's
+         git-service call even starts) never sends a `commitsBetween` reply,
+         which otherwise left the Files tab spinning forever. `source` is set
+         by MainPanel's catch-all to the message type that failed. */
+      if (msg.type === 'error' && msg.payload?.source === 'getCommitsBetween') {
+        loadingCommits = false;
         loadingFiles = false;
       }
+      /* SNIPCODE-HOOK end */
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
@@ -226,7 +275,11 @@
 
   <div class="pr-content">
     {#if subTab === 'files'}
-      {#if loadingFiles}
+      <!-- SNIPCODE-HOOK: Minor 1 — files come from the same commitsBetween
+           response as commits, so a commit list still loading means the
+           Files tab isn't ready either; without loadingCommits here this
+           briefly rendered "No changed files" before commits arrived. -->
+      {#if loadingCommits || loadingFiles}
         <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
       {:else if files.length === 0}
         <div class="pr-empty">{t('pr.noFiles')}</div>
