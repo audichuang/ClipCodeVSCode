@@ -28,6 +28,12 @@
 
   let base = $state<string | null>(null);
   let showBaseDropdown = $state(false);
+  /* SNIPCODE-HOOK start: PR tab two-sided compare — head is now selectable
+     (was hardcoded 'HEAD' everywhere) so the compare header matches GitHub's
+     base...head picker, with a swap button to flip the two. */
+  let head = $state<string | null>(null);
+  let showHeadDropdown = $state(false);
+  /* SNIPCODE-HOOK end */
   let subTab = $state<'files' | 'commits'>('files');
 
   let commits = $state<PrCommit[]>([]);
@@ -63,7 +69,7 @@
     return branchStore.remoteBranches[0]?.name ?? null;
   }
 
-  function loadCommits(newBase: string) {
+  function loadCommits(newBase: string, newHead: string) {
     /* SNIPCODE-HOOK start: PR tab (Important 2) — tag this request so a late
        response for a base we've since left can be told apart from the one
        that's still current. */
@@ -77,15 +83,41 @@
     ahead = 0;
     behind = 0;
     files = [];
-    vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: 'HEAD', requestId: reqId } });
+    vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
 
   function selectBase(b: string) {
     if (base === b) return;
     base = b;
     showBaseDropdown = false;
-    loadCommits(b);
+    /* SNIPCODE-HOOK start: PR tab two-sided compare — only fire once both
+       sides are chosen; during default-selection this is a no-op until the
+       head default effect below sets `head` too, avoiding a half-configured
+       request. */
+    if (head !== null) loadCommits(base, head);
+    /* SNIPCODE-HOOK end */
   }
+
+  /* SNIPCODE-HOOK start: PR tab two-sided compare */
+  function defaultHead(): string | null {
+    return branchStore.currentBranch?.name ?? null;
+  }
+
+  function selectHead(h: string) {
+    if (head === h) return;
+    head = h;
+    showHeadDropdown = false;
+    if (base !== null) loadCommits(base, head);
+  }
+
+  function swap() {
+    if (base === null || head === null) return;
+    const t = base;
+    base = head;
+    head = t;
+    loadCommits(base, head);
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab (Important 2 / repo-switch race) — after a repo
      switch, `uiStore.activeRepo` updates (host posts `repoList`) BEFORE
@@ -111,6 +143,7 @@
       awaitingBranches = true;
       currentRequestId = null;
       base = null;
+      head = null; // SNIPCODE-HOOK: PR tab two-sided compare — never carry a head over from the old repo
       commits = [];
       files = [];
       mergeBase = null;
@@ -142,6 +175,20 @@
       if (d) selectBase(d);
     }
   });
+
+  /* SNIPCODE-HOOK start: PR tab two-sided compare — mirrors the default-base
+     effect above for head (default: current branch). Independent of it (each
+     only sets its own state and only reads the other's already-committed
+     value), so whichever runs first is a no-op on the request (see
+     selectBase/selectHead's own-null guard) and the second one, seeing both
+     sides now set, is the one that actually fires loadCommits — exactly once,
+     regardless of effect run order. */
+  $effect(() => {
+    if (!awaitingBranches && head === null && branchStore.branches.length > 0) {
+      const dh = defaultHead();
+      if (dh) selectHead(dh);
+    }
+  });
   /* SNIPCODE-HOOK end */
 
   function openFile(file: PrFile) {
@@ -149,7 +196,7 @@
       type: 'openDiff',
       // SNIPCODE-HOOK: PR tab (Important 3) — carry oldPath so a rename's
       // diff resolves its base (left) side from the old name.
-      payload: { file: file.path, oldPath: file.oldPath, ref1: mergeBase ?? base ?? undefined, ref2: 'HEAD' },
+      payload: { file: file.path, oldPath: file.oldPath, ref1: mergeBase ?? base ?? undefined, ref2: head ?? 'HEAD' },
     });
   }
 
@@ -161,7 +208,7 @@
       oldRelativePath: f.oldPath,
       status: f.status,
     }));
-    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: 'HEAD', files: payloadFiles } });
+    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: head ?? 'HEAD', files: payloadFiles } });
   }
 
   function statusColor(s?: string): string {
@@ -267,8 +314,37 @@
         </div>
       {/if}
     </div>
-    <i class="codicon codicon-arrow-right pr-into-icon"></i>
-    <span class="pr-head-branch">{branchStore.currentBranch?.name ?? 'HEAD'}</span>
+    <!-- SNIPCODE-HOOK start: PR tab two-sided compare — swap button (was a
+         static arrow-right icon) + head pill/dropdown copied from the base
+         pill/dropdown above, bound to head/selectHead/showHeadDropdown. -->
+    <button class="pr-swap-btn" onclick={swap} title="Swap" use:tooltip={'Swap base and head'}>
+      <i class="codicon codicon-arrow-swap"></i>
+    </button>
+    <div class="base-dropdown-wrapper">
+      <button class="base-pill" onclick={() => { showHeadDropdown = !showHeadDropdown; }}>
+        <i class="codicon codicon-git-branch"></i>
+        <span class="base-name">{head ?? branchStore.currentBranch?.name ?? 'HEAD'}</span>
+        <i class="codicon codicon-chevron-down base-chevron"></i>
+      </button>
+      {#if showHeadDropdown}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <div class="repo-dropdown-backdrop" onclick={() => { showHeadDropdown = false; }}></div>
+        <div class="repo-dropdown">
+          {#each branchStore.branches as b (b.name)}
+            <button
+              class="repo-dropdown-item"
+              class:active={head === b.name}
+              onclick={() => selectHead(b.name)}
+            >
+              <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+              <span class="repo-dropdown-item-name">{b.name}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <!-- SNIPCODE-HOOK end -->
   </div>
 
   {#if behind > 0}
@@ -446,15 +522,27 @@
     text-overflow: ellipsis;
   }
 
-  .pr-into-icon {
-    font-size: 13px;
-    opacity: 0.6;
+  /* SNIPCODE-HOOK start: PR tab two-sided compare */
+  .pr-swap-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
   }
 
-  .pr-head-branch {
-    font-family: var(--vscode-editor-font-family, monospace);
+  .pr-swap-btn:hover {
+    background: rgba(128, 128, 128, 0.15);
     color: var(--text-primary);
   }
+  /* SNIPCODE-HOOK end */
 
   .pr-banner {
     display: flex;
