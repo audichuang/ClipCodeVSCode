@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toGraphCopyPayload } from '../src/prCopyService.js';
+import { formatBanner, toGraphCopyPayload } from '../src/prCopyService.js';
 
 const diff = [
   { path: 'a.ts', status: 'M' },
@@ -16,3 +16,24 @@ test('keeps only selected, hash=HEAD', () => {
 });
 test('empty selection → no files', () =>
   assert.equal(toGraphCopyPayload('/repo', diff, new Set()).files.length, 0));
+
+test('formatBanner: behind>0 warns to pull', () => {
+  const msg = formatBanner({ ahead: 0, behind: 3, upstream: 'origin/main', fetched: true, fetchAttempted: true });
+  assert.equal(msg, '⚠ origin 有 3 個新 commit,建議 pull');
+});
+test('formatBanner: behind===0 && upstream shows synced', () => {
+  const msg = formatBanner({ ahead: 2, behind: 0, upstream: 'origin/main', fetched: true, fetchAttempted: true });
+  assert.equal(msg, '✓ 與 origin/main 同步(ahead 2)');
+});
+test('formatBanner: !upstream shows no-upstream note', () => {
+  const msg = formatBanner({ ahead: 0, behind: 0, upstream: undefined, fetched: false, fetchAttempted: false });
+  assert.equal(msg, '本分支無對應 origin 分支');
+});
+test('formatBanner: fetchAttempted && !fetched appends offline note', () => {
+  const msg = formatBanner({ ahead: 2, behind: 0, upstream: 'origin/main', fetched: false, fetchAttempted: true });
+  assert.equal(msg, '✓ 與 origin/main 同步(ahead 2)（未能連線 remote，以下為本地快取狀態）');
+});
+test('formatBanner: fetched → no offline note even if fetchAttempted', () => {
+  const msg = formatBanner({ ahead: 0, behind: 0, upstream: undefined, fetched: true, fetchAttempted: true });
+  assert.equal(msg, '本分支無對應 origin 分支');
+});
