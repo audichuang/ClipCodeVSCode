@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.24
+
+- **PR tab: pick both sides + swap direction.** The compare header now lets you
+  choose **both** the base and the head branch (previously the head was fixed to
+  the current branch), with a **swap button** in the middle to flip the
+  direction (`base → head` ⇄ `head → base`), GitHub-compare-style. The Files,
+  Commits, per-file diffs, ahead/behind banner, and Copy all follow the chosen
+  head. Ref pickers are blocked briefly during a repo switch so a stale
+  cross-repo base/head pair can't be selected.
+
 ## 0.3.23
 
 - **PR view moved into Git Graph+.** The 0.3.22 SCM-sidebar "Snipcode PR" tree
