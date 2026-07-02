@@ -2,9 +2,10 @@
   "name": "clipcode-vscode",
   "displayName": "Snipcode",
   "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "publisher": "audichuang",
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/audichuang/ClipCodeVSCode.git"

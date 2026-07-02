@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.22
+
+- **PR panel** — a new "Snipcode PR" view in the Source Control side bar. Pick a
+  base ref and see the files your branch changed relative to it (three-dot /
+  merge-base semantics, so a base that advanced after you branched doesn't show
+  as reverse changes), check the ones you want, and copy them in the ClipCode
+  clipboard format for pasting to an AI. A banner warns when your branch is
+  behind its origin upstream, with a one-click Fetch. Mirrors the ClipCode
+  IntelliJ plugin's PR panel and stays clipboard-format-compatible with it.
+- Added an extension icon.
+
 ## 0.3.21
 
 - **Reword safety hardening** (from a code review of 0.3.20):

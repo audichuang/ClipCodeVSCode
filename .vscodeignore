@@ -13,6 +13,7 @@ package-lock.json
 *.vsix
 .gitignore
 docs/**
+.superpowers/**
 .github/**
 HANDOFF-*.md
 esbuild.config.mjs
