@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.23
+
+- **PR view moved into Git Graph+.** The 0.3.22 SCM-sidebar "Snipcode PR" tree
+  view is replaced by a **"PR" tab inside the Git Graph+ webview** (Graph /
+  Reflog / Stats / **PR**), GitHub-"New pull request"-style: pick a base ref
+  (`<base> into <current>`), see the **Files** changed and the **Commits**
+  between base and HEAD (three-dot / merge-base), open per-file diffs, and copy
+  the changed files in the ClipCode clipboard format. A banner shows how far the
+  branch is ahead/behind the base. Renames, non-ASCII paths, base/repo switching
+  and stale-response races are all handled. Clipboard format stays compatible
+  with the ClipCode IntelliJ plugin.
+
 ## 0.3.22
 
 - **PR panel** — a new "Snipcode PR" view in the Source Control side bar. Pick a
