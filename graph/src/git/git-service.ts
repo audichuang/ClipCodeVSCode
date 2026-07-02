@@ -1721,6 +1721,7 @@ export class GitService {
     ahead: number;
     behind: number;
     files: Array<{ path: string; status: string; oldPath?: string }>;
+    diffs: DiffData[];
   }> {
     this.assertSafeRef(base, 'commitsBetween');
     this.assertSafeRef(head, 'commitsBetween');
@@ -1766,16 +1767,33 @@ export class GitService {
        pre-G2 SCM PR panel already solved this exact problem). Falls back to
        `base` itself when there's no merge-base, matching the mergeBase-or-base
        fallback the webview already uses for its Files diff. */
+    const diffBase = mergeBase ?? base;
     let files: Array<{ path: string; status: string; oldPath?: string }> = [];
     try {
-      const diffBase = mergeBase ?? base;
       const raw = await this.exec(['diff', '-M', '-z', '--name-status', diffBase, head], { silent: true });
       files = this.parseNameStatusZ(raw);
     } catch (err) {
       this.warn(`commitsBetween: diff failed: ${err instanceof Error ? err.message : err}`);
     }
 
-    return { commits, mergeBase, ahead, behind, files };
+    /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — full parsed diffs
+       alongside the file list above, so the webview's PR Files sub-tab can
+       render each file's diff inline (FileDiffView) instead of round-tripping
+       through a separate compareCommits()/getFileDiff() call per file. Same
+       `mergeBase ?? base` start as the file-list diff (three-dot-consistent),
+       reuses the shared parseDiff() (git-parser) that diffCommits() already
+       goes through. Independent try/catch: a diff-text parse failure must not
+       take down the file list this method also returns. */
+    let diffs: DiffData[] = [];
+    try {
+      const raw = await this.exec(['diff', '-M', '--no-color', diffBase, head], { silent: true });
+      diffs = parseDiff(raw);
+    } catch (err) {
+      this.warn(`commitsBetween: diff (parsed) failed: ${err instanceof Error ? err.message : err}`);
+    }
+    /* SNIPCODE-HOOK end */
+
+    return { commits, mergeBase, ahead, behind, files, diffs };
   }
 
   /** NUL-delimited `--name-status -z` parser: a normal record is
