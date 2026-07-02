@@ -48,9 +48,17 @@
     // When provided (committed view only), the "Reverse Selected Lines" button
     // reverses just the dragged changed lines of a hunk immediately.
     onReverseLines?: (target: { commitHash: string; file: string; hunkIndex: number; lineIndices: number[] }) => void;
+    /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — optional controlled
+       diff-mode so PrView's toolbar can drive inline/side-by-side across every
+       stacked FileDiffView from one control. Omitted (existing CommitDetails
+       usage) falls back to the local uncontrolled toggle — fully backward
+       compatible, see `mode` below. */
+    diffMode?: 'inline' | 'side-by-side';
+    hideModeToggle?: boolean;
+    /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines }: Props = $props();
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, diffMode: diffModeProp, hideModeToggle = false }: Props = $props();
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -229,7 +237,14 @@
     lineSel = null;
   });
 
-  let diffMode = $state<'inline' | 'side-by-side'>('inline');
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — `internalMode` is the
+     pre-existing local toggle state (unchanged behavior for CommitDetails,
+     which never passes `diffMode`); `mode` resolves to the controlling prop
+     when the parent supplies one (PrView), otherwise falls back to
+     `internalMode`. Template/toggle below use `mode` exclusively. */
+  let internalMode = $state<'inline' | 'side-by-side'>('inline');
+  const mode = $derived(diffModeProp ?? internalMode);
+  /* SNIPCODE-HOOK end */
 
   let totalDiffLines = $derived(
     diff && !diff.isBinary
@@ -353,16 +368,24 @@
         {/if}
         <span class="diff-base">{getFileName(diff.file)}</span>
       </span>
-      <div class="diff-mode-toggle">
-        <button
-          class:active={diffMode === 'inline'}
-          onclick={() => { diffMode = 'inline'; lineSel = null; }}
-        >{t('details.inline')}</button>
-        <button
-          class:active={diffMode === 'side-by-side'}
-          onclick={() => { diffMode = 'side-by-side'; lineSel = null; }}
-        >{t('details.sideBySide')}</button>
-      </div>
+      <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D1) — hidden when the
+           parent (PrView) hosts its own shared toggle via hideModeToggle; the
+           onclick guards on diffModeProp === undefined so a controlled
+           instance without hideModeToggle (not currently used) doesn't fight
+           the parent's state. -->
+      {#if !hideModeToggle}
+        <div class="diff-mode-toggle">
+          <button
+            class:active={mode === 'inline'}
+            onclick={() => { if (diffModeProp === undefined) { internalMode = 'inline'; lineSel = null; } }}
+          >{t('details.inline')}</button>
+          <button
+            class:active={mode === 'side-by-side'}
+            onclick={() => { if (diffModeProp === undefined) { internalMode = 'side-by-side'; lineSel = null; } }}
+          >{t('details.sideBySide')}</button>
+        </div>
+      {/if}
+      <!-- SNIPCODE-HOOK end -->
     </div>
   </div>
 
@@ -383,7 +406,7 @@
       {/if}
     {:else if diff.isBinary}
       <div class="diff-empty">{t('details.binaryFile')}</div>
-    {:else if diffMode === 'inline'}
+    {:else if mode === 'inline'}
       <div class="diff-content">
         {#each renderHunks as hunk, hunkIdx}
           <div class="diff-hunk" class:reversible={canReverse && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>

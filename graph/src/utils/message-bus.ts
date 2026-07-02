@@ -210,6 +210,11 @@ export type ExtensionMessage =
       ahead: number;
       behind: number;
       files: Array<{ path: string; status: string; oldPath?: string }>;
+      /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — parsed diffs for
+         every changed file, so PrView can render FileDiffView inline per file
+         instead of a separate round-trip per selection. */
+      diffs: DiffData[];
+      /* SNIPCODE-HOOK end */
     } }
   /* SNIPCODE-HOOK end */
   | { type: 'imageData'; payload: { ref: string; path: string; base64: string; mimeType: string } }

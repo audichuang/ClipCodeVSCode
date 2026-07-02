@@ -542,6 +542,67 @@ describe('GitService', () => {
       const result = await service.commitsBetween('main', 'feature');
       expect(result.files).toEqual([]);
     });
+
+    /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — commitsBetween.diffs */
+    it('returns parsed diffs (DiffData[]) from -M --no-color against mergeBase..head', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff' && args.includes('--name-status')) return 'M\0a.ts\0';
+        if (args[0] === 'diff' && args.includes('--no-color')) {
+          // Same mergeBase..head start as the name-status file list, rename-detecting.
+          expect(args).toEqual(['diff', '-M', '--no-color', 'base123', 'feature']);
+          return [
+            'diff --git a/a.ts b/a.ts',
+            'index abc123..def456 100644',
+            '--- a/a.ts',
+            '+++ b/a.ts',
+            '@@ -1,1 +1,1 @@',
+            '-old',
+            '+new',
+          ].join('\n');
+        }
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.diffs).toHaveLength(1);
+      expect(result.diffs[0].file).toBe('a.ts');
+      expect(result.diffs[0].hunks[0].lines.map(l => l.type)).toEqual(['delete', 'add']);
+    });
+
+    it('falls back to base (not mergeBase) for diffs when there is no common ancestor', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') throw new GitError('fatal: no merge base', 1, args);
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff' && args.includes('--no-color')) {
+          expect(args).toEqual(['diff', '-M', '--no-color', 'main', 'unrelated']);
+          return '';
+        }
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'unrelated');
+      expect(result.diffs).toEqual([]);
+    });
+
+    it('degrades diffs to [] when the diff --no-color command fails (independent of files)', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        if (args[0] === 'diff' && args.includes('--name-status')) return 'M\0a.ts\0';
+        if (args[0] === 'diff' && args.includes('--no-color')) throw new GitError('fatal: bad revision', 128, args);
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.diffs).toEqual([]);
+      expect(result.files).toEqual([{ path: 'a.ts', status: 'M' }]);
+    });
+    /* SNIPCODE-HOOK end */
   });
   /* SNIPCODE-HOOK end */
 
