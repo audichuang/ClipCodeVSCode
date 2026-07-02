@@ -87,6 +87,16 @@
   }
 
   function selectBase(b: string) {
+    /* SNIPCODE-HOOK start: PR tab (Important, repo-switch stale-head race) —
+       while awaitingBranches is true the pickers still render the OLD repo's
+       branchStore.branches (the new repo's branchData hasn't landed yet), so
+       a pick here would set `base` to an OLD-repo ref that then survives into
+       the NEW-repo default-base/head selection below, mismatching refs across
+       repos. Pills are also disabled for this window (see template); this is
+       defense in depth against any path that still calls selectBase/selectHead
+       (e.g. a stale dropdown left open across the switch). */
+    if (awaitingBranches) return;
+    /* SNIPCODE-HOOK end */
     if (base === b) return;
     base = b;
     showBaseDropdown = false;
@@ -104,6 +114,9 @@
   }
 
   function selectHead(h: string) {
+    // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — same
+    // guard as selectBase above; see its comment.
+    if (awaitingBranches) return;
     if (head === h) return;
     head = h;
     showHeadDropdown = false;
@@ -111,6 +124,9 @@
   }
 
   function swap() {
+    // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — same
+    // guard as selectBase above; see its comment.
+    if (awaitingBranches) return;
     if (base === null || head === null) return;
     const t = base;
     base = head;
@@ -144,6 +160,11 @@
       currentRequestId = null;
       base = null;
       head = null; // SNIPCODE-HOOK: PR tab two-sided compare — never carry a head over from the old repo
+      // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — close
+      // any dropdown left open across the switch so it can't keep rendering
+      // the OLD repo's branch list while awaitingBranches is true.
+      showBaseDropdown = false;
+      showHeadDropdown = false;
       commits = [];
       files = [];
       mergeBase = null;
@@ -291,7 +312,12 @@
 <div class="pr-view">
   <div class="pr-header">
     <div class="base-dropdown-wrapper">
-      <button class="base-pill" onclick={() => { showBaseDropdown = !showBaseDropdown; }}>
+      <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
+           disabled + guarded onclick while awaitingBranches: the dropdown
+           below still lists the OLD repo's branchStore.branches until the new
+           repo's branchData arrives, so opening it here could let the user
+           pick a stale ref. -->
+      <button class="base-pill" disabled={awaitingBranches} onclick={() => { if (awaitingBranches) return; showBaseDropdown = !showBaseDropdown; }}>
         <i class="codicon codicon-git-branch"></i>
         <span class="base-name">{base ?? t('pr.selectBase')}</span>
         <i class="codicon codicon-chevron-down base-chevron"></i>
@@ -321,7 +347,9 @@
       <i class="codicon codicon-arrow-swap"></i>
     </button>
     <div class="base-dropdown-wrapper">
-      <button class="base-pill" onclick={() => { showHeadDropdown = !showHeadDropdown; }}>
+      <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
+           same guard as the base pill above; see its comment. -->
+      <button class="base-pill" disabled={awaitingBranches} onclick={() => { if (awaitingBranches) return; showHeadDropdown = !showHeadDropdown; }}>
         <i class="codicon codicon-git-branch"></i>
         <span class="base-name">{head ?? branchStore.currentBranch?.name ?? 'HEAD'}</span>
         <i class="codicon codicon-chevron-down base-chevron"></i>
