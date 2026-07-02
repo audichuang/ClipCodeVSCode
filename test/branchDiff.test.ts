@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseNameStatus, parseAheadBehind } from '../src/branchDiff.js';
 
 test('parseNameStatus: M/A/D + rename', () => {
-  const out = 'M\tsrc/a.ts\nA\tsrc/b.ts\nD\tsrc/c.ts\nR100\tsrc/old.ts\tsrc/new.ts\n';
+  const out = 'M\0src/a.ts\0A\0src/b.ts\0D\0src/c.ts\0R100\0src/old.ts\0src/new.ts\0';
   const r = parseNameStatus(out);
   assert.deepEqual(r[0], { path: 'src/a.ts', status: 'M' });
   assert.deepEqual(r[1], { path: 'src/b.ts', status: 'A' });

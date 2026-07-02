@@ -19,7 +19,7 @@ test('empty selection → no files', () =>
 
 test('formatBanner: behind>0 warns to pull', () => {
   const msg = formatBanner({ ahead: 0, behind: 3, upstream: 'origin/main', fetched: true, fetchAttempted: true });
-  assert.equal(msg, '⚠ origin 有 3 個新 commit,建議 pull');
+  assert.equal(msg, '⚠ origin/main 有 3 個新 commit,建議 pull');
 });
 test('formatBanner: behind===0 && upstream shows synced', () => {
   const msg = formatBanner({ ahead: 2, behind: 0, upstream: 'origin/main', fetched: true, fetchAttempted: true });

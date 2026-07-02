@@ -6,19 +6,27 @@ export interface RemoteStatus {
   fetched: boolean; fetchAttempted: boolean;
 }
 
-// Parse `git diff --name-status <base> HEAD` stdout. Status letter is the
-// first char (rename lines carry a numeric similarity suffix, e.g. R100).
-// Rename/copy lines have two paths: old then new; path = new, oldPath = old.
+// Parse `git diff -z --name-status <base>...HEAD` stdout: NUL-delimited
+// fields, no quoting (paired with core.quotePath=false), so non-ASCII/tab/
+// newline paths survive intact. A normal entry is `<status>\0<path>\0`; a
+// rename/copy entry (status starts with R/C, carries a similarity suffix
+// like R100) is `<status>\0<oldpath>\0<newpath>\0`. Status letter is the
+// first char; rename/copy: path = new, oldPath = old.
 export function parseNameStatus(stdout: string): DiffFile[] {
+  const fields = stdout.split('\0');
   const files: DiffFile[] = [];
-  for (const line of stdout.split('\n')) {
-    if (!line) continue;
-    const parts = line.split('\t');
-    const status = parts[0][0];
-    if (parts.length >= 3) {
-      files.push({ path: parts[2], status, oldPath: parts[1] });
+  let i = 0;
+  while (i < fields.length) {
+    const statusToken = fields[i++];
+    if (!statusToken) continue; // trailing empty field from the final \0
+    const status = statusToken[0];
+    if (status === 'R' || status === 'C') {
+      const oldPath = fields[i++];
+      const path = fields[i++];
+      files.push({ path, status, oldPath });
     } else {
-      files.push({ path: parts[1], status });
+      const path = fields[i++];
+      files.push({ path, status });
     }
   }
   return files;
@@ -56,14 +64,32 @@ function runGit(gitPath: string, repoRoot: string, args: string[]): Promise<stri
 }
 
 export async function diffNameStatus(gitPath: string, repoRoot: string, baseRef: string): Promise<DiffFile[]> {
-  const out = await runGit(gitPath, repoRoot, ['diff', '--name-status', baseRef, 'HEAD']);
+  // Three dots = diff against merge-base(baseRef, HEAD), i.e. "what this PR
+  // changed" — base moving forward after the branch forked no longer shows
+  // up as bogus reverse edits/deletions. -M forces rename detection.
+  const out = await runGit(gitPath, repoRoot,
+    ['-c', 'core.quotePath=false', 'diff', '-M', '-z', '--name-status', `${baseRef}...HEAD`]);
   return out === undefined ? [] : parseNameStatus(out);
 }
 
-export async function remoteStatus(gitPath: string, repoRoot: string, doFetch: boolean): Promise<RemoteStatus> {
+// Remote a ref belongs to, e.g. 'origin/main' -> 'origin'. undefined when
+// baseRef has no remote prefix (local branch, or a bare ref like 'HEAD').
+function remoteFromBaseRef(baseRef: string): string | undefined {
+  const slash = baseRef.indexOf('/');
+  return slash > 0 ? baseRef.slice(0, slash) : undefined;
+}
+
+export async function remoteStatus(
+  gitPath: string, repoRoot: string, doFetch: boolean, baseRef: string
+): Promise<RemoteStatus> {
   let fetched = false;
   if (doFetch) {
-    const fetchOut = await runGit(gitPath, repoRoot, ['fetch', '--no-tags']);
+    // Fetch the remote baseRef actually belongs to, so the three-dot diff
+    // and the ahead/behind count below read a freshly-updated ref. Fall
+    // back to fetching everything if we can't tell which remote that is.
+    const remote = remoteFromBaseRef(baseRef);
+    const fetchOut = await runGit(gitPath, repoRoot,
+      remote ? ['fetch', '--no-tags', remote] : ['fetch', '--no-tags', '--all']);
     fetched = fetchOut !== undefined;
   }
   const fetchAttempted = doFetch;
