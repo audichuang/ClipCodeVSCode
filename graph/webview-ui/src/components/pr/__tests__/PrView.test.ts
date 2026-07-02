@@ -229,8 +229,8 @@ describe('PrView — Commits sub-tab', () => {
   });
 });
 
-describe('PrView — repo switch resets PR state (Important 2)', () => {
-  it('clears base/commits/files when uiStore.activeRepo changes', async () => {
+describe('PrView — repo switch resets PR state (Important 2 + repo-switch race)', () => {
+  it('does NOT auto-select a base from the OLD repo branches when activeRepo changes before branchData', async () => {
     branchStore.branches = [
       branch({ name: 'feat', current: true, upstream: 'origin/main' }),
       branch({ name: 'origin/main', remote: 'origin' }),
@@ -242,11 +242,27 @@ describe('PrView — repo switch resets PR state (Important 2)', () => {
     });
     await waitFor(() => expect(container.textContent).toContain('src/a.ts'));
 
+    // Real ordering: the host posts `repoList` (activeRepo) FIRST, while
+    // `branchStore.branches` is still the previous repo's list. State must
+    // reset, but no base may be auto-selected from that stale list yet.
+    globalThis.__postedMessages = [];
     uiStore.activeRepo = '/other-repo';
-    branchStore.branches = [];
     await waitFor(() => {
       expect(container.textContent).not.toContain('src/a.ts');
       expect(container.textContent).toContain('Select base branch');
+    });
+    // Give any (buggy) default-base effect a tick to fire off the stale list.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+
+    // The new repo's branches arrive on a later tick (branchData) as a fresh
+    // array reference — only now may a base be auto-selected, from the NEW list.
+    branchStore.branches = [
+      branch({ name: 'dev', current: true, upstream: 'origin/dev' }),
+      branch({ name: 'origin/dev', remote: 'origin' }),
+    ];
+    await waitFor(() => {
+      expect(lastMessageOf('getCommitsBetween')?.payload.base).toBe('origin/dev');
     });
   });
 });

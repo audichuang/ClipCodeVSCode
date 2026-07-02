@@ -87,24 +87,28 @@
     loadCommits(b);
   }
 
-  // Pick a default base once branch data has arrived. Guarded on base===null
-  // so this only ever fires once (selectBase always sets a non-null base).
-  $effect(() => {
-    if (base === null && branchStore.branches.length > 0) {
-      const d = defaultBase();
-      if (d) selectBase(d);
-    }
-  });
-
-  /* SNIPCODE-HOOK start: PR tab (Important 2) — reset all PR state when the
-     active repo changes. Without this, a repo switch while the PR tab is open
-     leaves the previous repo's base/commits/files/banner on screen (and lets
-     an in-flight response for the old repo land on the new one, since
-     `currentRequestId` is invalidated below but `base` alone wouldn't be). */
+  /* SNIPCODE-HOOK start: PR tab (Important 2 / repo-switch race) — after a repo
+     switch, `uiStore.activeRepo` updates (host posts `repoList`) BEFORE
+     `branchStore.branches` (host posts `branchData`/`fullRefresh` later), so the
+     branch list is briefly the OLD repo's. `awaitingBranches` blocks the
+     default-base pick until the new repo's branches actually arrive — detected
+     by the `branchStore.branches` array reference changing — so we never
+     auto-select a base from the stale list. Starts false so a normal first load
+     (no switch) auto-selects immediately. */
+  // $state so flipping it back to false re-runs the default-base effect below,
+  // regardless of effect execution order.
+  let awaitingBranches = $state(false);
+  let lastBranchesRef = branchStore.branches;
   let lastActiveRepo = uiStore.activeRepo;
+
+  // Reset all PR state on repo switch and wait for the new repo's branches
+  // before re-selecting a base (see above). Without the reset a repo switch
+  // would leave the previous repo's base/commits/files/banner on screen and
+  // let an in-flight response for the old repo land on the new one.
   $effect(() => {
     if (uiStore.activeRepo !== lastActiveRepo) {
       lastActiveRepo = uiStore.activeRepo;
+      awaitingBranches = true;
       currentRequestId = null;
       base = null;
       commits = [];
@@ -114,6 +118,28 @@
       behind = 0;
       loadingCommits = false;
       loadingFiles = false;
+    }
+  });
+
+  // The branches array reference changes when branchData for the (now current)
+  // repo arrives (branchStore.setData reassigns the array); that's our signal
+  // the switch has completed, so clear the flag and let the default-base effect
+  // pick from the new list.
+  $effect(() => {
+    if (branchStore.branches !== lastBranchesRef) {
+      lastBranchesRef = branchStore.branches;
+      awaitingBranches = false;
+    }
+  });
+
+  // Pick a default base once branch data has arrived. Guarded on base===null
+  // so this only ever fires once per repo (selectBase always sets a non-null
+  // base), and on !awaitingBranches so a repo switch can't select from the
+  // previous repo's stale branch list.
+  $effect(() => {
+    if (!awaitingBranches && base === null && branchStore.branches.length > 0) {
+      const d = defaultBase();
+      if (d) selectBase(d);
     }
   });
   /* SNIPCODE-HOOK end */
