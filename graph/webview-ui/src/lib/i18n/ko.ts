@@ -16,7 +16,9 @@ export const ko: Record<string, string> = {
   'toolbar.noRemotes': '설정된 리모트가 없습니다. 먼저 리모트를 추가하세요.',
   'toolbar.addRemote': '리모트 추가',
   'toolbar.detachedHead': '(Detached HEAD)',
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   'toolbar.pr': 'PR',
+  /* SNIPCODE-HOOK end */
 
   // Push modal
   'push.title': 'Push',
@@ -674,6 +676,7 @@ export const ko: Record<string, string> = {
   'setUpstream.typeManually': '직접 입력',
   'setUpstream.selectFromList': '목록에서 선택',
 
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   // PR tab (Task G3)
   'pr.selectBase': '기준 브랜치 선택',
   'pr.filesTab': '파일',
@@ -682,4 +685,5 @@ export const ko: Record<string, string> = {
   'pr.noCommits': '커밋 없음',
   'pr.behindWarning': '{base}보다 {count}개 커밋 뒤처짐',
   'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
+  /* SNIPCODE-HOOK end */
 };

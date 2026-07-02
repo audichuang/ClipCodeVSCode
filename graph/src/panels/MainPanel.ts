@@ -548,7 +548,7 @@ export class MainPanel {
           const result = await this.gitService.commitsBetween(message.payload.base, message.payload.head);
           this.post({
             type: 'commitsBetween',
-            payload: { base: message.payload.base, ...result },
+            payload: { base: message.payload.base, requestId: message.payload.requestId, ...result },
           });
           break;
         }
@@ -779,7 +779,10 @@ export class MainPanel {
         }
         case 'openDiff': {
           if (message.payload.ref1 && message.payload.ref2) {
-            await this.openCompareDiffInEditor(message.payload.file, message.payload.ref1, message.payload.ref2);
+            /* SNIPCODE-HOOK start: PR tab (Important 3) — pass oldPath through
+               so a rename resolves its LEFT (base) URI from the old name. */
+            await this.openCompareDiffInEditor(message.payload.file, message.payload.ref1, message.payload.ref2, message.payload.oldPath);
+            /* SNIPCODE-HOOK end */
           } else {
             await this.openDiffInEditor(
               message.payload.file,
@@ -1762,18 +1765,26 @@ export class MainPanel {
     }
   }
 
-  private async openCompareDiffInEditor(file: string, ref1: string, ref2: string): Promise<void> {
+  private async openCompareDiffInEditor(file: string, ref1: string, ref2: string, oldPath?: string): Promise<void> {
     // Same validation as openDiffInEditor — the path must stay inside the repo
     // before being embedded in the diff editor and the content-provider URI.
     const fullPath = this.resolveRepoRelativePath(file, 'openCompareDiff');
+    /* SNIPCODE-HOOK start: PR tab (Important 3) — rename-aware LEFT (ref1/base)
+       path. A renamed file didn't exist under its new name at ref1, so without
+       this the base side resolves to nothing (empty/"missing" in the diff
+       editor) instead of the file's prior content. `oldPath` is optional so
+       every non-PR caller (which never sends it) is unaffected. */
+    const leftPath = oldPath ? this.resolveRepoRelativePath(oldPath, 'openCompareDiff') : fullPath;
+    /* SNIPCODE-HOOK end */
     // ref1 = 'working' means compare ref2 against working tree
     if (ref1 === 'working' || ref2 === 'working') {
       const commitRef = ref1 === 'working' ? ref2 : ref1;
-      const commitUri = this.toGitUri(fullPath, commitRef);
+      const commitPath = ref1 === 'working' ? fullPath : leftPath;
+      const commitUri = this.toGitUri(commitPath, commitRef);
       const fileUri = vscode.Uri.file(fullPath);
       await vscode.commands.executeCommand('vscode.diff', commitUri, fileUri, `${file} (${commitRef.substring(0, 7)} ↔ Working Tree)`);
     } else {
-      const leftUri = this.toGitUri(fullPath, ref1);
+      const leftUri = this.toGitUri(leftPath, ref1);
       const rightUri = this.toGitUri(fullPath, ref2);
       const label1 = ref1.length > 10 ? ref1.substring(0, 7) : ref1;
       const label2 = ref2.length > 10 ? ref2.substring(0, 7) : ref2;

@@ -65,7 +65,11 @@ export type WebviewMessage =
   | { type: 'dragMerge'; payload: { source: string; target: string; force?: boolean; merge?: boolean; stash?: boolean; stashUntracked?: boolean; clean?: boolean } }
   | { type: 'addRemote'; payload: { name: string; url: string } }
   | { type: 'removeRemote'; payload: { name: string } }
-  | { type: 'openDiff'; payload: { file: string; commitHash?: string; ref1?: string; ref2?: string; staged?: boolean } }
+  /* SNIPCODE-HOOK start: PR tab (Important 3) — optional oldPath so a rename's
+     compare diff can resolve the LEFT (base) URI from the old name instead of
+     the new one. Optional: every existing non-PR caller omits it. */
+  | { type: 'openDiff'; payload: { file: string; oldPath?: string; commitHash?: string; ref1?: string; ref2?: string; staged?: boolean } }
+  /* SNIPCODE-HOOK end */
   | { type: 'openFile'; payload: { file: string } }
   | { type: 'openScmView'; payload?: { returnFocus?: boolean } }
   | { type: 'amendCommit'; payload: { message?: string; keepMessage?: boolean; resetDate?: boolean; resetAuthor?: boolean; only?: boolean; pushAfter?: boolean } }
@@ -149,7 +153,9 @@ export type WebviewMessage =
   /* PR tab (Task G2): commit list + merge-base + ahead/behind between base and
      head, so the webview can feed compareCommits(mergeBase, 'HEAD') for a
      three-dot Files diff. */
-  | { type: 'getCommitsBetween'; payload: { base: string; head: string } };
+  /* SNIPCODE-HOOK start: PR tab (Important 2) — requestId so a fast base/repo
+     switch can't have a stale response overwrite the current selection. */
+  | { type: 'getCommitsBetween'; payload: { base: string; head: string; requestId?: string } };
   /* SNIPCODE-HOOK end */
 
 // Messages from Extension → Webview
@@ -190,13 +196,20 @@ export type ExtensionMessage =
   | { type: 'worktreeData'; payload: WorktreeInfo[] }
   | { type: 'uncommittedDiffData'; payload: { staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> } }
   | { type: 'multiCommitSectionsData'; payload: { files: Array<{ path: string; status: string }>; sections: Array<{ file: string; commit: string; diff: DiffData }> } }
-  /* SNIPCODE-HOOK start: PR tab (Task G2) — response to getCommitsBetween. */
+  /* SNIPCODE-HOOK start: PR tab (Task G2 / Important 1 & 2) — response to
+     getCommitsBetween. `requestId` echoes the request so the webview can
+     drop a stale response from a since-abandoned base/repo selection.
+     `files` (Important 1) is the rename/encoding-correct file list computed
+     by commitsBetween itself — the webview drives its Files list from this,
+     not from a separate compareCommits()/diffFiles() round-trip. */
   | { type: 'commitsBetween'; payload: {
       base: string;
+      requestId?: string;
       commits: Array<{ hash: string; subject: string; author: string; date: string }>;
       mergeBase: string | null;
       ahead: number;
       behind: number;
+      files: Array<{ path: string; status: string; oldPath?: string }>;
     } }
   /* SNIPCODE-HOOK end */
   | { type: 'imageData'; payload: { ref: string; path: string; base64: string; mimeType: string } }

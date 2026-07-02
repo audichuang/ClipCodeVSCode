@@ -41,9 +41,9 @@ beforeEach(() => {
   globalThis.__postedMessages = [];
 });
 
+/* SNIPCODE-HOOK start: PR tab (Task G3) added a 4th tab. */
 describe('Toolbar — view tabs', () => {
   it('renders the four view-mode tabs and graph is active by default', () => {
-    // SNIPCODE-HOOK: PR tab (Task G3) added a 4th tab.
     const { container } = render(Toolbar);
     const tabs = container.querySelectorAll<HTMLButtonElement>('.view-tab');
     expect(tabs.length).toBe(4);
@@ -63,6 +63,7 @@ describe('Toolbar — view tabs', () => {
     expect(uiStore.viewMode).toBe('graph');
   });
 });
+/* SNIPCODE-HOOK end */
 
 describe('Toolbar — fetch / pull / push', () => {
   it('fetch button with no remotes opens NoRemotesErrorModal', async () => {

@@ -16,7 +16,9 @@ export const en: Record<string, string> = {
   'toolbar.noRemotes': 'No remotes configured. Add a remote first.',
   'toolbar.addRemote': 'Add Remote',
   'toolbar.detachedHead': '(Detached HEAD)',
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   'toolbar.pr': 'PR',
+  /* SNIPCODE-HOOK end */
 
   // Push modal
   'push.title': 'Push',
@@ -676,6 +678,7 @@ export const en: Record<string, string> = {
   'setUpstream.typeManually': 'Type manually',
   'setUpstream.selectFromList': 'Select from list',
 
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
   // PR tab (Task G3)
   'pr.selectBase': 'Select base branch',
   'pr.filesTab': 'Files',
@@ -684,4 +687,5 @@ export const en: Record<string, string> = {
   'pr.noCommits': 'No commits',
   'pr.behindWarning': '{count} commit(s) behind {base}',
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
+  /* SNIPCODE-HOOK end */
 };
