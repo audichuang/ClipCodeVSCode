@@ -16,6 +16,7 @@ export const ko: Record<string, string> = {
   'toolbar.noRemotes': '설정된 리모트가 없습니다. 먼저 리모트를 추가하세요.',
   'toolbar.addRemote': '리모트 추가',
   'toolbar.detachedHead': '(Detached HEAD)',
+  'toolbar.pr': 'PR',
 
   // Push modal
   'push.title': 'Push',
@@ -672,4 +673,13 @@ export const ko: Record<string, string> = {
   'setUpstream.willCreate.post': '를 실행하여 새로 생성합니다.',
   'setUpstream.typeManually': '직접 입력',
   'setUpstream.selectFromList': '목록에서 선택',
+
+  // PR tab (Task G3)
+  'pr.selectBase': '기준 브랜치 선택',
+  'pr.filesTab': '파일',
+  'pr.commitsTab': '커밋',
+  'pr.noFiles': '변경된 파일 없음',
+  'pr.noCommits': '커밋 없음',
+  'pr.behindWarning': '{base}보다 {count}개 커밋 뒤처짐',
+  'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
 };

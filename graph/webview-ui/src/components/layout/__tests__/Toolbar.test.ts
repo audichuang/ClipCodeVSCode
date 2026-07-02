@@ -42,10 +42,11 @@ beforeEach(() => {
 });
 
 describe('Toolbar — view tabs', () => {
-  it('renders the three view-mode tabs and graph is active by default', () => {
+  it('renders the four view-mode tabs and graph is active by default', () => {
+    // SNIPCODE-HOOK: PR tab (Task G3) added a 4th tab.
     const { container } = render(Toolbar);
     const tabs = container.querySelectorAll<HTMLButtonElement>('.view-tab');
-    expect(tabs.length).toBe(3);
+    expect(tabs.length).toBe(4);
     expect(tabs[0].classList.contains('active')).toBe(true);
   });
 
@@ -56,6 +57,8 @@ describe('Toolbar — view tabs', () => {
     expect(uiStore.viewMode).toBe('log');
     await fireEvent.click(tabs[2]); // stats
     expect(uiStore.viewMode).toBe('stats');
+    await fireEvent.click(tabs[3]); // pr
+    expect(uiStore.viewMode).toBe('pr');
     await fireEvent.click(tabs[0]); // back to graph
     expect(uiStore.viewMode).toBe('graph');
   });

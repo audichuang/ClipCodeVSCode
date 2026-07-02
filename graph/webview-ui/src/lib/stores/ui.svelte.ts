@@ -11,7 +11,9 @@ class UiStore {
   comparing = $state(false);
   compareRef1 = $state<string | null>(null);
   compareRef2 = $state<string | null>(null);
-  viewMode = $state<'graph' | 'log' | 'stats'>('graph');
+  /* SNIPCODE-HOOK start: PR tab (Task G3) — 'pr' viewMode */
+  viewMode = $state<'graph' | 'log' | 'stats' | 'pr'>('graph');
+  /* SNIPCODE-HOOK end */
   bottomPanelHeight = $state(250);
   showBottomPanel = $state(true);
   sidebarWidth = $state(220);
@@ -141,9 +143,11 @@ class UiStore {
     this.compareRef2 = null;
   }
 
-  setViewMode(mode: 'graph' | 'log' | 'stats') {
+  /* SNIPCODE-HOOK start: PR tab (Task G3) — accept 'pr' */
+  setViewMode(mode: 'graph' | 'log' | 'stats' | 'pr') {
     this.viewMode = mode;
   }
+  /* SNIPCODE-HOOK end */
 
   setError(message: string | null) {
     // Clear existing timer
