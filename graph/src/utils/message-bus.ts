@@ -145,7 +145,11 @@ export type WebviewMessage =
      it never shares the commit-details `getCommitDiff`/`commitFilesSequence`
      latest-wins guard — a T5 click and a CommitDetails load can be in flight at
      once without dropping each other. */
-  | { type: 'getCommitFilesForCopy'; payload: { hash: string; requestId: string } };
+  | { type: 'getCommitFilesForCopy'; payload: { hash: string; requestId: string } }
+  /* PR tab (Task G2): commit list + merge-base + ahead/behind between base and
+     head, so the webview can feed compareCommits(mergeBase, 'HEAD') for a
+     three-dot Files diff. */
+  | { type: 'getCommitsBetween'; payload: { base: string; head: string } };
   /* SNIPCODE-HOOK end */
 
 // Messages from Extension → Webview
@@ -186,6 +190,15 @@ export type ExtensionMessage =
   | { type: 'worktreeData'; payload: WorktreeInfo[] }
   | { type: 'uncommittedDiffData'; payload: { staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> } }
   | { type: 'multiCommitSectionsData'; payload: { files: Array<{ path: string; status: string }>; sections: Array<{ file: string; commit: string; diff: DiffData }> } }
+  /* SNIPCODE-HOOK start: PR tab (Task G2) — response to getCommitsBetween. */
+  | { type: 'commitsBetween'; payload: {
+      base: string;
+      commits: Array<{ hash: string; subject: string; author: string; date: string }>;
+      mergeBase: string | null;
+      ahead: number;
+      behind: number;
+    } }
+  /* SNIPCODE-HOOK end */
   | { type: 'imageData'; payload: { ref: string; path: string; base64: string; mimeType: string } }
   | { type: 'avatarData'; payload: { email: string; size: number; dataUri: string | null } }
   | { type: 'conflictData'; payload: { operation: string; files: Array<{ path: string; resolved: boolean }> } }

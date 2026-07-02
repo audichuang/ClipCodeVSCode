@@ -425,6 +425,77 @@ describe('GitService', () => {
     });
   });
 
+  /* SNIPCODE-HOOK start: PR tab — commitsBetween (commits + merge-base + ahead/behind) */
+  describe('commitsBetween (PR tab)', () => {
+    it('parses commits, merge-base, and ahead/behind counts', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return 'aaa111\x00feat: one\x00Alice\x002026-01-01T00:00:00Z\nbbb222\x00fix: two\x00Bob\x002026-01-02T00:00:00Z\n';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '3\t2\n';
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.commits).toEqual([
+        { hash: 'aaa111', subject: 'feat: one', author: 'Alice', date: '2026-01-01T00:00:00Z' },
+        { hash: 'bbb222', subject: 'fix: two', author: 'Bob', date: '2026-01-02T00:00:00Z' },
+      ]);
+      expect(result.mergeBase).toBe('base123');
+      expect(result.behind).toBe(3);
+      expect(result.ahead).toBe(2);
+    });
+
+    it('returns empty commits when there are none in range', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return '';
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'main');
+      expect(result.commits).toEqual([]);
+      expect(result.ahead).toBe(0);
+      expect(result.behind).toBe(0);
+    });
+
+    it('falls back to mergeBase=null when there is no common ancestor', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') return 'aaa111\x00feat: one\x00Alice\x002026-01-01T00:00:00Z\n';
+        if (args[0] === 'merge-base') throw new GitError('fatal: no merge base', 1, args);
+        if (args[0] === 'rev-list') return '0\t1\n';
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'unrelated');
+      expect(result.mergeBase).toBeNull();
+      expect(result.commits).toHaveLength(1);
+      expect(result.ahead).toBe(1);
+    });
+
+    it('degrades to safe defaults when the log command fails', async () => {
+      mockExec(service, async (args: string[]) => {
+        if (args[0] === 'log') throw new GitError('fatal: bad revision', 128, args);
+        if (args[0] === 'merge-base') return 'base123\n';
+        if (args[0] === 'rev-list') return '0\t0\n';
+        return '';
+      });
+
+      const result = await service.commitsBetween('main', 'feature');
+      expect(result.commits).toEqual([]);
+      expect(result.mergeBase).toBe('base123');
+    });
+
+    it('rejects base ref starting with -', async () => {
+      await expect(service.commitsBetween('-foo', 'HEAD')).rejects.toThrow("must not start with '-'");
+    });
+
+    it('rejects head ref starting with -', async () => {
+      await expect(service.commitsBetween('main', '-foo')).rejects.toThrow("must not start with '-'");
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   describe('log() uncommitted node injection', () => {
     const logLine = '\x01\x02\x03abc123\x00abc\x00Author\x00a@a.com\x002024-01-01T00:00:00Z\x00Author\x00a@a.com\x002024-01-01T00:00:00Z\x00feat: initial\x00\x00\x00\n';
 

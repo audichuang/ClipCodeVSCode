@@ -540,6 +540,19 @@ export class MainPanel {
           });
           break;
         }
+        /* SNIPCODE-HOOK start: PR tab (Task G2) — commits + merge-base + ahead/behind
+           for the webview's PR tab base-ref compare. No sequence guard: unlike
+           getCommitDiff/getFileDiff this doesn't share a channel with rapid-click
+           commit/file selection, so a latest-wins guard isn't needed here. */
+        case 'getCommitsBetween': {
+          const result = await this.gitService.commitsBetween(message.payload.base, message.payload.head);
+          this.post({
+            type: 'commitsBetween',
+            payload: { base: message.payload.base, ...result },
+          });
+          break;
+        }
+        /* SNIPCODE-HOOK end */
         case 'checkDirty': {
           const dirty = await this.gitService.isDirty();
           this.post({ type: 'dirtyState', payload: { dirty, requestId: message.payload?.requestId } });

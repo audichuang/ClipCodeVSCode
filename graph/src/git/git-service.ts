@@ -1705,6 +1705,60 @@ export class GitService {
     }
   }
 
+  /* SNIPCODE-HOOK start: PR tab — commits + merge-base + ahead/behind between
+     two refs (base...head, three-dot semantics; see docs/superpowers/plans/
+     2026-07-02-pr-tab-in-graph.md Task G2). log()'s options don't accept a raw
+     `base..head` range, so this builds its own `log`/`merge-base`/`rev-list`
+     calls directly (mirrors the `${a}..${b}` pattern already used by
+     getRebaseCommits/showCommitFiles above) instead of routing through log().
+     Each of the three git calls degrades independently to a safe default
+     (empty commits / null mergeBase / 0,0) so e.g. a base with no common
+     ancestor still returns usable commits+counts instead of failing the
+     whole request. */
+  async commitsBetween(base: string, head: string): Promise<{
+    commits: Array<{ hash: string; subject: string; author: string; date: string }>;
+    mergeBase: string | null;
+    ahead: number;
+    behind: number;
+  }> {
+    this.assertSafeRef(base, 'commitsBetween');
+    this.assertSafeRef(head, 'commitsBetween');
+
+    let commits: Array<{ hash: string; subject: string; author: string; date: string }> = [];
+    try {
+      const raw = await this.exec(['log', '--pretty=%H%x00%s%x00%an%x00%aI', `${base}..${head}`], { silent: true });
+      commits = raw.split('\n').filter(Boolean).map(line => {
+        const [hash = '', subject = '', author = '', date = ''] = line.split('\x00');
+        return { hash, subject, author, date };
+      });
+    } catch (err) {
+      this.warn(`commitsBetween: log failed: ${err instanceof Error ? err.message : err}`);
+    }
+
+    // No common ancestor (or an unresolvable ref) — webview falls back to
+    // treating `base` itself as the two-dot compare point.
+    let mergeBase: string | null = null;
+    try {
+      mergeBase = (await this.exec(['merge-base', base, head], { silent: true })).trim() || null;
+    } catch {
+      // intentionally silent: absence of a merge-base is an expected outcome, not an error to log.
+    }
+
+    let ahead = 0;
+    let behind = 0;
+    try {
+      const raw = (await this.exec(['rev-list', '--left-right', '--count', `${base}...${head}`], { silent: true })).trim();
+      const [behindStr = '0', aheadStr = '0'] = raw.split('\t');
+      behind = parseInt(behindStr, 10) || 0;
+      ahead = parseInt(aheadStr, 10) || 0;
+    } catch (err) {
+      this.warn(`commitsBetween: rev-list failed: ${err instanceof Error ? err.message : err}`);
+    }
+
+    return { commits, mergeBase, ahead, behind };
+  }
+  /* SNIPCODE-HOOK end */
+
   /**
    * Get commits between base and HEAD for interactive rebase preview.
    */
