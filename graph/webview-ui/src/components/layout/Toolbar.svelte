@@ -171,6 +171,15 @@
     >
       {t('toolbar.stats')}
     </button>
+    <!-- SNIPCODE-HOOK start: PR tab (Task G3) — 4th view tab -->
+    <button
+      class="view-tab"
+      class:active={uiStore.viewMode === 'pr'}
+      onclick={() => uiStore.setViewMode('pr')}
+    >
+      {t('toolbar.pr')}
+    </button>
+    <!-- SNIPCODE-HOOK end -->
   </div>
 
   <div class="toolbar-right">

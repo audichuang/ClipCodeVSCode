@@ -46,6 +46,9 @@ import RewordModal from './components/modals/RewordModal.svelte';
   import FlowStartModal from './components/modals/FlowStartModal.svelte';
   import FlowFinishModal from './components/modals/FlowFinishModal.svelte';
   import BisectBanner from './components/common/BisectBanner.svelte';
+  /* SNIPCODE-HOOK start: PR tab (Task G3) */
+  import PrView from './components/pr/PrView.svelte';
+  /* SNIPCODE-HOOK end */
   import type { FlowConfig } from './lib/types';
   import { tooltip } from './lib/actions/tooltip';
 
@@ -506,6 +509,10 @@ import RewordModal from './components/modals/RewordModal.svelte';
       <div class="stats-container">
         <StatsView />
       </div>
+    <!-- SNIPCODE-HOOK start: PR tab (Task G3) — router branch -->
+    {:else if uiStore.viewMode === 'pr'}
+      <PrView />
+    <!-- SNIPCODE-HOOK end -->
     {/if}
   </div>
 </div>

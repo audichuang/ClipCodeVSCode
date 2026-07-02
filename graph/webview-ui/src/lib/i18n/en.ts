@@ -16,6 +16,7 @@ export const en: Record<string, string> = {
   'toolbar.noRemotes': 'No remotes configured. Add a remote first.',
   'toolbar.addRemote': 'Add Remote',
   'toolbar.detachedHead': '(Detached HEAD)',
+  'toolbar.pr': 'PR',
 
   // Push modal
   'push.title': 'Push',
@@ -674,4 +675,13 @@ export const en: Record<string, string> = {
   'setUpstream.willCreate.post': ' will create it.',
   'setUpstream.typeManually': 'Type manually',
   'setUpstream.selectFromList': 'Select from list',
+
+  // PR tab (Task G3)
+  'pr.selectBase': 'Select base branch',
+  'pr.filesTab': 'Files',
+  'pr.commitsTab': 'Commits',
+  'pr.noFiles': 'No changed files',
+  'pr.noCommits': 'No commits',
+  'pr.behindWarning': '{count} commit(s) behind {base}',
+  'pr.aheadInfo': '{count} commit(s) ahead of {base}',
 };

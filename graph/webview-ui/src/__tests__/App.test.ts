@@ -449,6 +449,16 @@ describe('App — view mode rendering', () => {
       expect(container.querySelector('.stats-container')).not.toBeNull();
     });
   });
+
+  // SNIPCODE-HOOK start: PR tab (Task G3)
+  it('viewMode=pr renders PrView', async () => {
+    const { container } = render(App);
+    uiStore.viewMode = 'pr';
+    await waitFor(() => {
+      expect(container.querySelector('.pr-view')).not.toBeNull();
+    });
+  });
+  // SNIPCODE-HOOK end
 });
 
 describe('App — fullRefresh and tagDetails', () => {
