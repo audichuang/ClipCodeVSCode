@@ -343,7 +343,7 @@
     <!-- SNIPCODE-HOOK start: PR tab two-sided compare — swap button (was a
          static arrow-right icon) + head pill/dropdown copied from the base
          pill/dropdown above, bound to head/selectHead/showHeadDropdown. -->
-    <button class="pr-swap-btn" onclick={swap} title="Swap" use:tooltip={'Swap base and head'}>
+    <button class="pr-swap-btn" onclick={swap} use:tooltip={'Swap base and head'}>
       <i class="codicon codicon-arrow-swap"></i>
     </button>
     <div class="base-dropdown-wrapper">
