@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.26
+
+- **PR tab: draggable file-list / diff splitter.** The divider between the
+  changed-file list and the diff view can now be dragged to resize (was a
+  fixed width) — give the file list more room, or the diff more room. Width is
+  clamped to a sensible range.
+
 ## 0.3.25
 
 - **PR tab: inline diff preview.** The Files sub-tab now renders each changed
