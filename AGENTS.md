@@ -49,6 +49,10 @@ by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
 Note: `npm test` runs **host** tests only — the graph webview has a separate
 vitest suite (`cd graph && npx vitest run`). Run it if you touch `graph/`.
 
+Gotcha: piping a build/test command (`| tail`/`| grep`) gives the pipe's exit code, not
+npm/vitest/vsce's — judge pass/fail by the `pass N, fail 0` / `Tests …` / `BUILD SUCCESSFUL`
+TEXT in the output, not `$?`.
+
 ## Release
 
 Pushing a `v<version>` tag runs `.github/workflows/publish.yml` (test → build →
@@ -66,6 +70,11 @@ unclaimed) — VS Code Marketplace only for now.
 `src/pathResolver.ts` + `src/filterMatcher.ts` + `src/settings.ts` (mirror
 ClipCode's resolver / filter / settings). For full structure read `src/` — don't
 trust a hand-written tree.
+
+PR compare tab (pick base→head, inline diff, copy): `graph/webview-ui/src/components/pr/PrView.svelte`
+(webview UI) + `graph/src/git/git-service.ts` `commitsBetween` (host: base...HEAD three-dot
+diff/commits/merge-base). It's a Snipcode feature added INSIDE the vendored graph webview —
+fence every `graph/` edit with `/* SNIPCODE-HOOK start/end */` for upstream re-sync.
 
 ## Permissions
 
