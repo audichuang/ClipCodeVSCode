@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.25
+
+- **PR tab: inline diff preview.** The Files sub-tab now renders each changed
+  file's diff inline (syntax-highlighted `+/-` hunks) instead of only opening
+  VS Code's native diff. Toggle **inline ⇄ side-by-side** for all files at once,
+  and use the **↑/↓ buttons to jump to the previous/next change**. Binary/image
+  files and zero-hunk changes (pure renames, mode-only) fall back to an "Open
+  native diff" button. Diffs use the same three-dot (merge-base) range as the
+  file list.
+- **PR tab: type-to-filter branch dropdowns.** The base and head branch pickers
+  now have an auto-focused search box — start typing to filter the branch list
+  (case-insensitive substring); Enter picks the first match, Esc closes.
+
 ## 0.3.24
 
 - **PR tab: pick both sides + swap direction.** The compare header now lets you
