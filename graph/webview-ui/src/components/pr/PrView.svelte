@@ -504,7 +504,16 @@
             {#each files as file (file.path)}
               {@const d = diffs.find((x) => x.file === file.path)}
               <div class="pr-diff-file" data-pr-file={file.path}>
-                {#if d}
+                <!-- SNIPCODE-HOOK: PR tab inline diff (Task D2 fix, blocking review
+                     finding) — binary diffs (incl. images) fall through to the
+                     placeholder instead of FileDiffView. FileDiffView's
+                     isBinary&&isImage branch renders <ImageDiff> with no
+                     commitHash prop here (PrView has no single commit — it's a
+                     base..head range), which defaults ImageDiff to comparing the
+                     index against the working tree, not the PR's mergeBase->head.
+                     The placeholder's "Open native diff" button (openFile) posts
+                     the correct ref1=mergeBase/ref2=head via openDiff instead. -->
+                {#if d && !d.isBinary}
                   <FileDiffView diff={d} stacked diffMode={diffMode} hideModeToggle heading={file.path} />
                 {:else}
                   <div class="pr-diff-placeholder">
