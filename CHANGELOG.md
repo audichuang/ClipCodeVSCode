@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.27
+
+- **Faster repo discovery / repo picker.** Opening a folder that holds many git
+  repos (especially on slow filesystems — network mounts, WSL `/mnt`) could take
+  up to a couple of minutes before the repo dropdown appeared. Discovery is now
+  progressive: workspace-root repos and their immediate children populate the
+  dropdown right away, while the deeper nested-repo walk and submodule scan
+  finish in the background and fill in the rest. The submodule scan also runs in
+  parallel instead of one repo at a time, so a single slow repo no longer stalls
+  the whole list.
+
 ## 0.3.26
 
 - **PR tab: draggable file-list / diff splitter.** The divider between the

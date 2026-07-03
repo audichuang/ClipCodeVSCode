@@ -26,7 +26,10 @@ export class RepoDiscoveryService {
    * Finds the workspace root repo, its submodules, and independent nested repos.
    * Results are cached until clearCache() is called.
    */
-  static async discoverRepos(folderPaths: string[]): Promise<RepoInfo[]> {
+  static async discoverRepos(
+    folderPaths: string[],
+    onProgress?: (partial: RepoInfo[]) => void,
+  ): Promise<RepoInfo[]> {
     const cacheKey = [...folderPaths].sort().join(';');
     if (this.cache && this.cache.cacheKey === cacheKey) {
       return this.cache.repos;
@@ -36,6 +39,11 @@ export class RepoDiscoveryService {
     const seen = new Set<string>();
     const normalize = (p: string) => path.resolve(p).toLowerCase();
 
+    // --- Fast pass: workspace-root repos + their immediate children ---------
+    // These cover the common case (a folder holding N sibling repos). Emitting
+    // them right away lets the repo dropdown populate in ~one readdir instead of
+    // waiting for the full depth-3 walk + serial submodule scan, which on slow
+    // filesystems (network mounts, WSL /mnt) can stack into minutes.
     for (const folderPath of folderPaths) {
       try {
         const repoRoot = await this.execGit(['rev-parse', '--show-toplevel'], folderPath);
@@ -52,31 +60,39 @@ export class RepoDiscoveryService {
         // Not a git repo - still scan children for nested repos
       }
     }
-
-    // Discover independent nested git repos in workspace folders
-    // We do this before submodules to ensure we catch all independent repos first
     for (const folderPath of folderPaths) {
-      await this.discoverNestedRepos(folderPath, seen, repos, 0, normalize);
+      await this.discoverNestedRepos(folderPath, seen, repos, 0, normalize, 1);
+    }
+    if (onProgress) { onProgress(this.finalizeRepos(repos.map(r => ({ ...r })))); }
+
+    // --- Slow pass: deep nested repos (already-found roots are skipped) ------
+    for (const folderPath of folderPaths) {
+      await this.discoverNestedRepos(folderPath, seen, repos, 0, normalize, MAX_DEPTH);
     }
 
-    // Discover submodules recursively from each repo found (both root and nested)
+    // Discover submodules from each repo found — in parallel so one slow repo
+    // (or one that hits the 15s timeout) no longer blocks all the others.
     const reposToScan = [...repos];
-    for (const repo of reposToScan) {
-      try {
-        const subs = await this.getSubmodules(repo.path);
-        for (const sub of subs) {
-          const normSub = normalize(sub.path);
-          if (!seen.has(normSub)) {
-            seen.add(normSub);
-            repos.push(sub);
-          }
+    const subLists = await Promise.all(
+      reposToScan.map(repo => this.getSubmodules(repo.path).catch(() => [] as RepoInfo[])),
+    );
+    for (const subs of subLists) {
+      for (const sub of subs) {
+        const normSub = normalize(sub.path);
+        if (!seen.has(normSub)) {
+          seen.add(normSub);
+          repos.push(sub);
         }
-      } catch {
-        // No submodules or error, skip
       }
     }
 
+    this.finalizeRepos(repos);
+    this.cache = { repos, cacheKey };
+    return repos;
+  }
 
+  /** Sort by type/name and disambiguate duplicate basenames in place. */
+  private static finalizeRepos(repos: RepoInfo[]): RepoInfo[] {
     const typeOrder: Record<RepoType, number> = { root: 0, nested: 1, submodule: 2 };
     repos.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.name.localeCompare(b.name));
 
@@ -118,7 +134,6 @@ export class RepoDiscoveryService {
       }
     }
 
-    this.cache = { repos, cacheKey };
     return repos;
   }
 
@@ -127,9 +142,10 @@ export class RepoDiscoveryService {
   }
 
   private static async discoverNestedRepos(
-    dir: string, seen: Set<string>, repos: RepoInfo[], depth: number, normalize: (p: string) => string
+    dir: string, seen: Set<string>, repos: RepoInfo[], depth: number, normalize: (p: string) => string,
+    maxDepth: number = MAX_DEPTH
   ): Promise<void> {
-    if (depth >= MAX_DEPTH) { return; }
+    if (depth >= maxDepth) { return; }
 
     let entries: fs.Dirent[];
     try {
@@ -143,6 +159,8 @@ export class RepoDiscoveryService {
     // Check all children in parallel - detect repos by .git presence, then verify with git rev-parse
     const results = await Promise.all(dirs.map(async (entry) => {
       const childPath = path.join(dir, entry.name);
+      // Already discovered on the fast pass — skip the redundant rev-parse spawn.
+      if (seen.has(normalize(childPath))) { return { childPath, hasGit: true }; }
       const hasGit = await this.hasGitDir(childPath);
       if (hasGit) {
         try {
@@ -169,8 +187,9 @@ export class RepoDiscoveryService {
       }
     }
 
-    // Recurse into non-repo directories in parallel
-    await Promise.all(toRecurse.map(p => this.discoverNestedRepos(p, seen, repos, depth + 1, normalize)));
+    // Recurse into non-repo directories in parallel (carry maxDepth through so
+    // the fast pass actually stops at depth 1 instead of resetting to MAX_DEPTH).
+    await Promise.all(toRecurse.map(p => this.discoverNestedRepos(p, seen, repos, depth + 1, normalize, maxDepth)));
   }
 
   private static async hasGitDir(dir: string): Promise<boolean> {
