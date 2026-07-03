@@ -39,6 +39,51 @@
   let head = $state<string | null>(null);
   let showHeadDropdown = $state(false);
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — each
+     dropdown gets its own filter state so typing in one never affects the
+     other. The filtered list is a plain $derived case-insensitive substring
+     match; an empty filter matches everything for free since
+     "anything".includes('') is always true. Closing a dropdown (select,
+     backdrop click, Escape, or a repo switch resetting state) always goes
+     through closeBaseDropdown/closeHeadDropdown so the filter is cleared and
+     the next open starts fresh. */
+  let baseFilter = $state('');
+  let headFilter = $state('');
+  let filteredBaseBranches = $derived(
+    branchStore.branches.filter((b) => b.name.toLowerCase().includes(baseFilter.trim().toLowerCase()))
+  );
+  let filteredHeadBranches = $derived(
+    branchStore.branches.filter((b) => b.name.toLowerCase().includes(headFilter.trim().toLowerCase()))
+  );
+
+  function closeBaseDropdown() {
+    showBaseDropdown = false;
+    baseFilter = '';
+  }
+  function closeHeadDropdown() {
+    showHeadDropdown = false;
+    headFilter = '';
+  }
+  function toggleBaseDropdown() {
+    if (awaitingBranches) return;
+    if (showBaseDropdown) closeBaseDropdown();
+    else showBaseDropdown = true;
+  }
+  function toggleHeadDropdown() {
+    if (awaitingBranches) return;
+    if (showHeadDropdown) closeHeadDropdown();
+    else showHeadDropdown = true;
+  }
+
+  // Svelte action: focus the filter input the instant its dropdown mounts
+  // (the {#if} block re-creates it fresh on every open) so the user can
+  // start typing immediately without an extra click.
+  function focusInput(node: HTMLInputElement) {
+    node.focus();
+  }
+  /* SNIPCODE-HOOK end */
+
   let subTab = $state<'files' | 'commits'>('files');
 
   let commits = $state<PrCommit[]>([]);
@@ -121,7 +166,7 @@
     /* SNIPCODE-HOOK end */
     if (base === b) return;
     base = b;
-    showBaseDropdown = false;
+    closeBaseDropdown(); // SNIPCODE-HOOK: PR tab branch-dropdown type-to-filter — also clears the filter
     /* SNIPCODE-HOOK start: PR tab two-sided compare — only fire once both
        sides are chosen; during default-selection this is a no-op until the
        head default effect below sets `head` too, avoiding a half-configured
@@ -141,7 +186,7 @@
     if (awaitingBranches) return;
     if (head === h) return;
     head = h;
-    showHeadDropdown = false;
+    closeHeadDropdown(); // SNIPCODE-HOOK: PR tab branch-dropdown type-to-filter — also clears the filter
     if (base !== null) loadCommits(base, head);
   }
 
@@ -184,9 +229,11 @@
       head = null; // SNIPCODE-HOOK: PR tab two-sided compare — never carry a head over from the old repo
       // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — close
       // any dropdown left open across the switch so it can't keep rendering
-      // the OLD repo's branch list while awaitingBranches is true.
-      showBaseDropdown = false;
-      showHeadDropdown = false;
+      // the OLD repo's branch list while awaitingBranches is true. Routed
+      // through close*Dropdown (SNIPCODE-HOOK: PR tab branch-dropdown
+      // type-to-filter) so a stale filter doesn't survive into the new repo.
+      closeBaseDropdown();
+      closeHeadDropdown();
       commits = [];
       files = [];
       diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
@@ -384,7 +431,7 @@
            below still lists the OLD repo's branchStore.branches until the new
            repo's branchData arrives, so opening it here could let the user
            pick a stale ref. -->
-      <button class="base-pill" disabled={awaitingBranches} onclick={() => { if (awaitingBranches) return; showBaseDropdown = !showBaseDropdown; }}>
+      <button class="base-pill" disabled={awaitingBranches} onclick={toggleBaseDropdown}>
         <i class="codicon codicon-git-branch"></i>
         <span class="base-name">{base ?? t('pr.selectBase')}</span>
         <i class="codicon codicon-chevron-down base-chevron"></i>
@@ -392,9 +439,30 @@
       {#if showBaseDropdown}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="repo-dropdown-backdrop" onclick={() => { showBaseDropdown = false; }}></div>
+        <div class="repo-dropdown-backdrop" onclick={closeBaseDropdown}></div>
         <div class="repo-dropdown">
-          {#each branchStore.branches as b (b.name)}
+          <!-- SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter —
+               auto-focused filter input; Enter picks the first filtered
+               result, Escape closes without picking. Sits above the backdrop
+               (dropdown's own z-index) so clicks/typing here never bubble to
+               the backdrop's close handler. -->
+          <input
+            type="text"
+            class="dropdown-filter-input"
+            placeholder="Filter branches…"
+            bind:value={baseFilter}
+            use:focusInput
+            onkeydown={(e) => {
+              if (e.key === 'Enter') {
+                const first = filteredBaseBranches[0];
+                if (first) selectBase(first.name);
+              } else if (e.key === 'Escape') {
+                closeBaseDropdown();
+              }
+            }}
+          />
+          <!-- SNIPCODE-HOOK end -->
+          {#each filteredBaseBranches as b (b.name)}
             <button
               class="repo-dropdown-item"
               class:active={base === b.name}
@@ -403,6 +471,8 @@
               <i class="codicon {base === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
               <span class="repo-dropdown-item-name">{b.name}</span>
             </button>
+          {:else}
+            <div class="repo-dropdown-empty">No matching branches</div>
           {/each}
         </div>
       {/if}
@@ -416,7 +486,7 @@
     <div class="base-dropdown-wrapper">
       <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
            same guard as the base pill above; see its comment. -->
-      <button class="base-pill" disabled={awaitingBranches} onclick={() => { if (awaitingBranches) return; showHeadDropdown = !showHeadDropdown; }}>
+      <button class="base-pill" disabled={awaitingBranches} onclick={toggleHeadDropdown}>
         <i class="codicon codicon-git-branch"></i>
         <span class="base-name">{head ?? branchStore.currentBranch?.name ?? 'HEAD'}</span>
         <i class="codicon codicon-chevron-down base-chevron"></i>
@@ -424,9 +494,28 @@
       {#if showHeadDropdown}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="repo-dropdown-backdrop" onclick={() => { showHeadDropdown = false; }}></div>
+        <div class="repo-dropdown-backdrop" onclick={closeHeadDropdown}></div>
         <div class="repo-dropdown">
-          {#each branchStore.branches as b (b.name)}
+          <!-- SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — see
+               the base dropdown's filter input above for the full rationale;
+               this is the same behavior mirrored for head. -->
+          <input
+            type="text"
+            class="dropdown-filter-input"
+            placeholder="Filter branches…"
+            bind:value={headFilter}
+            use:focusInput
+            onkeydown={(e) => {
+              if (e.key === 'Enter') {
+                const first = filteredHeadBranches[0];
+                if (first) selectHead(first.name);
+              } else if (e.key === 'Escape') {
+                closeHeadDropdown();
+              }
+            }}
+          />
+          <!-- SNIPCODE-HOOK end -->
+          {#each filteredHeadBranches as b (b.name)}
             <button
               class="repo-dropdown-item"
               class:active={head === b.name}
@@ -435,6 +524,8 @@
               <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
               <span class="repo-dropdown-item-name">{b.name}</span>
             </button>
+          {:else}
+            <div class="repo-dropdown-empty">No matching branches</div>
           {/each}
         </div>
       {/if}
@@ -680,6 +771,32 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  /* SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter */
+  .dropdown-filter-input {
+    box-sizing: border-box;
+    width: 100%;
+    margin-bottom: 4px;
+    padding: 5px 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border, var(--border-color));
+    border-radius: 4px;
+    color: var(--input-fg);
+    font-size: inherit;
+    font-family: var(--vscode-editor-font-family, monospace);
+    outline: none;
+  }
+
+  .dropdown-filter-input:focus {
+    border-color: var(--vscode-focusBorder, #007fd4);
+  }
+
+  .repo-dropdown-empty {
+    padding: 8px 10px;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab two-sided compare */
   .pr-swap-btn {
