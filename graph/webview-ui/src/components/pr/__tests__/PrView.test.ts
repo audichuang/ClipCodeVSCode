@@ -1005,6 +1005,12 @@ describe('PrView — resizable file-list/diff splitter', () => {
   it('renders a resize handle between the file list and diff stack, with the file list at the default 240px width', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    // SNIPCODE-HOOK: PR tab resize handle (review fix, High) — Svelte's
+    // scoped <style> block isn't injected under this project's vitest/
+    // happy-dom setup (getComputedStyle on .pr-resize-handle returns ''), so
+    // the height/single-divider CSS fix can't be asserted via computed style
+    // here; it's covered by the drag/clamp behavior below plus manual
+    // verification that the handle spans the row's full height in-app.
     expect(container.querySelector('.pr-resize-handle')).toBeTruthy();
     const fileList = container.querySelector<HTMLElement>('.pr-file-list')!;
     expect(fileList.style.width).toBe('240px');
