@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getVsCodeApi } from '../../lib/vscode-api';
+  import { uiStore } from '../../lib/stores/ui.svelte';
   import { avatarStore } from '../../lib/stores/avatars.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { tooltip } from '../../lib/actions/tooltip';
@@ -25,8 +26,17 @@
       }
     }
     window.addEventListener('message', handleMessage);
-    vscode.postMessage({ type: 'getStats' });
     return () => window.removeEventListener('message', handleMessage);
+  });
+
+  // Re-fetch whenever the active repo changes. Switching repo while this view is
+  // mounted doesn't re-run onMount (viewMode stays 'stats'), and the host only
+  // sends `statsData` in reply to `getStats` — so without this the stats stay
+  // stuck on the previous repo. Reading activeRepo also covers the initial load.
+  $effect(() => {
+    uiStore.activeRepo; // track
+    loading = true;
+    vscode.postMessage({ type: 'getStats' });
   });
 
   function getHeatColor(count: number): string {

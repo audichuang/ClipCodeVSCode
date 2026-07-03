@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.28
+
+- **Stats view now follows the active repo.** Switching repositories while the
+  Stats tab was open left the contributor/heatmap numbers stuck on the previous
+  repo — the view only fetched its data once when first opened. It now re-fetches
+  whenever the active repo changes.
+- **Type-to-filter in the repo picker.** The repo dropdown has a filter box at
+  the top (auto-focused on open) so you can narrow a long list by typing; Enter
+  selects the first match, Esc closes. The list also scrolls instead of
+  overflowing when there are many repos.
+
 ## 0.3.27
 
 - **Faster repo discovery / repo picker.** Opening a folder that holds many git

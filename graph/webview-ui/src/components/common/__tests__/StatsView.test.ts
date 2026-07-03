@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/svelte';
 import StatsView from '../StatsView.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
+import { uiStore } from '../../../lib/stores/ui.svelte';
 
 function deliverStats(byAuthor: Array<{ author: string; email: string; count: number }>, byWeekdayHour: Array<{ weekday: number; hour: number; count: number }> = []) {
   window.dispatchEvent(new MessageEvent('message', {
@@ -21,6 +22,19 @@ describe('StatsView', () => {
       (m) => (m.data as { type?: string }).type === 'getStats'
     );
     expect(req).toBeDefined();
+  });
+
+  it('re-requests stats when the active repo changes', async () => {
+    render(StatsView);
+    // Drop the initial on-mount request so we only count the switch-triggered one.
+    globalThis.__postedMessages = [];
+    uiStore.activeRepo = '/some/other/repo';
+    await waitFor(() => {
+      const reqs = globalThis.__postedMessages.filter(
+        (m) => (m.data as { type?: string }).type === 'getStats'
+      );
+      expect(reqs.length).toBeGreaterThan(0);
+    });
   });
 
   it('shows spinner before data arrives', () => {

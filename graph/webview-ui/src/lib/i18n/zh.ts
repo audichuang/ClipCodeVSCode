@@ -3,6 +3,8 @@ export const zh: Record<string, string> = {
   'toolbar.history': 'Graph',
   'toolbar.log': 'Reflog',
   'toolbar.stats': '统计',
+  'toolbar.filterRepos': '筛选仓库…',
+  'toolbar.noRepoMatch': '没有匹配的仓库',
   'toolbar.fetch': '抓取',
   'toolbar.pull': '拉取',
   'toolbar.push': '推送',
