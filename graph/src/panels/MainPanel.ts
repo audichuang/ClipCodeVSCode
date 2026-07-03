@@ -1904,7 +1904,18 @@ export class MainPanel {
         workspacePaths.add(f.uri.fsPath);
       }
       workspacePaths.add(this.repoPath);
-      const discovered = await RepoDiscoveryService.discoverRepos([...workspacePaths]);
+      // Paint the dropdown with the fast-pass repos immediately; the full list
+      // (deep-nested repos + submodules) arrives in a second post below. The
+      // webview replaces its list on each repoList message, so this is safe.
+      const discovered = await RepoDiscoveryService.discoverRepos([...workspacePaths], (partial) => {
+        const partialRepos = partial.map(r => ({ ...r, path: vscode.Uri.file(r.path).fsPath }));
+        // Update cachedRepos before posting: switchRepo() validates a clicked
+        // repo against cachedRepos, so a repo shown by the fast pass must already
+        // be allowed even if the user clicks it before the slow pass finishes.
+        this.cachedRepos = partialRepos;
+        const active = vscode.Uri.file(this.repoPath).fsPath;
+        this.post({ type: 'repoList', payload: { repos: partialRepos, active } });
+      });
       // Canonicalize every path to VS Code's fsPath so the repo list and the
       // active path share one format. `git rev-parse --show-toplevel` returns
       // forward slashes (and a lowercase drive on Windows) while VS Code paths
