@@ -5,7 +5,7 @@
      via `openDiff` (ref1/ref2, with oldPath for renames). Kept as its own component (not
      wired into CommitGraph/CommitDetails) per plan constraints. -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { getVsCodeApi } from '../../lib/vscode-api';
   import { branchStore } from '../../lib/stores/branches.svelte';
   import { uiStore } from '../../lib/stores/ui.svelte';
@@ -297,6 +297,48 @@
       const dh = defaultHead();
       if (dh) selectHead(dh);
     }
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
+     CommitDetails.svelte's resize-handle pattern (filesPanelWidth/startResize/
+     onResizeMove/stopResize, :190,224-247) for the Files sub-tab's
+     file-list/diff split, which previously had a CSS-fixed width
+     (.pr-files-layout .pr-file-list). Not persisted across sessions, same as
+     CommitDetails' filesPanelWidth. */
+  let fileListWidth = $state(240);
+  let isResizingFiles = $state(false);
+  let resizeStartX = 0;
+  let resizeStartWidth = 0;
+
+  function startResize(e: MouseEvent) {
+    e.preventDefault();
+    isResizingFiles = true;
+    resizeStartX = e.clientX;
+    resizeStartWidth = fileListWidth;
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', stopResize);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  }
+
+  function onResizeMove(e: MouseEvent) {
+    fileListWidth = Math.min(600, Math.max(120, resizeStartWidth + (e.clientX - resizeStartX)));
+  }
+
+  function stopResize() {
+    isResizingFiles = false;
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', stopResize);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+  }
+
+  onDestroy(() => {
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', stopResize);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
   });
   /* SNIPCODE-HOOK end */
 
@@ -615,7 +657,7 @@
              every file. Not lazy-loaded: every file's diff renders up front
              (see plan — large PRs are a follow-up, not this version). -->
         <div class="pr-files-layout">
-          <div class="pr-file-list">
+          <div class="pr-file-list" style="width: {fileListWidth}px; flex-shrink: 0;">
             {#each files as file (file.path)}
               <button class="pr-file-row" onclick={() => scrollToFile(file)}>
                 <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
@@ -623,6 +665,16 @@
               </button>
             {/each}
           </div>
+          <!-- SNIPCODE-HOOK: PR tab resizable file-list/diff splitter -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            class="pr-resize-handle"
+            class:resizing={isResizingFiles}
+            onmousedown={startResize}
+            role="separator"
+            aria-orientation="vertical"
+          ></div>
+          <!-- SNIPCODE-HOOK end -->
           <div class="pr-diff-stack">
             {#each files as file (file.path)}
               {@const d = diffs.find((x) => x.file === file.path)}
@@ -959,11 +1011,31 @@
   }
 
   .pr-files-layout .pr-file-list {
-    flex: 0 0 240px;
+    /* SNIPCODE-HOOK: PR tab resizable file-list/diff splitter — width is now
+       driven by the inline style (fileListWidth, clamped 120-600px); no
+       fixed flex-basis here so that inline width takes effect. */
+    flex-shrink: 0;
     position: sticky;
     top: 0;
     border-right: 1px solid var(--border-color);
   }
+
+  /* SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
+     CommitDetails.svelte's .resize-handle (:1826-1836). */
+  .pr-resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: transparent;
+    border-right: 1px solid var(--border-color);
+    transition: background 0.15s;
+  }
+
+  .pr-resize-handle:hover,
+  .pr-resize-handle.resizing {
+    background: var(--vscode-sash-hoverBorder, rgba(128, 128, 128, 0.4));
+  }
+  /* SNIPCODE-HOOK end */
 
   .pr-diff-stack {
     flex: 1;
