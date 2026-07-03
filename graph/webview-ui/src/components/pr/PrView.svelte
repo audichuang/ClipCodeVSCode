@@ -164,7 +164,17 @@
        (e.g. a stale dropdown left open across the switch). */
     if (awaitingBranches) return;
     /* SNIPCODE-HOOK end */
-    if (base === b) return;
+    /* SNIPCODE-HOOK start: PR tab (Medium) — re-picking the already-selected
+       base must still close+clear the dropdown per the pick contract (any
+       selection closes the dropdown); only the reload is skipped. Returning
+       before closeBaseDropdown() left the dropdown open with a live filter
+       when the user picked the currently-active branch (e.g. Enter on an
+       already-active first-filtered result, or clicking the active item). */
+    if (base === b) {
+      closeBaseDropdown();
+      return;
+    }
+    /* SNIPCODE-HOOK end */
     base = b;
     closeBaseDropdown(); // SNIPCODE-HOOK: PR tab branch-dropdown type-to-filter — also clears the filter
     /* SNIPCODE-HOOK start: PR tab two-sided compare — only fire once both
@@ -184,7 +194,14 @@
     // SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) — same
     // guard as selectBase above; see its comment.
     if (awaitingBranches) return;
-    if (head === h) return;
+    /* SNIPCODE-HOOK start: PR tab (Medium) — same fix as selectBase above:
+       re-picking the already-active head must still close+clear the
+       dropdown, just skip the reload. See selectBase's comment. */
+    if (head === h) {
+      closeHeadDropdown();
+      return;
+    }
+    /* SNIPCODE-HOOK end */
     head = h;
     closeHeadDropdown(); // SNIPCODE-HOOK: PR tab branch-dropdown type-to-filter — also clears the filter
     if (base !== null) loadCommits(base, head);
