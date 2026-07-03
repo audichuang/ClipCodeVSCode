@@ -30,6 +30,20 @@ class CommitStore {
   });
 
   setData(data: CommitGraphData) {
+    // Refreshes (post-op / watcher) request the log WITHOUT signature verification
+    // to keep it off the hot path (preserveSignatures), so their commits carry no
+    // signatureStatus. Carry over the last-known status by hash so badges from the
+    // initial signed getLog don't blink out on every refresh. Gated on the flag so
+    // an intentional unsigned getLog (setting toggled off) still clears them.
+    if (data.preserveSignatures) {
+      const prev = this.commitByHash;
+      for (const c of data.commits) {
+        if (c.signatureStatus === undefined) {
+          const known = prev.get(c.hash)?.signatureStatus;
+          if (known !== undefined) c.signatureStatus = known;
+        }
+      }
+    }
     this.commits = data.commits;
     this.graphNodes = data.graph;
     this.paths = data.paths ?? [];

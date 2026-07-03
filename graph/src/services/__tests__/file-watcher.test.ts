@@ -107,19 +107,36 @@ describe('FileWatcher debounce / cooldown / suppress state machine', () => {
     for (const w of created) expect(w.dispose).toHaveBeenCalled();
   });
 
-  it('suppress() absorbs events during the window, then re-triggers once afterwards', () => {
+  it('suppress() fully absorbs events during the window (no redundant re-trigger)', () => {
     fw.suppress(1000);
     fireOn('**', `${REPO}/src/a.ts`);
-    // Still inside the suppression window → nothing yet.
+    // Inside the window → nothing.
     vi.advanceTimersByTime(500);
     expect(onChange).not.toHaveBeenCalled();
-    // Cooldown ends at 1000ms → a coalesced re-trigger is scheduled…
+    // Window ends at 1000ms; the op's own events are dropped, not re-triggered…
     vi.advanceTimersByTime(500);
-    // …which then waits out its own debounce.
+    // …and nothing fires after any subsequent debounce either.
     vi.advanceTimersByTime(500);
-    // Exactly one delivery, carrying the change type absorbed during the window
-    // (the pending 'status' is retained and outranks the re-trigger's 'unknown').
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('suppress() cancels a debounce already armed by the op before it was called', () => {
+    // The op's .git writes arm a debounce first; refreshAll() then calls suppress().
+    fireOn('**', `${REPO}/.git/HEAD`);
+    vi.advanceTimersByTime(200); // debounce armed but not yet fired
+    fw.suppress(1000);
+    // The pre-armed debounce must not fire a redundant refresh.
+    vi.advanceTimersByTime(500);
+    expect(onChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('a real external change after the suppress window still refreshes', () => {
+    fw.suppress(1000);
+    vi.advanceTimersByTime(1000); // window fully expired, refreshing cleared
+    fireOn('**', `${REPO}/src/b.ts`);
+    vi.advanceTimersByTime(500);
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith('status');
   });
 });

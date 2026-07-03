@@ -89,6 +89,24 @@ import RewordModal from './components/modals/RewordModal.svelte';
 
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
+      // Clear the mutating-op busy indicator (set in vscode-api's postMessage)
+      // only on a *terminal* outcome that the user can actually see: the graph
+      // repainted (fullRefresh/logData), the op failed (error/notGitRepo), or it
+      // paused waiting for the user (operationPaused/conflictData). Deliberately
+      // NOT 'operationComplete' — handlers post it BEFORE `await refreshAll()`, so
+      // clearing there would hide the indicator during the slow repaint this is
+      // meant to cover. Every mutating op ends its refresh with fullRefresh or
+      // logData (or one of the failure/pause messages), so the bar always clears.
+      switch (msg.type) {
+        case 'fullRefresh':
+        case 'logData':
+        case 'error':
+        case 'operationPaused':
+        case 'conflictData':
+        case 'notGitRepo':
+          uiStore.operating = null;
+          break;
+      }
       switch (msg.type) {
         case 'logData':
           if (msg.payload.remoteFilter !== undefined) remoteFilter = msg.payload.remoteFilter;

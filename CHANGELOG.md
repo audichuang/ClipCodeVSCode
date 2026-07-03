@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.29
+
+- **Git operations feel instant now.** Squash / rebase / reset / merge and other
+  operations used to appear frozen after you clicked — no feedback until a heavy
+  refresh landed, and then the view kept "loading" a second time. Three fixes:
+  - A busy progress bar now shows the moment a git operation starts, so the
+    button press is never silent.
+  - The file watcher no longer fires a **second, redundant** full refresh for the
+    operation's own changes — every op now refreshes once instead of twice.
+  - Commit-signature verification (which serially checks every commit on signed
+    repos) is kept off the post-operation refresh path, so the graph repaints
+    without waiting on it; signature badges are preserved across refreshes.
+- The uncommitted-changes probe now runs concurrently with the log walk instead
+  of after it, and the "squashed / reset" confirmation appears together with the
+  graph update rather than before it.
+
 ## 0.3.28
 
 - **Stats view now follows the active repo.** Switching repositories while the

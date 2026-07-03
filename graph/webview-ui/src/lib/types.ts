@@ -81,6 +81,12 @@ export interface CommitGraphData {
   commitLeftMargin?: number[];
   hasMore?: boolean;
   currentLimit?: number;
+  /** Set by the refresh hot path, which fetches the log WITHOUT signature
+   *  verification for speed. Tells the commit store to carry each commit's
+   *  last-known signatureStatus forward by hash instead of blanking the badges.
+   *  Absent on `getLog` payloads, so toggling the setting off (an intentional
+   *  unsigned load) correctly clears them. */
+  preserveSignatures?: boolean;
 }
 
 export interface BranchInfo {
