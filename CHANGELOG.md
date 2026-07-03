@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.31
+
+- **Fix: PR compare swap button was flung to the far end of the toolbar.** In
+  0.3.30 the swap button used `margin-left: auto`, pushing it to the right edge
+  of the whole row instead of sitting next to the base branch pill. It now sits
+  right beside the pills (`head into base ⇄`).
+
 ## 0.3.30
 
 - **PR compare header now reads like GitHub.** The base/head picker used to be
