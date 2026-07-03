@@ -1023,11 +1023,19 @@
   /* SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
      CommitDetails.svelte's .resize-handle (:1826-1836). */
   .pr-resize-handle {
+    /* SNIPCODE-HOOK: PR tab resize handle (review fix) — .pr-files-layout is
+       align-items: flex-start (so the sticky .pr-file-list doesn't stretch to
+       the full diff-stack height); without align-self here the handle's own
+       cross-size collapsed to ~0px and couldn't be grabbed. align-self:
+       stretch pulls just this element back to the row's full height.
+       border-right dropped too — .pr-file-list already draws one divider
+       line; keeping both drew two ~5px apart. The hover/active background
+       below is still the drag affordance. */
     width: 5px;
+    align-self: stretch;
     flex-shrink: 0;
     cursor: col-resize;
     background: transparent;
-    border-right: 1px solid var(--border-color);
     transition: background 0.15s;
   }
 
