@@ -501,6 +501,40 @@ describe('PrView — inline diff preview (Task D2)', () => {
     });
   });
 
+  // SNIPCODE-HOOK: PR tab inline diff (Task D2 fix, blocking review finding) —
+  // D1's parseDiff DOES return a DiffData entry for binary files (isBinary:
+  // true, empty hunks — git-parser.ts:248-252), so this is NOT the "missing
+  // from diffs" case above: `d` is found, but must still route to the
+  // placeholder rather than <FileDiffView>, since FileDiffView would render
+  // <ImageDiff> with no commitHash (PrView has no single commit — base..head
+  // is a range) and silently compare the wrong things (index vs working tree).
+  it('a binary/image diffs entry (isBinary+isImage) shows the placeholder, not FileDiffView, and its native-diff button uses the mergeBase/head refs', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'assets/logo.png', status: 'M' }],
+      diffs: [{ file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    });
+    const btn = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.pr-open-native-btn');
+      expect(b).toBeTruthy();
+      return b!;
+    });
+    expect(container.textContent).toContain('assets/logo.png');
+    // Never rendered via FileDiffView/ImageDiff for this range comparison.
+    expect(container.querySelector('.diff-content')).toBeNull();
+    expect(container.querySelector('.diff-sbs')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+
+    await fireEvent.click(btn);
+    const req = lastMessageOf('openDiff');
+    expect(req?.payload).toEqual({ file: 'assets/logo.png', oldPath: undefined, ref1: 'mb', ref2: 'feat' });
+  });
+
   it('clicking a file in the left list scrolls to its matching stacked FileDiffView section', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
