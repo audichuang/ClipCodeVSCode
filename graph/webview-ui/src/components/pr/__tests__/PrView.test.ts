@@ -428,6 +428,143 @@ describe('PrView — head selectable + swap', () => {
   });
 });
 
+// SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — both the base
+// and head dropdowns gain a filter input at the top; typing narrows the list
+// to a case-insensitive substring match, an empty/no-match result shows "No
+// matching branches", the input auto-focuses on open, and closing (select,
+// backdrop click, Escape) clears the filter for the next open.
+describe('PrView — branch dropdown type-to-filter', () => {
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+      branch({ name: 'origin/develop', remote: 'origin' }),
+      branch({ name: 'release/1.0' }),
+    ];
+    return render(PrView);
+  }
+
+  function filterInput(container: HTMLElement) {
+    return container.querySelector<HTMLInputElement>('.repo-dropdown .dropdown-filter-input');
+  }
+
+  it('auto-focuses the base filter input when the dropdown opens', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('filters the base branch list case-insensitively as the user types', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = filterInput(container)!;
+    await fireEvent.input(input, { target: { value: 'DEV' } });
+    await waitFor(() => {
+      const items = Array.from(container.querySelectorAll<HTMLButtonElement>('.repo-dropdown-item'));
+      expect(items.length).toBe(1);
+      expect(items[0].textContent).toContain('origin/develop');
+    });
+  });
+
+  it('shows "No matching branches" when nothing matches the filter', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = filterInput(container)!;
+    await fireEvent.input(input, { target: { value: 'zzz-no-such-branch' } });
+    await waitFor(() => {
+      expect(container.querySelector('.repo-dropdown-empty')).toBeTruthy();
+      expect(container.textContent).toContain('No matching branches');
+      expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(0);
+    });
+  });
+
+  it('clears the base filter when the dropdown closes (backdrop click) and reopens with the full list', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = filterInput(container)!;
+    await fireEvent.input(input, { target: { value: 'dev' } });
+    await waitFor(() => expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(1));
+
+    await fireEvent.click(container.querySelector('.repo-dropdown-backdrop')!);
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+
+    await fireEvent.click(pills[0]);
+    const reopened = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(reopened.value).toBe('');
+    expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(4);
+  });
+
+  it('filters the head branch list the same way', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[1]);
+    const input = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.input(input, { target: { value: 'release' } });
+    await waitFor(() => {
+      const items = Array.from(container.querySelectorAll<HTMLButtonElement>('.repo-dropdown-item'));
+      expect(items.length).toBe(1);
+      expect(items[0].textContent).toContain('release/1.0');
+    });
+  });
+
+  it('pressing Enter selects the first filtered result and closes the dropdown', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = filterInput(container)!;
+    await fireEvent.input(input, { target: { value: 'develop' } });
+    await waitFor(() => expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(1));
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => {
+      expect(pills[0].textContent).toContain('origin/develop');
+    });
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+  });
+
+  it('pressing Escape closes the dropdown without selecting anything', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    const input = filterInput(container)!;
+    await fireEvent.keyDown(input, { key: 'Escape' });
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+    expect(pills[0].textContent).not.toContain('feat');
+  });
+
+  it('disabled while awaitingBranches: clicking the base pill does not open the dropdown or its filter input', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+    uiStore.activeRepo = '/other-repo';
+    await waitFor(() => expect(container.textContent).toContain('Select base branch'));
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    expect(pills[0].disabled).toBe(true);
+    await fireEvent.click(pills[0]);
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end
+
 // SNIPCODE-HOOK start: PR tab inline diff (Task D2) — PrView renders
 // FileDiffView stacked per changed file straight from commitsBetween.diffs
 // (Task D1), drives a shared inline/side-by-side toggle across all of them,
