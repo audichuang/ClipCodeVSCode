@@ -535,6 +535,39 @@ describe('PrView — inline diff preview (Task D2)', () => {
     expect(req?.payload).toEqual({ file: 'assets/logo.png', oldPath: undefined, ref1: 'mb', ref2: 'feat' });
   });
 
+  // SNIPCODE-HOOK start: PR tab (Minor fix) — a pure rename/mode-only/empty
+  // add-delete diff is NOT binary but has hunks: [], so `d` is found and
+  // !d.isBinary is true; without the hunks.length > 0 check this used to
+  // render an empty FileDiffView with nothing to show and no way to see the
+  // actual change. Must fall through to the same placeholder + native-diff
+  // fallback as binary files.
+  it('a non-binary diffs entry with zero hunks (e.g. a pure rename) shows the placeholder, not an empty FileDiffView', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/renamed.ts', status: 'R', oldPath: 'src/original.ts' }],
+      diffs: [{ file: 'src/renamed.ts', isBinary: false, isImage: false, hunks: [] }],
+    });
+    const btn = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.pr-open-native-btn');
+      expect(b).toBeTruthy();
+      return b!;
+    });
+    expect(container.textContent).toContain('src/renamed.ts');
+    // Never rendered via FileDiffView for a zero-hunk diff.
+    expect(container.querySelector('.diff-content')).toBeNull();
+    expect(container.querySelector('.diff-sbs')).toBeNull();
+
+    await fireEvent.click(btn);
+    const req = lastMessageOf('openDiff');
+    expect(req?.payload).toEqual({ file: 'src/renamed.ts', oldPath: 'src/original.ts', ref1: 'mb', ref2: 'feat' });
+  });
+  // SNIPCODE-HOOK end
+
   it('clicking a file in the left list scrolls to its matching stacked FileDiffView section', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
@@ -562,63 +595,152 @@ describe('PrView — inline diff preview (Task D2)', () => {
     });
   });
 
-  // SNIPCODE-HOOK: PR tab inline diff (Task D2) — jumpChange compares each
-  // hunk's live getBoundingClientRect() against the container's viewport
-  // center line, not offsetTop vs scrollTop (offsetTop is relative to the
-  // offsetParent, not comparable to scrollTop, and once
-  // scrollIntoView({block:'center'}) has run once, an offsetTop/scrollTop
-  // compare re-selects the same hunk forever — see PrView.svelte's
-  // jumpChange comment). `.pr-content` itself doesn't move when scrolled
-  // (only its children do), so its own getBoundingClientRect().top/
-  // clientHeight are fixed for the whole test; each hunk's rect.top is
-  // modeled as `documentY - virtualScrollTop`, and virtualScrollTop is
-  // advanced after each click the same way a real
-  // scrollIntoView({block:'center'}) would (since scrollIntoView itself is
-  // stubbed to a no-op here) — landing the clicked hunk's rect.top on the
-  // center line for the next assertion.
-  it('prev/next-change buttons scroll to the next/previous diff hunk within .pr-content, advancing past each one', async () => {
+  // SNIPCODE-HOOK start: PR tab prev/next-change nav (fix) — replaces the old
+  // viewport-center-cursor test above. jumpChange now tracks a plain index
+  // (currentHunk, starting at -1) into the flattened hunk list instead of
+  // comparing getBoundingClientRect().top against the pane's center line —
+  // the old cursor put the FIRST hunk above center on initial load, so the
+  // first "next" click skipped it (a single-hunk PR's "next" was a permanent
+  // no-op), and "prev" at the top could re-jump to that same first hunk.
+  // scrollIntoView is stubbed to a no-op throughout; only which element it
+  // was called on matters here.
+  it('first "next" click selects the first hunk (not the second) on initial load', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
-    const prContent = container.querySelector<HTMLElement>('.pr-content')!;
     const hunks = Array.from(container.querySelectorAll<HTMLElement>('.diff-hunk'));
     expect(hunks.length).toBe(2);
-
-    const clientHeight = 200;
-    const center = clientHeight / 2; // 100
-    const hunkDocY = [500, 700]; // fixed document positions, arbitrary
-    let virtualScrollTop = 0;
-
-    vi.spyOn(prContent, 'getBoundingClientRect').mockImplementation(() => ({ top: 0 }) as DOMRect);
-    Object.defineProperty(prContent, 'clientHeight', { value: clientHeight, configurable: true });
-    hunks.forEach((el, i) => {
-      vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
-        () => ({ top: hunkDocY[i] - virtualScrollTop }) as DOMRect,
-      );
-    });
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
 
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.pr-jump-next')!);
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    expect(scrollSpy.mock.instances[0]).toBe(hunks[0]);
+
+    scrollSpy.mockRestore();
+  });
+
+  it('"prev" before any "next" is a no-op (no scroll, nothing to go back to)', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.pr-jump-prev')!);
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    scrollSpy.mockRestore();
+  });
+
+  it('next/prev advance and step back one logical hunk at a time; "prev" at the first hunk is a no-op', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const hunks = Array.from(container.querySelectorAll<HTMLElement>('.diff-hunk'));
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
     const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
     const prevBtn = container.querySelector<HTMLButtonElement>('.pr-jump-prev')!;
 
-    // Nothing scrolled yet: both hunks are below the center line, "next"
-    // finds the first one.
-    await fireEvent.click(nextBtn);
-    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    await fireEvent.click(nextBtn); // -1 -> 0
     expect(scrollSpy.mock.instances[0]).toBe(hunks[0]);
-    virtualScrollTop = hunkDocY[0] - center; // simulate the centering scrollIntoView caused
-
-    // The bug this replaces: an offsetTop/scrollTop compare would re-select
-    // hunks[0] here forever. The fixed rect-vs-center-line compare correctly
-    // skips it (its rect.top now sits at the center line) and advances.
-    await fireEvent.click(nextBtn);
-    expect(scrollSpy).toHaveBeenCalledTimes(2);
+    await fireEvent.click(nextBtn); // 0 -> 1
     expect(scrollSpy.mock.instances[1]).toBe(hunks[1]);
-    virtualScrollTop = hunkDocY[1] - center; // simulate centering hunks[1]
+    await fireEvent.click(nextBtn); // clamped at last index (1)
+    expect(scrollSpy.mock.instances[2]).toBe(hunks[1]);
+    await fireEvent.click(prevBtn); // 1 -> 0
+    expect(scrollSpy.mock.instances[3]).toBe(hunks[0]);
+    expect(scrollSpy).toHaveBeenCalledTimes(4);
 
-    // "prev" from hunks[1] centered: skips hunks[1] itself, steps back to hunks[0].
-    await fireEvent.click(prevBtn);
-    expect(scrollSpy).toHaveBeenCalledTimes(3);
-    expect(scrollSpy.mock.instances[2]).toBe(hunks[0]);
+    await fireEvent.click(prevBtn); // at 0: no-op, no extra scroll
+    expect(scrollSpy).toHaveBeenCalledTimes(4);
+
+    scrollSpy.mockRestore();
+  });
+
+  it('a single-hunk PR: "next" jumps to it, a second "next" is a no-op past the end', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }],
+      diffs: [diffFixture('src/a.ts', 'hello-from-a')],
+    });
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const hunk = container.querySelector<HTMLElement>('.diff-hunk')!;
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
+
+    await fireEvent.click(nextBtn);
+    expect(scrollSpy.mock.instances[0]).toBe(hunk);
+    await fireEvent.click(nextBtn); // clamped, still index 0 — scrolls to the same hunk again
+    expect(scrollSpy.mock.instances[1]).toBe(hunk);
+
+    scrollSpy.mockRestore();
+  });
+
+  it('side-by-side mode advances one logical hunk at a time (dedupes the left/right .sbs-hunk pair)', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const sbsBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-diff-mode-toggle button'))
+      .find((b) => b.textContent?.includes('Side by Side'))!;
+    await fireEvent.click(sbsBtn);
+    await waitFor(() => expect(container.querySelectorAll('.diff-sbs').length).toBe(2));
+
+    const leftHunks = Array.from(container.querySelectorAll<HTMLElement>('.sbs-left .sbs-hunk'));
+    expect(leftHunks.length).toBe(2); // one per file, not doubled by the right pane
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
+
+    await fireEvent.click(nextBtn);
+    expect(scrollSpy.mock.instances[0]).toBe(leftHunks[0]);
+    await fireEvent.click(nextBtn);
+    expect(scrollSpy.mock.instances[1]).toBe(leftHunks[1]);
+
+    scrollSpy.mockRestore();
+  });
+
+  it('resets the jump cursor on a diffMode switch (next after switching selects the first hunk again)', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    await fireEvent.click(nextBtn); // advance to hunk 0 in inline mode
+
+    const sbsBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-diff-mode-toggle button'))
+      .find((b) => b.textContent?.includes('Side by Side'))!;
+    await fireEvent.click(sbsBtn);
+    await waitFor(() => expect(container.querySelectorAll('.diff-sbs').length).toBe(2));
+
+    const leftHunks = Array.from(container.querySelectorAll<HTMLElement>('.sbs-left .sbs-hunk'));
+    await fireEvent.click(nextBtn); // must land on the first hunk again, not advance to the second
+    expect(scrollSpy.mock.instances[scrollSpy.mock.instances.length - 1]).toBe(leftHunks[0]);
+
+    scrollSpy.mockRestore();
+  });
+
+  it('resets the jump cursor when the compare changes (base/head swap triggers a new compare)', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
+    const hunksBefore = Array.from(container.querySelectorAll<HTMLElement>('.diff-hunk'));
+    await fireEvent.click(nextBtn); // -1 -> 0
+    await fireEvent.click(nextBtn); // 0 -> 1
+    expect(scrollSpy.mock.instances[1]).toBe(hunksBefore[1]);
+
+    // Swap base/head: loadCommits clears diffs and resets currentHunk to -1
+    // before the new response even lands.
+    const swapBtn = container.querySelector<HTMLButtonElement>('.pr-swap-btn')!;
+    await fireEvent.click(swapBtn);
+    deliver('commitsBetween', {
+      base: 'feat', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/c.ts', status: 'M' }],
+      diffs: [diffFixture('src/c.ts', 'hello-from-c')],
+    });
+    await waitFor(() => expect(container.textContent).toContain('hello-from-c'));
+
+    const newHunk = container.querySelector<HTMLElement>('.diff-hunk')!;
+    await fireEvent.click(nextBtn); // must land on the first hunk of the NEW diff set, not advance past it
+    expect(scrollSpy.mock.instances[scrollSpy.mock.instances.length - 1]).toBe(newHunk);
 
     scrollSpy.mockRestore();
   });
