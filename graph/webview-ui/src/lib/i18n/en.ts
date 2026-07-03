@@ -3,6 +3,8 @@ export const en: Record<string, string> = {
   'toolbar.history': 'Graph',
   'toolbar.log': 'Reflog',
   'toolbar.stats': 'Stats',
+  'toolbar.filterRepos': 'Filter repositories…',
+  'toolbar.noRepoMatch': 'No matching repository',
   'toolbar.fetch': 'Fetch',
   'toolbar.pull': 'Pull',
   'toolbar.push': 'Push',

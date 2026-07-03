@@ -20,6 +20,7 @@
 
   let showAddRemote = $state(false);
   let showRepoDropdown = $state(false);
+  let repoFilter = $state('');
   let showFlowDropdown = $state(false);
   let flowStatus = $state<FlowStatus | null>(null);
   let flowBranches = $state<FlowBranches>({ features: [], releases: [], hotfixes: [] });
@@ -66,6 +67,32 @@
     vscode.postMessage({ type: 'switchRepo', payload: { path: repoPath } });
   }
 
+  function toggleRepoDropdown() {
+    if (uiStore.repos.length <= 1) return;
+    showRepoDropdown = !showRepoDropdown;
+    if (showRepoDropdown) repoFilter = '';
+  }
+
+  // Focus the filter input as soon as the dropdown opens so the user can type
+  // straight away (the ~20-repo case is why filtering exists at all).
+  function autofocus(node: HTMLInputElement) {
+    node.focus();
+  }
+
+  let filteredRepos = $derived.by(() => {
+    const q = repoFilter.trim().toLowerCase();
+    if (!q) return uiStore.repos;
+    return uiStore.repos.filter(r => r.name.toLowerCase().includes(q));
+  });
+
+  function onRepoFilterKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') { showRepoDropdown = false; }
+    else if (e.key === 'Enter' && filteredRepos.length > 0) {
+      showRepoDropdown = false;
+      switchRepo(filteredRepos[0].path);
+    }
+  }
+
   onMount(() => {
     // Note: App.svelte also listens for `message` events. The two handlers write to
     // disjoint state (App: rebasePaused/conflict, this: uiStore.operating) and read
@@ -101,7 +128,7 @@
       <button
         class="repo-pill"
         class:clickable={uiStore.repos.length > 1}
-        onclick={() => { if (uiStore.repos.length > 1) showRepoDropdown = !showRepoDropdown; }}
+        onclick={toggleRepoDropdown}
         use:tooltip={activeRepoInfo?.name}
       >
         <i class="codicon {
@@ -121,21 +148,33 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="repo-dropdown-backdrop" onclick={() => { showRepoDropdown = false; }}></div>
         <div class="repo-dropdown">
-          {#each uiStore.repos as repo}
-            <button
-              class="repo-dropdown-item"
-              class:active={samePath(repo.path, uiStore.activeRepo)}
-              onclick={() => { showRepoDropdown = false; switchRepo(repo.path); }}
-            >
-              <i class="codicon {
-                samePath(repo.path, uiStore.activeRepo) ? 'codicon-check' :
-                repo.type === 'submodule' ? 'codicon-archive' : 
-                repo.type === 'nested' ? 'codicon-folder-library' :
-                'codicon-repo'
-              }"></i>
-              <span class="repo-dropdown-item-name">{repo.name}</span>
-            </button>
-          {/each}
+          <input
+            class="repo-dropdown-filter"
+            type="text"
+            placeholder={t('toolbar.filterRepos')}
+            bind:value={repoFilter}
+            onkeydown={onRepoFilterKeydown}
+            use:autofocus
+          />
+          <div class="repo-dropdown-list">
+            {#each filteredRepos as repo}
+              <button
+                class="repo-dropdown-item"
+                class:active={samePath(repo.path, uiStore.activeRepo)}
+                onclick={() => { showRepoDropdown = false; switchRepo(repo.path); }}
+              >
+                <i class="codicon {
+                  samePath(repo.path, uiStore.activeRepo) ? 'codicon-check' :
+                  repo.type === 'submodule' ? 'codicon-archive' :
+                  repo.type === 'nested' ? 'codicon-folder-library' :
+                  'codicon-repo'
+                }"></i>
+                <span class="repo-dropdown-item-name">{repo.name}</span>
+              </button>
+            {:else}
+              <div class="repo-dropdown-empty">{t('toolbar.noRepoMatch')}</div>
+            {/each}
+          </div>
         </div>
       {/if}
     </div>
@@ -432,6 +471,35 @@
 
   :global(body.vscode-light) .repo-dropdown {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  }
+
+  .repo-dropdown-filter {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 4px;
+    padding: 4px 8px;
+    font-size: inherit;
+    font-family: inherit;
+    color: var(--vscode-input-foreground, var(--text-primary));
+    background: var(--vscode-input-background, var(--bg-primary));
+    border: 1px solid var(--vscode-input-border, var(--border-color));
+    border-radius: 4px;
+    outline: none;
+  }
+
+  .repo-dropdown-filter:focus {
+    border-color: var(--vscode-focusBorder, var(--border-color));
+  }
+
+  .repo-dropdown-list {
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .repo-dropdown-empty {
+    padding: 6px 10px;
+    color: var(--vscode-descriptionForeground, var(--text-secondary));
+    white-space: nowrap;
   }
 
   .repo-dropdown-item {

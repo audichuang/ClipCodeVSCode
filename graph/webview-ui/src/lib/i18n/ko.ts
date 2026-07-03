@@ -3,6 +3,8 @@ export const ko: Record<string, string> = {
   'toolbar.history': 'Graph',
   'toolbar.log': 'Reflog',
   'toolbar.stats': '통계',
+  'toolbar.filterRepos': '저장소 필터…',
+  'toolbar.noRepoMatch': '일치하는 저장소 없음',
   'toolbar.fetch': 'Fetch',
   'toolbar.pull': 'Pull',
   'toolbar.push': 'Push',
