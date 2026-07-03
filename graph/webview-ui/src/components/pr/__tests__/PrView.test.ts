@@ -528,41 +528,63 @@ describe('PrView — inline diff preview (Task D2)', () => {
     });
   });
 
-  it('prev/next-change buttons scroll to the next/previous diff hunk within .pr-content', async () => {
+  // SNIPCODE-HOOK: PR tab inline diff (Task D2) — jumpChange compares each
+  // hunk's live getBoundingClientRect() against the container's viewport
+  // center line, not offsetTop vs scrollTop (offsetTop is relative to the
+  // offsetParent, not comparable to scrollTop, and once
+  // scrollIntoView({block:'center'}) has run once, an offsetTop/scrollTop
+  // compare re-selects the same hunk forever — see PrView.svelte's
+  // jumpChange comment). `.pr-content` itself doesn't move when scrolled
+  // (only its children do), so its own getBoundingClientRect().top/
+  // clientHeight are fixed for the whole test; each hunk's rect.top is
+  // modeled as `documentY - virtualScrollTop`, and virtualScrollTop is
+  // advanced after each click the same way a real
+  // scrollIntoView({block:'center'}) would (since scrollIntoView itself is
+  // stubbed to a no-op here) — landing the clicked hunk's rect.top on the
+  // center line for the next assertion.
+  it('prev/next-change buttons scroll to the next/previous diff hunk within .pr-content, advancing past each one', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
     const prContent = container.querySelector<HTMLElement>('.pr-content')!;
     const hunks = Array.from(container.querySelectorAll<HTMLElement>('.diff-hunk'));
     expect(hunks.length).toBe(2);
-    Object.defineProperty(hunks[0], 'offsetTop', { value: 50, configurable: true });
-    Object.defineProperty(hunks[1], 'offsetTop', { value: 150, configurable: true });
+
+    const clientHeight = 200;
+    const center = clientHeight / 2; // 100
+    const hunkDocY = [500, 700]; // fixed document positions, arbitrary
+    let virtualScrollTop = 0;
+
+    vi.spyOn(prContent, 'getBoundingClientRect').mockImplementation(() => ({ top: 0 }) as DOMRect);
+    Object.defineProperty(prContent, 'clientHeight', { value: clientHeight, configurable: true });
+    hunks.forEach((el, i) => {
+      vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
+        () => ({ top: hunkDocY[i] - virtualScrollTop }) as DOMRect,
+      );
+    });
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
 
     const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
     const prevBtn = container.querySelector<HTMLButtonElement>('.pr-jump-prev')!;
 
-    prContent.scrollTop = 0;
+    // Nothing scrolled yet: both hunks are below the center line, "next"
+    // finds the first one.
     await fireEvent.click(nextBtn);
     expect(scrollSpy).toHaveBeenCalledTimes(1);
     expect(scrollSpy.mock.instances[0]).toBe(hunks[0]);
+    virtualScrollTop = hunkDocY[0] - center; // simulate the centering scrollIntoView caused
 
-    prContent.scrollTop = 60;
+    // The bug this replaces: an offsetTop/scrollTop compare would re-select
+    // hunks[0] here forever. The fixed rect-vs-center-line compare correctly
+    // skips it (its rect.top now sits at the center line) and advances.
     await fireEvent.click(nextBtn);
     expect(scrollSpy).toHaveBeenCalledTimes(2);
     expect(scrollSpy.mock.instances[1]).toBe(hunks[1]);
+    virtualScrollTop = hunkDocY[1] - center; // simulate centering hunks[1]
 
-    // From just past hunks[1] (150), "prev" lands back on hunks[1] itself —
-    // the nearest hunk above the current scroll position.
-    prContent.scrollTop = 160;
+    // "prev" from hunks[1] centered: skips hunks[1] itself, steps back to hunks[0].
     await fireEvent.click(prevBtn);
     expect(scrollSpy).toHaveBeenCalledTimes(3);
-    expect(scrollSpy.mock.instances[2]).toBe(hunks[1]);
-
-    // From between the two hunks, "prev" steps back to hunks[0].
-    prContent.scrollTop = 100;
-    await fireEvent.click(prevBtn);
-    expect(scrollSpy).toHaveBeenCalledTimes(4);
-    expect(scrollSpy.mock.instances[3]).toBe(hunks[0]);
+    expect(scrollSpy.mock.instances[2]).toBe(hunks[0]);
 
     scrollSpy.mockRestore();
   });

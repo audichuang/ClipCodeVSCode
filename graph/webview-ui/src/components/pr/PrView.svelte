@@ -252,19 +252,26 @@
 
   // Prev/next-change nav: walk every rendered hunk (inline .diff-hunk or
   // side-by-side .sbs-hunk) across all stacked FileDiffViews and jump to the
-  // first one past (dir=1) or before (dir=-1) the pane's current scroll
-  // position. `eps` skips the hunk currently at/just above the scroll line so
-  // repeated clicks advance instead of re-landing on the same hunk.
+  // first one past (dir=1) or before (dir=-1) the pane's current center line.
+  // Compared against each hunk's live getBoundingClientRect() rather than
+  // offsetTop vs scrollTop: offsetTop is measured from the offsetParent
+  // (which for a position:static .pr-content is some ancestor above it, not
+  // comparable to scrollTop), and scrollIntoView({block:'center'}) leaves
+  // scrollTop roughly half a viewport above the centered hunk, so an
+  // offsetTop/scrollTop compare would re-select the same hunk on every click.
+  // getBoundingClientRect().top is always relative to the viewport, so after
+  // centering a hunk its rect.top sits at ~the container's center line, and
+  // `eps` skips it so the next click advances to the following hunk.
   function jumpChange(dir: 1 | -1) {
     const container = prContentEl;
     if (!container) return;
     const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-hunk')];
     if (hunks.length === 0) return;
-    const scrollTop = container.scrollTop;
+    const line = container.getBoundingClientRect().top + container.clientHeight / 2;
     const eps = 2;
     const target = dir === 1
-      ? hunks.find((el) => el.offsetTop > scrollTop + eps)
-      : [...hunks].reverse().find((el) => el.offsetTop < scrollTop - eps);
+      ? hunks.find((el) => el.getBoundingClientRect().top > line + eps)
+      : [...hunks].reverse().find((el) => el.getBoundingClientRect().top < line - eps);
     target?.scrollIntoView({ block: 'center' });
   }
   /* SNIPCODE-HOOK end */
@@ -777,7 +784,8 @@
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — two-pane Files
      layout: sticky file list at left (click scrolls the right pane to that
      file), stacked FileDiffViews at right. Both scroll together inside the
-     single .pr-content pane so jumpChange's scrollTop math stays simple. */
+     single .pr-content pane so jumpChange only has one scroll container to
+     read hunk positions from. */
   .pr-files-layout {
     display: flex;
     align-items: flex-start;
