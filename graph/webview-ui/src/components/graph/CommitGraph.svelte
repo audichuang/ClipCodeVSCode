@@ -1377,6 +1377,12 @@
 }} />
 
 <div class="commit-graph" class:h-scroll={horizontalScroll} bind:this={container} onscroll={handleScroll}>
+  {#if uiStore.operating}
+    <!-- Non-blocking busy indicator: a git op is in flight. Sticky so it stays
+         pinned to the top of the scroll viewport; the graph underneath keeps its
+         previous state instead of blanking (unlike the commitStore.loading path). -->
+    <div class="op-progress" aria-hidden="true"></div>
+  {/if}
   {#if commitStore.loading && !isSearchActive}
     <div class="loading"><span class="spinner"></span> {t('graph.loading')}</div>
   {:else if commitStore.notGitRepo}
@@ -1978,6 +1984,32 @@
     overflow-y: auto;
     overflow-x: auto;
     position: relative;
+  }
+
+  /* Indeterminate top bar shown while a git op is in flight. Sticky pins it to
+     the top of the scroll viewport; a moving sheen conveys "working" without
+     blocking or blanking the graph beneath it. */
+  .op-progress {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    height: 2px;
+    width: 100%;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--vscode-progressBar-background, #0e70c0) 25%, transparent);
+  }
+  .op-progress::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    background: var(--vscode-progressBar-background, #0e70c0);
+    animation: op-progress-slide 1.1s ease-in-out infinite;
+  }
+  @keyframes op-progress-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
   }
 
   .loading, .empty {

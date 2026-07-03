@@ -1025,15 +1025,16 @@ export class MainPanel {
         case 'interactiveRebase': {
           await this.gitService.interactiveRebase(message.payload.base, message.payload.todos);
           this.post({ type: 'operationComplete', payload: { operation: 'interactiveRebase', success: true } });
-          // A squash routes through this same backend; surface a dedicated
-          // confirmation, otherwise a generic one so the rebase never completes
-          // silently.
+          await this.refreshAll();
+          // Toast AFTER the refresh so the "squashed N" confirmation coincides
+          // with the graph repaint instead of leading it. A squash routes through
+          // this same backend; surface a dedicated confirmation, otherwise a
+          // generic one so the rebase never completes silently.
           if (message.payload.squashCount) {
             vscode.window.showInformationMessage(vscode.l10n.t('squashed', String(message.payload.squashCount)));
           } else {
             vscode.window.showInformationMessage(vscode.l10n.t('interactiveRebaseComplete'));
           }
-          await this.refreshAll();
           break;
         }
         case 'getRebaseCommits': {
@@ -1044,8 +1045,8 @@ export class MainPanel {
         case 'reset': {
           await this.gitService.reset(message.payload.ref, message.payload.mode);
           this.post({ type: 'operationComplete', payload: { operation: 'reset', success: true } });
-          vscode.window.showInformationMessage(vscode.l10n.t('resetComplete', message.payload.ref.substring(0, 7)));
           await this.refreshAll();
+          vscode.window.showInformationMessage(vscode.l10n.t('resetComplete', message.payload.ref.substring(0, 7)));
           break;
         }
         case 'stashSave': {
@@ -1819,7 +1820,12 @@ export class MainPanel {
     try {
       const refreshCfg = vscode.workspace.getConfiguration('gitGraphPlus');
       const sortOrder = refreshCfg.get<'author-date' | 'date' | 'topological'>('graphSortOrder', 'topological');
-      const includeSignature = refreshCfg.get<boolean>('showSignatureStatus', true);
+      // Signature verification (%G?) is kept OFF the refresh hot path: on signed
+      // repos it serially verifies every commit and gates the post-op repaint,
+      // and refreshes fire after every git operation. The initial getLog still
+      // requests signatures; the webview preserves each commit's known status by
+      // hash across refreshes (commits store), so badges don't disappear here.
+      const includeSignature = false;
       const refreshLimit = this.currentLimit || readInitialCommitCount();
       // Until the webview's first getLog establishes this session's filter,
       // mirror the saved filter that getLog will apply (same logic as the
@@ -1838,7 +1844,10 @@ export class MainPanel {
         // Handle empty repository (0 commits) gracefully. The webview renders from
         // paths/links/dots; the legacy GraphNode[] is unused so we don't build it.
         const fg = allCommits.length > 0 ? buildFullGraph(allCommits, branches, this.makeBranchColorResolver()) : { paths: [], links: [], dots: [], commitLeftMargin: [] };
-        return { commits: allCommits, hasMore, currentLimit: this.currentLimit, graph: [], paths: fg.paths, links: fg.links, dots: fg.dots, commitLeftMargin: fg.commitLeftMargin, remoteFilter, branches: branchFilter };
+        // preserveSignatures: this refresh path fetches the log with
+        // includeSignature:false (off the hot path), so tell the webview to carry
+        // each commit's last-known signature badge forward instead of blanking it.
+        return { commits: allCommits, hasMore, currentLimit: this.currentLimit, graph: [], paths: fg.paths, links: fg.links, dots: fg.dots, commitLeftMargin: fg.commitLeftMargin, remoteFilter, branches: branchFilter, preserveSignatures: true };
       };
 
       if (scope === 'status') {

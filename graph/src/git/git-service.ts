@@ -493,6 +493,20 @@ export class GitService {
       args.push(options.branch);
     }
 
+    // Kick off the uncommitted-changes probe concurrently with the log walk
+    // (it's independent of the walk) so it stops adding a serial round-trip
+    // after the walk on every refresh. Only the first page carries the summary
+    // row, so skip it on paginated pages. The catch is attached HERE (not at the
+    // await below): a later await in this function — stashList()/the log exec —
+    // could throw first and leave this an unhandled rejection. On failure it
+    // warns and yields null → "no summary row".
+    const porcelainPromise = !options?.skip
+      ? this.exec(['status', '--porcelain', '-uall']).catch((err) => {
+          this.warn(`failed to check uncommitted status: ${err instanceof Error ? err.message : err}`);
+          return null;
+        })
+      : null;
+
     // Resolve stashes before running the log: their base commits may need to be
     // added as extra walk start points (below). stashList() is deduped/cached,
     // so awaiting it here doesn't add a round-trip versus the old Promise.all.
@@ -583,18 +597,19 @@ export class GitService {
     // The UNCOMMITTED summary row belongs only at the very top of the graph.
     // Skip it on paginated (skip>0) pages, otherwise every page would prepend
     // a duplicate row.
-    if (commits.length > 0 && !options?.skip) {
-      try {
-        // `-uall` is intentional: it lists every untracked file individually
-        // (instead of collapsing untracked directories like the default
-        // `-unormal`) so the "Uncommitted changes (N)" summary row and the
-        // staged/unstaged counts match what the detail panel shows file-for-file.
-        // .gitignore is still honored, so on a normal repo this stays cheap; the
-        // only pathological case is a large *non-ignored* untracked tree, which
-        // is rare and which we accept in exchange for accurate counts.
-        const porcelain = await this.exec(['status', '--porcelain', '-uall']);
+    // Always consume porcelainPromise when it was started (!skip) so its result
+    // is awaited (and a failure surfaces as a warn) rather than becoming a
+    // floating rejection on the empty-repo path; only PREPEND the summary row
+    // when there are commits to sit above.
+    if (!options?.skip && porcelainPromise) {
+      // `-uall` (see porcelainPromise above) lists every untracked file
+      // individually so the "Uncommitted changes (N)" summary row and the
+      // staged/unstaged counts match what the detail panel shows file-for-file.
+      // porcelain is null when the probe failed (already warned).
+      const porcelain = await porcelainPromise;
+      if (porcelain !== null) {
         const lines = porcelain.split('\n').filter(Boolean);
-        if (lines.length > 0) {
+        if (commits.length > 0 && lines.length > 0) {
           let staged = 0, unstaged = 0;
           for (const line of lines) {
             const x = line[0], y = line[1];
@@ -616,8 +631,6 @@ export class GitService {
             committer: { name: '', email: '', date: '' },
           });
         }
-      } catch (err) {
-        this.warn(`failed to check uncommitted status: ${err instanceof Error ? err.message : err}`);
       }
     }
 

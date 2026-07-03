@@ -128,11 +128,25 @@ export class FileWatcher implements vscode.Disposable {
   /** Absorb watcher events for `durationMs` ms. Call this immediately after the
    *  extension performs its own git operation + explicit refresh, so the
    *  filesystem changes caused by that operation don't trigger a redundant
-   *  second refresh. Any events arriving during the window are coalesced into
-   *  a single re-trigger after it expires (same path as pendingWhileRefreshing). */
+   *  second refresh.
+   *
+   *  The op's `.git` writes happen DURING the awaited git call — i.e. before the
+   *  handler's refreshAll() reaches here — so by now a debounce may already be
+   *  armed. We cancel it and drop every queued event: the handler always runs an
+   *  explicit refreshAll() that re-reads git state AFTER the op, so re-firing the
+   *  op's own events would only schedule a redundant second full refresh (the
+   *  "keeps loading after it looked done" tail). A genuine external change landing
+   *  inside the window is dropped too, but that's a narrow race right after the
+   *  user's own click and self-heals on the next filesystem event / auto-fetch. */
   public suppress(durationMs = 1000): void {
     if (this.disposed) { return; }
     this.refreshing = true;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.pendingChanges.clear();
+    this.pendingWhileRefreshing = false;
     if (this.cooldownTimer) {
       clearTimeout(this.cooldownTimer);
     }
@@ -140,12 +154,11 @@ export class FileWatcher implements vscode.Disposable {
       this.cooldownTimer = null;
       this.refreshing = false;
       if (this.disposed) { return; }
-      if (this.pendingWhileRefreshing) {
-        this.pendingWhileRefreshing = false;
-        if (this.pendingChanges.size > 0) {
-          this.scheduleRefresh('unknown');
-        }
-      }
+      // Events during the window were the op's own FS churn — drop them rather
+      // than re-triggering. (External-change handling during a *normal* refresh
+      // still works via the debounce path's own cooldown re-trigger.)
+      this.pendingWhileRefreshing = false;
+      this.pendingChanges.clear();
     }, durationMs);
   }
 

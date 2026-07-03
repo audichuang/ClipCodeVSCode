@@ -28,6 +28,22 @@ beforeEach(() => {
 });
 
 describe('commitStore.setData', () => {
+  it('carries signatureStatus forward by hash on a preserveSignatures refresh', () => {
+    const signed = makeCommit('a1'); signed.signatureStatus = 'good';
+    commitStore.setData({ ...emptyData, commits: [signed] });
+    // Refresh payload omits signatures (hot path) but flags preservation.
+    commitStore.setData({ ...emptyData, commits: [makeCommit('a1')], preserveSignatures: true });
+    expect(commitStore.commits[0].signatureStatus).toBe('good');
+  });
+
+  it('does NOT carry signatureStatus when preserveSignatures is absent (intentional unsigned load)', () => {
+    const signed = makeCommit('a1'); signed.signatureStatus = 'good';
+    commitStore.setData({ ...emptyData, commits: [signed] });
+    // A plain getLog with signatures disabled: badges must clear.
+    commitStore.setData({ ...emptyData, commits: [makeCommit('a1')] });
+    expect(commitStore.commits[0].signatureStatus).toBeUndefined();
+  });
+
   it('clears loading flags after data arrives', () => {
     commitStore.setLoading(true);
     commitStore.setLoadingMore(true);
