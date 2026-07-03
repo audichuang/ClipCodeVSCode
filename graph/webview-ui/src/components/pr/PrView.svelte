@@ -11,6 +11,11 @@
   import { uiStore } from '../../lib/stores/ui.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { tooltip } from '../../lib/actions/tooltip';
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — stacked FileDiffView
+     per changed file, reusing Task D1's diffMode/hideModeToggle prop. */
+  import type { DiffData } from '../../lib/types';
+  import FileDiffView from '../commit/FileDiffView.svelte';
+  /* SNIPCODE-HOOK end */
 
   const vscode = getVsCodeApi();
 
@@ -44,6 +49,14 @@
 
   let files = $state<PrFile[]>([]);
   let loadingFiles = $state(false);
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — parsed diffs for the
+     current compare (Task D1's commitsBetween.diffs) plus the shared
+     inline/side-by-side mode every stacked FileDiffView renders with, and a
+     ref to the scrolling `.pr-content` pane for prev/next-change nav. */
+  let diffs = $state<DiffData[]>([]);
+  let diffMode = $state<'inline' | 'side-by-side'>('inline');
+  let prContentEl = $state<HTMLElement | undefined>();
+  /* SNIPCODE-HOOK end */
   // Repo root captured at the moment `files` are fetched (same reasoning as
   // CommitDetails.svelte's filesRepoRoot: pairs the root with the fetch that
   // produced it rather than reading uiStore.activeRepo at click time).
@@ -83,6 +96,7 @@
     ahead = 0;
     behind = 0;
     files = [];
+    diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
 
@@ -167,6 +181,7 @@
       showHeadDropdown = false;
       commits = [];
       files = [];
+      diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
       mergeBase = null;
       ahead = 0;
       behind = 0;
@@ -220,6 +235,39 @@
       payload: { file: file.path, oldPath: file.oldPath, ref1: mergeBase ?? base ?? undefined, ref2: head ?? 'HEAD' },
     });
   }
+
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file-list click
+     now scrolls to that file's stacked FileDiffView section instead of
+     opening the native diff editor (the inline diff replaces that need; a
+     file with no parsed diff still renders a placeholder whose own "Open
+     native diff" button calls openFile). Matched via a data attribute
+     rather than a CSS.escape'd attribute selector, since file paths can
+     contain characters `querySelector` would otherwise choke on. */
+  function scrollToFile(file: PrFile) {
+    const target = prContentEl
+      ? [...prContentEl.querySelectorAll<HTMLElement>('[data-pr-file]')].find((el) => el.dataset.prFile === file.path)
+      : undefined;
+    target?.scrollIntoView({ block: 'start' });
+  }
+
+  // Prev/next-change nav: walk every rendered hunk (inline .diff-hunk or
+  // side-by-side .sbs-hunk) across all stacked FileDiffViews and jump to the
+  // first one past (dir=1) or before (dir=-1) the pane's current scroll
+  // position. `eps` skips the hunk currently at/just above the scroll line so
+  // repeated clicks advance instead of re-landing on the same hunk.
+  function jumpChange(dir: 1 | -1) {
+    const container = prContentEl;
+    if (!container) return;
+    const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-hunk')];
+    if (hunks.length === 0) return;
+    const scrollTop = container.scrollTop;
+    const eps = 2;
+    const target = dir === 1
+      ? hunks.find((el) => el.offsetTop > scrollTop + eps)
+      : [...hunks].reverse().find((el) => el.offsetTop < scrollTop - eps);
+    target?.scrollIntoView({ block: 'center' });
+  }
+  /* SNIPCODE-HOOK end */
 
   function copyAll() {
     if (files.length === 0) return;
@@ -288,6 +336,7 @@
         ahead = msg.payload.ahead;
         behind = msg.payload.behind;
         files = msg.payload.files ?? [];
+        diffs = msg.payload.diffs ?? []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
         filesRepoRoot = uiStore.activeRepo;
         loadingCommits = false;
         loadingFiles = false;
@@ -396,6 +445,21 @@
       {t('pr.commitsTab')}{#if commits.length} ({commits.length}){/if}
     </button>
     {#if subTab === 'files'}
+      <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D2) — shared
+           inline/side-by-side toggle driving every stacked FileDiffView
+           (markup mirrors FileDiffView's own .diff-mode-toggle), plus
+           prev/next-change nav within the shared .pr-content pane. -->
+      <div class="pr-diff-mode-toggle">
+        <button class:active={diffMode === 'inline'} onclick={() => { diffMode = 'inline'; }}>{t('details.inline')}</button>
+        <button class:active={diffMode === 'side-by-side'} onclick={() => { diffMode = 'side-by-side'; }}>{t('details.sideBySide')}</button>
+      </div>
+      <button class="pr-jump-btn pr-jump-prev" aria-label="Previous change" onclick={() => jumpChange(-1)} use:tooltip={'Previous change'}>
+        <i class="codicon codicon-arrow-up"></i>
+      </button>
+      <button class="pr-jump-btn pr-jump-next" aria-label="Next change" onclick={() => jumpChange(1)} use:tooltip={'Next change'}>
+        <i class="codicon codicon-arrow-down"></i>
+      </button>
+      <!-- SNIPCODE-HOOK end -->
       <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={'Copy Full Source'}>
         <i class="codicon codicon-copy"></i>
         Copy Full Source
@@ -403,7 +467,7 @@
     {/if}
   </div>
 
-  <div class="pr-content">
+  <div class="pr-content" bind:this={prContentEl}>
     {#if subTab === 'files'}
       <!-- SNIPCODE-HOOK: Minor 1 — files come from the same commitsBetween
            response as commits, so a commit list still loading means the
@@ -414,14 +478,41 @@
       {:else if files.length === 0}
         <div class="pr-empty">{t('pr.noFiles')}</div>
       {:else}
-        <div class="pr-file-list">
-          {#each files as file (file.path)}
-            <button class="pr-file-row" onclick={() => openFile(file)}>
-              <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
-              <span class="pr-file-path">{file.path}</span>
-            </button>
-          {/each}
+        <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file
+             list (click scrolls to the matching section at right) + right
+             stacked FileDiffView per changed file, reusing Task D1's
+             diffMode/hideModeToggle prop so this one toolbar toggle drives
+             every file. Not lazy-loaded: every file's diff renders up front
+             (see plan — large PRs are a follow-up, not this version). -->
+        <div class="pr-files-layout">
+          <div class="pr-file-list">
+            {#each files as file (file.path)}
+              <button class="pr-file-row" onclick={() => scrollToFile(file)}>
+                <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
+                <span class="pr-file-path">{file.path}</span>
+              </button>
+            {/each}
+          </div>
+          <div class="pr-diff-stack">
+            {#each files as file (file.path)}
+              {@const d = diffs.find((x) => x.file === file.path)}
+              <div class="pr-diff-file" data-pr-file={file.path}>
+                {#if d}
+                  <FileDiffView diff={d} stacked diffMode={diffMode} hideModeToggle heading={file.path} />
+                {:else}
+                  <div class="pr-diff-placeholder">
+                    <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
+                    <span class="pr-file-path">{file.path}</span>
+                    <button class="pr-open-native-btn" onclick={() => openFile(file)}>
+                      <i class="codicon codicon-diff"></i> Open native diff
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
         </div>
+        <!-- SNIPCODE-HOOK end -->
       {/if}
     {:else if loadingCommits}
       <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
@@ -618,11 +709,54 @@
     background: rgba(128, 128, 128, 0.1);
   }
 
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — shared diff-mode
+     toggle + prev/next-change buttons in the Files toolbar. margin-left:auto
+     lives here now (moved off .pr-copy-btn below) since this is the first of
+     the group and pushes the whole {toggle, prev, next, copy} cluster right. */
+  .pr-diff-mode-toggle {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+    background: rgba(128, 128, 128, 0.15);
+    border-radius: 3px;
+    padding: 1px;
+  }
+
+  .pr-diff-mode-toggle button {
+    padding: 2px 8px;
+    font-size: 0.85em;
+    border-radius: 2px;
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .pr-diff-mode-toggle button.active {
+    background: var(--button-bg);
+    color: var(--button-fg);
+  }
+
+  .pr-jump-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .pr-jump-btn:hover {
+    background: rgba(128, 128, 128, 0.15);
+    color: var(--text-primary);
+  }
+  /* SNIPCODE-HOOK end */
+
   .pr-copy-btn {
     display: flex;
     align-items: center;
     gap: 5px;
-    margin-left: auto;
     padding: 4px 10px;
     font-size: inherit;
     border-radius: 4px;
@@ -639,6 +773,48 @@
     flex: 1;
     overflow-y: auto;
   }
+
+  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — two-pane Files
+     layout: sticky file list at left (click scrolls the right pane to that
+     file), stacked FileDiffViews at right. Both scroll together inside the
+     single .pr-content pane so jumpChange's scrollTop math stays simple. */
+  .pr-files-layout {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .pr-files-layout .pr-file-list {
+    flex: 0 0 240px;
+    position: sticky;
+    top: 0;
+    border-right: 1px solid var(--border-color);
+  }
+
+  .pr-diff-stack {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pr-diff-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .pr-open-native-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 3px 10px;
+    font-size: 0.85em;
+    border-radius: 4px;
+    background: var(--button-bg);
+    color: var(--button-fg);
+  }
+  /* SNIPCODE-HOOK end */
 
   .pr-empty {
     padding: 32px;

@@ -2,13 +2,13 @@
 // SNIPCODE-HOOK: Important 1 & 2 — updated for commitsBetween now returning
 // `files` directly (no compareCommits round-trip) and requestId-guarded
 // responses (see PrView.svelte).
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import PrView from '../PrView.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
 import { branchStore } from '../../../lib/stores/branches.svelte';
 import { uiStore } from '../../../lib/stores/ui.svelte';
-import type { BranchInfo } from '../../../lib/types';
+import type { BranchInfo, DiffData } from '../../../lib/types';
 
 function branch(over: Partial<BranchInfo> = {}): BranchInfo {
   return { name: 'main', current: false, ahead: 0, behind: 0, hash: 'h', ...over };
@@ -116,19 +116,25 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     expect(lastMessageOf('compareCommits')).toBeUndefined();
   });
 
-  it('clicking a file requests openDiff with mergeBase/HEAD refs and oldPath for a rename', async () => {
+  // SNIPCODE-HOOK: PR tab inline diff (Task D2) — a file with no parsed diff
+  // (missing from commitsBetween.diffs, e.g. binary/unparseable) renders as a
+  // placeholder in the diff stack; its "Open native diff" button is now what
+  // requests openDiff (the plain file row instead scrolls to it — see the
+  // "clicking a file scrolls" test below).
+  it('a file with no parsed diff shows a placeholder whose "Open native diff" button requests openDiff (mergeBase/HEAD refs, oldPath for a rename)', async () => {
     const { container } = setup();
     deliver('commitsBetween', {
       base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
       files: [{ path: 'src/new.ts', status: 'R', oldPath: 'src/old.ts' }],
+      diffs: [],
     });
-    const row = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
-        .find((b) => b.textContent?.includes('src/new.ts'));
-      expect(btn).toBeDefined();
-      return btn!;
+    const btn = await waitFor(() => {
+      const b = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-open-native-btn'))
+        .find((el) => el.closest('[data-pr-file="src/new.ts"]'));
+      expect(b).toBeDefined();
+      return b!;
     });
-    await fireEvent.click(row);
+    await fireEvent.click(btn);
     const req = lastMessageOf('openDiff');
     expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: 'src/old.ts', ref1: 'mb', ref2: 'feat' });
   });
@@ -400,7 +406,7 @@ describe('PrView — head selectable + swap', () => {
     expect(req?.payload.hash).toBe('dev');
   });
 
-  it('openFile sends the selected head as ref2', async () => {
+  it('openFile (via the placeholder\'s Open native diff button) sends the selected head as ref2', async () => {
     const { container } = setup();
     await openHeadDropdown(container);
     const devBtn = await findDropdownItem(container, 'dev');
@@ -408,15 +414,157 @@ describe('PrView — head selectable + swap', () => {
     deliver('commitsBetween', {
       base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
       files: [{ path: 'src/new.ts', status: 'M' }],
+      diffs: [],
     });
-    const row = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
-        .find((b) => b.textContent?.includes('src/new.ts'));
-      expect(btn).toBeDefined();
-      return btn!;
+    const btn = await waitFor(() => {
+      const b = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-open-native-btn'))
+        .find((el) => el.closest('[data-pr-file="src/new.ts"]'));
+      expect(b).toBeDefined();
+      return b!;
     });
-    await fireEvent.click(row);
+    await fireEvent.click(btn);
     const req = lastMessageOf('openDiff');
     expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: undefined, ref1: 'mb', ref2: 'dev' });
   });
 });
+
+// SNIPCODE-HOOK start: PR tab inline diff (Task D2) — PrView renders
+// FileDiffView stacked per changed file straight from commitsBetween.diffs
+// (Task D1), drives a shared inline/side-by-side toggle across all of them,
+// and offers prev/next-change scrolling within the shared .pr-content pane.
+describe('PrView — inline diff preview (Task D2)', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file,
+      isBinary: false,
+      isImage: false,
+      hunks: [
+        {
+          header: '@@ -1 +1 @@',
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [{ type: 'add', content: line, newLineNumber: 1 }],
+        },
+      ],
+    };
+  }
+
+  function setupWithDiffs() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main',
+      requestId: currentRequestId(),
+      commits: [],
+      mergeBase: 'mb',
+      ahead: 0,
+      behind: 0,
+      files: [
+        { path: 'src/a.ts', status: 'M' },
+        { path: 'src/b.ts', status: 'M' },
+      ],
+      diffs: [diffFixture('src/a.ts', 'hello-from-a'), diffFixture('src/b.ts', 'hello-from-b')],
+    });
+    return utils;
+  }
+
+  it('renders a stacked, mode-toggle-hidden FileDiffView per changed file from commitsBetween.diffs', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => {
+      expect(container.textContent).toContain('hello-from-a');
+      expect(container.textContent).toContain('hello-from-b');
+    });
+    // Each stacked FileDiffView's own built-in toggle is hidden — PrView
+    // drives mode from one shared toolbar control instead (hideModeToggle).
+    expect(container.querySelectorAll('.diff-mode-toggle').length).toBe(0);
+  });
+
+  it('shows a placeholder with an "Open native diff" button for a file missing from diffs (binary/unparseable)', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'assets/logo.png', status: 'M' }],
+      diffs: [],
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.pr-open-native-btn')).toBeTruthy();
+      expect(container.textContent).toContain('assets/logo.png');
+    });
+  });
+
+  it('clicking a file in the left list scrolls to its matching stacked FileDiffView section', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const row = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/b.ts'))!;
+    await fireEvent.click(row);
+    expect(scrollSpy).toHaveBeenCalled();
+    const scrolledEl = scrollSpy.mock.instances[scrollSpy.mock.instances.length - 1] as unknown as HTMLElement;
+    expect(scrolledEl.closest('[data-pr-file="src/b.ts"]')).toBeTruthy();
+    // The old click-opens-native-diff behavior is gone for files with a parsed diff.
+    expect(lastMessageOf('openDiff')).toBeUndefined();
+    scrollSpy.mockRestore();
+  });
+
+  it('the shared toolbar toggle switches every stacked FileDiffView between inline and side-by-side', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    expect(container.querySelectorAll('.diff-sbs').length).toBe(0);
+    const sbsBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-diff-mode-toggle button'))
+      .find((b) => b.textContent?.includes('Side by Side'))!;
+    await fireEvent.click(sbsBtn);
+    await waitFor(() => {
+      expect(container.querySelectorAll('.diff-sbs').length).toBe(2);
+    });
+  });
+
+  it('prev/next-change buttons scroll to the next/previous diff hunk within .pr-content', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const prContent = container.querySelector<HTMLElement>('.pr-content')!;
+    const hunks = Array.from(container.querySelectorAll<HTMLElement>('.diff-hunk'));
+    expect(hunks.length).toBe(2);
+    Object.defineProperty(hunks[0], 'offsetTop', { value: 50, configurable: true });
+    Object.defineProperty(hunks[1], 'offsetTop', { value: 150, configurable: true });
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+
+    const nextBtn = container.querySelector<HTMLButtonElement>('.pr-jump-next')!;
+    const prevBtn = container.querySelector<HTMLButtonElement>('.pr-jump-prev')!;
+
+    prContent.scrollTop = 0;
+    await fireEvent.click(nextBtn);
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    expect(scrollSpy.mock.instances[0]).toBe(hunks[0]);
+
+    prContent.scrollTop = 60;
+    await fireEvent.click(nextBtn);
+    expect(scrollSpy).toHaveBeenCalledTimes(2);
+    expect(scrollSpy.mock.instances[1]).toBe(hunks[1]);
+
+    // From just past hunks[1] (150), "prev" lands back on hunks[1] itself —
+    // the nearest hunk above the current scroll position.
+    prContent.scrollTop = 160;
+    await fireEvent.click(prevBtn);
+    expect(scrollSpy).toHaveBeenCalledTimes(3);
+    expect(scrollSpy.mock.instances[2]).toBe(hunks[1]);
+
+    // From between the two hunks, "prev" steps back to hunks[0].
+    prContent.scrollTop = 100;
+    await fireEvent.click(prevBtn);
+    expect(scrollSpy).toHaveBeenCalledTimes(4);
+    expect(scrollSpy.mock.instances[3]).toBe(hunks[0]);
+
+    scrollSpy.mockRestore();
+  });
+});
+// SNIPCODE-HOOK end
