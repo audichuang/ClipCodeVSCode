@@ -959,3 +959,100 @@ describe('PrView — inline diff preview (Task D2)', () => {
   });
 });
 // SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
+// CommitDetails.svelte's resize-handle pattern (startResize/onResizeMove/
+// stopResize on document mousemove/mouseup) for the Files sub-tab's
+// file-list/diff split, which previously had a CSS-fixed width.
+describe('PrView — resizable file-list/diff splitter', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file,
+      isBinary: false,
+      isImage: false,
+      hunks: [
+        {
+          header: '@@ -1 +1 @@',
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [{ type: 'add', content: line, newLineNumber: 1 }],
+        },
+      ],
+    };
+  }
+
+  function setupWithDiffs() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main',
+      requestId: currentRequestId(),
+      commits: [],
+      mergeBase: 'mb',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }],
+      diffs: [diffFixture('src/a.ts', 'hello-from-a')],
+    });
+    return utils;
+  }
+
+  it('renders a resize handle between the file list and diff stack, with the file list at the default 240px width', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    expect(container.querySelector('.pr-resize-handle')).toBeTruthy();
+    const fileList = container.querySelector<HTMLElement>('.pr-file-list')!;
+    expect(fileList.style.width).toBe('240px');
+  });
+
+  it('dragging the handle resizes the file list, clamped to 120-600px', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const handle = container.querySelector<HTMLElement>('.pr-resize-handle')!;
+    const fileList = container.querySelector<HTMLElement>('.pr-file-list')!;
+
+    await fireEvent.mouseDown(handle, { clientX: 100 });
+    await fireEvent(document, new MouseEvent('mousemove', { clientX: 150 }));
+    expect(fileList.style.width).toBe('290px'); // 240 + (150 - 100)
+
+    await fireEvent(document, new MouseEvent('mousemove', { clientX: -10000 }));
+    expect(fileList.style.width).toBe('120px'); // clamped to min
+
+    await fireEvent(document, new MouseEvent('mousemove', { clientX: 10000 }));
+    expect(fileList.style.width).toBe('600px'); // clamped to max
+  });
+
+  it('stops resizing on mouseup — a later mousemove no longer changes the width', async () => {
+    const { container } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const handle = container.querySelector<HTMLElement>('.pr-resize-handle')!;
+    const fileList = container.querySelector<HTMLElement>('.pr-file-list')!;
+
+    await fireEvent.mouseDown(handle, { clientX: 100 });
+    await fireEvent(document, new MouseEvent('mousemove', { clientX: 150 }));
+    expect(fileList.style.width).toBe('290px');
+
+    await fireEvent(document, new MouseEvent('mouseup'));
+    await fireEvent(document, new MouseEvent('mousemove', { clientX: 400 }));
+    expect(fileList.style.width).toBe('290px');
+  });
+
+  it('removes the document mousemove/mouseup listeners on unmount (no leak)', async () => {
+    const { container, unmount } = setupWithDiffs();
+    await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
+    const handle = container.querySelector<HTMLElement>('.pr-resize-handle')!;
+    await fireEvent.mouseDown(handle, { clientX: 100 });
+
+    const removeSpy = vi.spyOn(document, 'removeEventListener');
+    unmount();
+    expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
+    removeSpy.mockRestore();
+  });
+});
+// SNIPCODE-HOOK end
