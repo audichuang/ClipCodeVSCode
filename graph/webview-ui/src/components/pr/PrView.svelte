@@ -484,6 +484,53 @@
 
 <div class="pr-view">
   <div class="pr-header">
+    <!-- SNIPCODE-HOOK start: PR tab compare header — GitHub-style "head into base"
+         inline layout (head pill · "into" · base pill · swap button on the far
+         right). head merges INTO base (base...head three-dot compare). -->
+    <div class="base-dropdown-wrapper">
+      <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
+           same guard as the base pill below; see its comment. -->
+      <button class="base-pill" disabled={awaitingBranches} onclick={toggleHeadDropdown}>
+        <i class="codicon codicon-git-branch"></i>
+        <span class="base-name">{head ?? branchStore.currentBranch?.name ?? 'HEAD'}</span>
+        <i class="codicon codicon-chevron-down base-chevron"></i>
+      </button>
+      {#if showHeadDropdown}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <div class="repo-dropdown-backdrop" onclick={closeHeadDropdown}></div>
+        <div class="repo-dropdown">
+          <input
+            type="text"
+            class="dropdown-filter-input"
+            placeholder="Filter branches…"
+            bind:value={headFilter}
+            use:focusInput
+            onkeydown={(e) => {
+              if (e.key === 'Enter') {
+                const first = filteredHeadBranches[0];
+                if (first) selectHead(first.name);
+              } else if (e.key === 'Escape') {
+                closeHeadDropdown();
+              }
+            }}
+          />
+          {#each filteredHeadBranches as b (b.name)}
+            <button
+              class="repo-dropdown-item"
+              class:active={head === b.name}
+              onclick={() => selectHead(b.name)}
+            >
+              <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+              <span class="repo-dropdown-item-name">{b.name}</span>
+            </button>
+          {:else}
+            <div class="repo-dropdown-empty">No matching branches</div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <span class="pr-into">{t('pr.into')}</span>
     <div class="base-dropdown-wrapper">
       <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
            disabled + guarded onclick while awaitingBranches: the dropdown
@@ -500,11 +547,6 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="repo-dropdown-backdrop" onclick={closeBaseDropdown}></div>
         <div class="repo-dropdown">
-          <!-- SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter —
-               auto-focused filter input; Enter picks the first filtered
-               result, Escape closes without picking. Sits above the backdrop
-               (dropdown's own z-index) so clicks/typing here never bubble to
-               the backdrop's close handler. -->
           <input
             type="text"
             class="dropdown-filter-input"
@@ -520,7 +562,6 @@
               }
             }}
           />
-          <!-- SNIPCODE-HOOK end -->
           {#each filteredBaseBranches as b (b.name)}
             <button
               class="repo-dropdown-item"
@@ -536,59 +577,9 @@
         </div>
       {/if}
     </div>
-    <!-- SNIPCODE-HOOK start: PR tab two-sided compare — swap button (was a
-         static arrow-right icon) + head pill/dropdown copied from the base
-         pill/dropdown above, bound to head/selectHead/showHeadDropdown. -->
     <button class="pr-swap-btn" onclick={swap} use:tooltip={'Swap base and head'}>
       <i class="codicon codicon-arrow-swap"></i>
     </button>
-    <div class="base-dropdown-wrapper">
-      <!-- SNIPCODE-HOOK: PR tab (Important, repo-switch stale-head race) —
-           same guard as the base pill above; see its comment. -->
-      <button class="base-pill" disabled={awaitingBranches} onclick={toggleHeadDropdown}>
-        <i class="codicon codicon-git-branch"></i>
-        <span class="base-name">{head ?? branchStore.currentBranch?.name ?? 'HEAD'}</span>
-        <i class="codicon codicon-chevron-down base-chevron"></i>
-      </button>
-      {#if showHeadDropdown}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="repo-dropdown-backdrop" onclick={closeHeadDropdown}></div>
-        <div class="repo-dropdown">
-          <!-- SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — see
-               the base dropdown's filter input above for the full rationale;
-               this is the same behavior mirrored for head. -->
-          <input
-            type="text"
-            class="dropdown-filter-input"
-            placeholder="Filter branches…"
-            bind:value={headFilter}
-            use:focusInput
-            onkeydown={(e) => {
-              if (e.key === 'Enter') {
-                const first = filteredHeadBranches[0];
-                if (first) selectHead(first.name);
-              } else if (e.key === 'Escape') {
-                closeHeadDropdown();
-              }
-            }}
-          />
-          <!-- SNIPCODE-HOOK end -->
-          {#each filteredHeadBranches as b (b.name)}
-            <button
-              class="repo-dropdown-item"
-              class:active={head === b.name}
-              onclick={() => selectHead(b.name)}
-            >
-              <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
-              <span class="repo-dropdown-item-name">{b.name}</span>
-            </button>
-          {:else}
-            <div class="repo-dropdown-empty">No matching branches</div>
-          {/each}
-        </div>
-      {/if}
-    </div>
     <!-- SNIPCODE-HOOK end -->
   </div>
 
@@ -868,6 +859,12 @@
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab two-sided compare */
+  /* SNIPCODE-HOOK: PR tab compare header — connector word + swap pushed right */
+  .pr-into {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
   .pr-swap-btn {
     display: flex;
     align-items: center;
@@ -875,6 +872,7 @@
     width: 24px;
     height: 24px;
     padding: 0;
+    margin-left: auto;
     flex-shrink: 0;
     background: transparent;
     border: none;

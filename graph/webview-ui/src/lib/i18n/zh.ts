@@ -687,5 +687,6 @@ export const zh: Record<string, string> = {
   'pr.noCommits': '没有提交',
   'pr.behindWarning': '落后 {base} {count} 个提交',
   'pr.aheadInfo': '领先 {base} {count} 个提交',
+  'pr.into': '合并到',
   /* SNIPCODE-HOOK end */
 };

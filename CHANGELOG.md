@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.30
+
+- **PR compare header now reads like GitHub.** The base/head picker used to be
+  `[base] ⇄ [head]` with only a swap arrow in the middle and no words, so it was
+  unclear which branch merged into which. It now lays out as `head into base`
+  (e.g. `dev into main`) with the swap button moved to the far right — the merge
+  direction is obvious at a glance. Swapping still flips the two branches.
+
 ## 0.3.29
 
 - **Git operations feel instant now.** Squash / rebase / reset / merge and other

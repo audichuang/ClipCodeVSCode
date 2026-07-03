@@ -80,7 +80,8 @@ describe('PrView — default base selection', () => {
     const { container } = render(PrView);
     expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    expect(pills[1].textContent).toContain('HEAD');
+    // head pill is now first (GitHub-style "head into base" layout)
+    expect(pills[0].textContent).toContain('HEAD');
   });
 });
 
@@ -348,7 +349,8 @@ describe('PrView — head selectable + swap', () => {
 
   function openHeadDropdown(container: HTMLElement) {
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    return fireEvent.click(pills[1]);
+    // head pill is first in the "head into base" layout
+    return fireEvent.click(pills[0]);
   }
 
   function findDropdownItem(container: HTMLElement, name: string) {
@@ -383,8 +385,9 @@ describe('PrView — head selectable + swap', () => {
       expect(req?.payload).toEqual({ base: 'feat', head: 'origin/main', requestId: currentRequestId() });
     });
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    expect(pills[0].textContent).toContain('feat');
-    expect(pills[1].textContent).toContain('origin/main');
+    // pills[0] = head, pills[1] = base; after swap head='origin/main', base='feat'
+    expect(pills[0].textContent).toContain('origin/main');
+    expect(pills[1].textContent).toContain('feat');
   });
 
   it('copyAll sends the selected head, not a hardcoded HEAD', async () => {
@@ -551,11 +554,12 @@ describe('PrView — branch dropdown type-to-filter', () => {
   it('pressing Escape closes the dropdown without selecting anything', async () => {
     const { container } = setup();
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    await fireEvent.click(pills[0]);
+    // base pill is now second (head into base); its default is 'origin/main', not 'feat'
+    await fireEvent.click(pills[1]);
     const input = filterInput(container)!;
     await fireEvent.keyDown(input, { key: 'Escape' });
     expect(container.querySelector('.repo-dropdown')).toBeNull();
-    expect(pills[0].textContent).not.toContain('feat');
+    expect(pills[1].textContent).not.toContain('feat');
   });
 
   // SNIPCODE-HOOK start: PR tab (Medium fix) — picking the already-selected
@@ -566,7 +570,8 @@ describe('PrView — branch dropdown type-to-filter', () => {
   it('picking the already-selected base still closes+clears the dropdown, without a new getCommitsBetween', async () => {
     const { container } = setup();
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    await fireEvent.click(pills[0]);
+    // base pill is now second (head into base layout)
+    await fireEvent.click(pills[1]);
     // Default base is 'origin/main' (current branch's upstream) — filter down
     // to just that already-active item.
     const input = filterInput(container)!;
@@ -582,7 +587,7 @@ describe('PrView — branch dropdown type-to-filter', () => {
 
     // Reopening starts with a cleared filter, proving the filter was reset,
     // not just the dropdown hidden.
-    await fireEvent.click(pills[0]);
+    await fireEvent.click(pills[1]);
     const reopened = await waitFor(() => {
       const el = filterInput(container);
       expect(el).toBeTruthy();
@@ -595,7 +600,8 @@ describe('PrView — branch dropdown type-to-filter', () => {
   it('picking the already-selected head still closes+clears the dropdown, without a new getCommitsBetween', async () => {
     const { container } = setup();
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
-    await fireEvent.click(pills[1]);
+    // head pill is now first (head into base layout)
+    await fireEvent.click(pills[0]);
     // Default head is 'feat' (the current branch) — filter down to just that
     // already-active item.
     const input = await waitFor(() => {
@@ -613,7 +619,7 @@ describe('PrView — branch dropdown type-to-filter', () => {
     expect(container.querySelector('.repo-dropdown')).toBeNull();
     expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
 
-    await fireEvent.click(pills[1]);
+    await fireEvent.click(pills[0]);
     const reopened = await waitFor(() => {
       const el = filterInput(container);
       expect(el).toBeTruthy();
