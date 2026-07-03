@@ -872,7 +872,7 @@
     width: 24px;
     height: 24px;
     padding: 0;
-    margin-left: auto;
+    margin-left: 4px;
     flex-shrink: 0;
     background: transparent;
     border: none;
