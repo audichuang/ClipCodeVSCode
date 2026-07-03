@@ -689,5 +689,6 @@ export const en: Record<string, string> = {
   'pr.noCommits': 'No commits',
   'pr.behindWarning': '{count} commit(s) behind {base}',
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
+  'pr.into': 'into',
   /* SNIPCODE-HOOK end */
 };

@@ -687,5 +687,6 @@ export const ko: Record<string, string> = {
   'pr.noCommits': '커밋 없음',
   'pr.behindWarning': '{base}보다 {count}개 커밋 뒤처짐',
   'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
+  'pr.into': '→',
   /* SNIPCODE-HOOK end */
 };
