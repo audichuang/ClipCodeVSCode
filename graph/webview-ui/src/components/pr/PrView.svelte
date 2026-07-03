@@ -52,10 +52,17 @@
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — parsed diffs for the
      current compare (Task D1's commitsBetween.diffs) plus the shared
      inline/side-by-side mode every stacked FileDiffView renders with, and a
-     ref to the scrolling `.pr-content` pane for prev/next-change nav. */
+     ref to the scrolling `.pr-content` pane for prev/next-change nav.
+     currentHunk (fix: index-based prev/next nav) is a plain index into the
+     flattened hunk list jumpChange walks; -1 means "no jump made yet" so the
+     first "next" press lands on the first hunk (index 0) instead of skipping
+     it. Reset to -1 wherever the underlying hunk list changes (new
+     compare/repo, diffMode flip) — see loadCommits, the repo-switch effect,
+     and the diff-mode-toggle buttons. */
   let diffs = $state<DiffData[]>([]);
   let diffMode = $state<'inline' | 'side-by-side'>('inline');
   let prContentEl = $state<HTMLElement | undefined>();
+  let currentHunk = $state(-1);
   /* SNIPCODE-HOOK end */
   // Repo root captured at the moment `files` are fetched (same reasoning as
   // CommitDetails.svelte's filesRepoRoot: pairs the root with the fetch that
@@ -97,6 +104,7 @@
     behind = 0;
     files = [];
     diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
+    currentHunk = -1; // SNIPCODE-HOOK: PR tab prev/next-change nav (fix) — new compare, new hunk list
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
 
@@ -182,6 +190,7 @@
       commits = [];
       files = [];
       diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
+      currentHunk = -1; // SNIPCODE-HOOK: PR tab prev/next-change nav (fix) — repo switch, new hunk list
       mergeBase = null;
       ahead = 0;
       behind = 0;
@@ -250,29 +259,31 @@
     target?.scrollIntoView({ block: 'start' });
   }
 
-  // Prev/next-change nav: walk every rendered hunk (inline .diff-hunk or
-  // side-by-side .sbs-hunk) across all stacked FileDiffViews and jump to the
-  // first one past (dir=1) or before (dir=-1) the pane's current center line.
-  // Compared against each hunk's live getBoundingClientRect() rather than
-  // offsetTop vs scrollTop: offsetTop is measured from the offsetParent
-  // (which for a position:static .pr-content is some ancestor above it, not
-  // comparable to scrollTop), and scrollIntoView({block:'center'}) leaves
-  // scrollTop roughly half a viewport above the centered hunk, so an
-  // offsetTop/scrollTop compare would re-select the same hunk on every click.
-  // getBoundingClientRect().top is always relative to the viewport, so after
-  // centering a hunk its rect.top sits at ~the container's center line, and
-  // `eps` skips it so the next click advances to the following hunk.
+  // Prev/next-change nav (fix: index-based, not viewport-center-based).
+  // The old version used the `.pr-content` container's live center line as
+  // the cursor: on first load the first hunk sits ABOVE that line, so the
+  // first "next" press skipped it entirely (a single-hunk PR's "next" was a
+  // permanent no-op), and "prev" at the top could still jump to that same
+  // first hunk even though there's nothing before it. currentHunk is a plain
+  // index into the flattened hunk list instead: -1 means "no jump made yet",
+  // so the first "next" lands on index 0 (the very first hunk), and "prev"
+  // at/above index 0 is a no-op rather than wrapping or re-centering hunk 0.
+  // Side-by-side renders every logical hunk twice — once in `.sbs-left`, once
+  // in the scroll-synced `.sbs-right` pane — so hunks scopes to `.sbs-left
+  // .sbs-hunk` rather than `.sbs-hunk` to keep one entry per logical hunk in
+  // both modes (no rect-based de-dup needed).
   function jumpChange(dir: 1 | -1) {
     const container = prContentEl;
     if (!container) return;
-    const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-hunk')];
+    const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-left .sbs-hunk')];
     if (hunks.length === 0) return;
-    const line = container.getBoundingClientRect().top + container.clientHeight / 2;
-    const eps = 2;
-    const target = dir === 1
-      ? hunks.find((el) => el.getBoundingClientRect().top > line + eps)
-      : [...hunks].reverse().find((el) => el.getBoundingClientRect().top < line - eps);
-    target?.scrollIntoView({ block: 'center' });
+    if (dir === 1) {
+      currentHunk = Math.min(currentHunk + 1, hunks.length - 1);
+    } else {
+      if (currentHunk <= 0) return;
+      currentHunk = currentHunk - 1;
+    }
+    hunks[currentHunk]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
   /* SNIPCODE-HOOK end */
 
@@ -457,8 +468,12 @@
            (markup mirrors FileDiffView's own .diff-mode-toggle), plus
            prev/next-change nav within the shared .pr-content pane. -->
       <div class="pr-diff-mode-toggle">
-        <button class:active={diffMode === 'inline'} onclick={() => { diffMode = 'inline'; }}>{t('details.inline')}</button>
-        <button class:active={diffMode === 'side-by-side'} onclick={() => { diffMode = 'side-by-side'; }}>{t('details.sideBySide')}</button>
+        <!-- SNIPCODE-HOOK: PR tab prev/next-change nav (fix) — a mode flip
+             changes the DOM hunk list (inline .diff-hunk vs side-by-side
+             .sbs-hunk), so currentHunk must reset or it'd index into the
+             wrong set. -->
+        <button class:active={diffMode === 'inline'} onclick={() => { diffMode = 'inline'; currentHunk = -1; }}>{t('details.inline')}</button>
+        <button class:active={diffMode === 'side-by-side'} onclick={() => { diffMode = 'side-by-side'; currentHunk = -1; }}>{t('details.sideBySide')}</button>
       </div>
       <button class="pr-jump-btn pr-jump-prev" aria-label="Previous change" onclick={() => jumpChange(-1)} use:tooltip={'Previous change'}>
         <i class="codicon codicon-arrow-up"></i>
@@ -513,7 +528,15 @@
                      index against the working tree, not the PR's mergeBase->head.
                      The placeholder's "Open native diff" button (openFile) posts
                      the correct ref1=mergeBase/ref2=head via openDiff instead. -->
-                {#if d && !d.isBinary}
+                <!-- SNIPCODE-HOOK start: PR tab (Minor) — pure renames,
+                     mode-only changes, and empty add/delete parse to a
+                     DiffData entry that is NOT binary but has hunks: [], so
+                     the old `d && !d.isBinary` guard rendered an empty
+                     FileDiffView with nothing to show and no escape hatch.
+                     Requiring d.hunks.length > 0 routes these to the same
+                     placeholder + "Open native diff" fallback already used
+                     for binary/image files. -->
+                {#if d && !d.isBinary && d.hunks.length > 0}
                   <FileDiffView diff={d} stacked diffMode={diffMode} hideModeToggle heading={file.path} />
                 {:else}
                   <div class="pr-diff-placeholder">
@@ -524,6 +547,7 @@
                     </button>
                   </div>
                 {/if}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>
