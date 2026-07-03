@@ -448,6 +448,16 @@ describe('PrView — branch dropdown type-to-filter', () => {
     return container.querySelector<HTMLInputElement>('.repo-dropdown .dropdown-filter-input');
   }
 
+  // SNIPCODE-HOOK: PR tab (Medium fix) — the dropdown item for the currently
+  // selected branch (marked via class:active in PrView.svelte).
+  function findActiveItem(container: HTMLElement) {
+    return waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('.repo-dropdown-item.active');
+      expect(btn).toBeTruthy();
+      return btn!;
+    });
+  }
+
   it('auto-focuses the base filter input when the dropdown opens', async () => {
     const { container } = setup();
     const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
@@ -547,6 +557,72 @@ describe('PrView — branch dropdown type-to-filter', () => {
     expect(container.querySelector('.repo-dropdown')).toBeNull();
     expect(pills[0].textContent).not.toContain('feat');
   });
+
+  // SNIPCODE-HOOK start: PR tab (Medium fix) — picking the already-selected
+  // branch is still a "pick" and must close+clear the dropdown per the pick
+  // contract; only the reload is skipped since base/head is unchanged. Before
+  // the fix, `if (base === b) return;` fired before closeBaseDropdown(),
+  // leaving the dropdown open with a live filter.
+  it('picking the already-selected base still closes+clears the dropdown, without a new getCommitsBetween', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]);
+    // Default base is 'origin/main' (current branch's upstream) — filter down
+    // to just that already-active item.
+    const input = filterInput(container)!;
+    await fireEvent.input(input, { target: { value: 'origin/main' } });
+    await waitFor(() => expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(1));
+
+    globalThis.__postedMessages = [];
+    const activeBtn = await findActiveItem(container);
+    await fireEvent.click(activeBtn);
+
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+
+    // Reopening starts with a cleared filter, proving the filter was reset,
+    // not just the dropdown hidden.
+    await fireEvent.click(pills[0]);
+    const reopened = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(reopened.value).toBe('');
+    expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(4);
+  });
+
+  it('picking the already-selected head still closes+clears the dropdown, without a new getCommitsBetween', async () => {
+    const { container } = setup();
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[1]);
+    // Default head is 'feat' (the current branch) — filter down to just that
+    // already-active item.
+    const input = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.input(input, { target: { value: 'feat' } });
+    await waitFor(() => expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(1));
+
+    globalThis.__postedMessages = [];
+    const activeBtn = await findActiveItem(container);
+    await fireEvent.click(activeBtn);
+
+    expect(container.querySelector('.repo-dropdown')).toBeNull();
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+
+    await fireEvent.click(pills[1]);
+    const reopened = await waitFor(() => {
+      const el = filterInput(container);
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(reopened.value).toBe('');
+    expect(container.querySelectorAll('.repo-dropdown-item').length).toBe(4);
+  });
+  // SNIPCODE-HOOK end
 
   it('disabled while awaitingBranches: clicking the base pill does not open the dropdown or its filter input', async () => {
     branchStore.branches = [
