@@ -28,7 +28,13 @@ export async function readTextFile(filePath: string): Promise<string | undefined
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
 }
 
-export async function* listFilesRecursive(inputPath: string): AsyncGenerator<string> {
+export async function* listFilesRecursive(
+  inputPath: string,
+  // 目錄級剪枝（回傳 false 就整棵子樹不走）。被 PATH exclude 規則命中的目錄，
+  // 其下所有檔案必然也被同一規則排除，走完再逐檔過濾是純浪費 —
+  // node_modules 這種大樹要在這裡就剪掉（對齊 IntelliJ 端 processDirectory 的行為）。
+  shouldEnterDirectory?: (dirPath: string) => boolean
+): AsyncGenerator<string> {
   const info = await lstat(inputPath).catch(() => undefined);
   if (!info) return;
 
@@ -43,9 +49,11 @@ export async function* listFilesRecursive(inputPath: string): AsyncGenerator<str
     return;
   }
 
+  if (shouldEnterDirectory && !shouldEnterDirectory(inputPath)) return;
+
   const entries = await readdir(inputPath);
   for (const entry of entries.sort()) {
-    yield* listFilesRecursive(path.join(inputPath, entry));
+    yield* listFilesRecursive(path.join(inputPath, entry), shouldEnterDirectory);
   }
 }
 

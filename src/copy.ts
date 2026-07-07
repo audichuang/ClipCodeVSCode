@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { buildPayload, type PayloadFile } from './clipboardFormat.js';
-import { fileMatchesFilters } from './filterMatcher.js';
+import { directoryExcluded, fileMatchesFilters } from './filterMatcher.js';
 import { fileSize, listFilesRecursive, readTextFile } from './fileSystem.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
@@ -38,10 +38,15 @@ export async function collectCopyFiles(
     fileLimitReached: false
   };
   const roots = normalizeRoots(workspaceRoots);
+  const pruneExcludedDirectory = (dirPath: string): boolean => {
+    if (!settings.useFilters || !settings.useExcludeFilters) return true;
+    const absolute = path.resolve(dirPath);
+    return !directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute);
+  };
 
   inputLoop:
   for (const inputPath of inputPaths) {
-    for await (const filePath of listFilesRecursive(inputPath)) {
+    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory)) {
       const absolutePath = path.resolve(filePath);
       const shouldContinue = await appendCopyCandidate({
         roots,

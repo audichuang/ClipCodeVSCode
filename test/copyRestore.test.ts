@@ -23,6 +23,29 @@ test('copies folders recursively while skipping empty files', async () => {
   });
 });
 
+test('prunes excluded directories during traversal without changing the copied set', async () => {
+  await withTempDir(async root => {
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await mkdir(path.join(root, 'node_modules', 'dep'), { recursive: true });
+    await writeFile(path.join(root, 'src', 'main.ts'), 'main');
+    await writeFile(path.join(root, 'node_modules', 'dep', 'index.js'), 'dep');
+
+    const settings = {
+      ...defaultSettings,
+      useFilters: true,
+      filterRules: [
+        { type: 'PATH' as const, action: 'EXCLUDE' as const, value: 'node_modules', enabled: true }
+      ]
+    };
+
+    const result = await collectCopyFiles(root, [root], settings);
+
+    assert.equal(result.copiedFileCount, 1);
+    assert.equal(result.files[0].path, 'src/main.ts');
+    assert.ok(!result.payload.includes('node_modules'));
+  });
+});
+
 test('copies oversized files as skipped markers and preserves wrappers', async () => {
   await withTempDir(async root => {
     const settings = {
