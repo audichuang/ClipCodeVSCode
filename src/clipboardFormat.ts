@@ -26,9 +26,19 @@ interface BuildPayloadOptions {
 }
 
 const LABELS: ChangeTypeLabel[] = ['NEW', 'MODIFIED', 'DELETED', 'MOVED'];
+// ASCII whitespace class — matches the Kotlin mirror's regex `\s` (ASCII-only). JS's
+// own `\s` is Unicode-wide (NBSP, ideographic space U+3000, BOM…), so a line indented
+// with a full-width space would parse as a header here but NOT on the Kotlin side,
+// splitting a phantom file on cross-tool restore. Builders only ever emit ASCII
+// whitespace, so pinning to ASCII keeps both parsers byte-aligned. Keep in sync with
+// ClipboardRestoreParser.kt (GENERIC_FILE_HEADER, MULTI_LABEL_PATTERN).
+const ASCII_WS = ' \\t\\n\\x0B\\f\\r';
 const LABEL_PATTERN = new RegExp(`\\[(${LABELS.join('|')})\\]`, 'g');
-const LEADING_LABEL_PATTERN = new RegExp(`^(?:\\[(${LABELS.join('|')})\\]\\s*)+`);
-const GENERIC_FILE_HEADER = /^\s*(?:(\/\/|#|\/\*)\s*)?file:\s*(.+?)\s*(?:\*\/)?$/i;
+const LEADING_LABEL_PATTERN = new RegExp(`^(?:\\[(${LABELS.join('|')})\\][${ASCII_WS}]*)+`);
+const GENERIC_FILE_HEADER = new RegExp(
+  `^[${ASCII_WS}]*(?:(\\/\\/|#|\\/\\*)[${ASCII_WS}]*)?file:[${ASCII_WS}]*(.+?)[${ASCII_WS}]*(?:\\*\\/)?$`,
+  'i'
+);
 // Scheme A marker — MUST match the Kotlin side byte-for-byte (see notes).
 // Distinctive enough that a real source line virtually never starts with it, so
 // the unconditional strip on read can't corrupt foreign/old clipboards. Must be
@@ -54,7 +64,11 @@ export function formatHeader(
   changeType?: ChangeTypeLabel
 ): string {
   const pathWithLabel = changeType ? `[${changeType}] ${clipboardPath}` : clipboardPath;
-  return headerFormat.replaceAll('$FILE_PATH', pathWithLabel);
+  // split/join, NOT replaceAll(str, str): a string replacement in replaceAll expands
+  // `$&`, `$$`, etc., so a path containing those would be corrupted (even in this
+  // tool's own round-trip). split/join inserts pathWithLabel verbatim, matching the
+  // Kotlin side's literal String.replace.
+  return headerFormat.split('$FILE_PATH').join(pathWithLabel);
 }
 
 export function buildPayload(options: BuildPayloadOptions): string {
