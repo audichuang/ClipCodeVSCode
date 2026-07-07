@@ -27,6 +27,22 @@ export function matchesPath(candidatePath: string, rulePath: string): boolean {
   return isSameOrChild(normalizePath(candidatePath), normalizePath(rulePath));
 }
 
+// 目錄被啟用的 PATH exclude 規則命中時可整棵剪枝：matchesPath 是 same-or-child，
+// 該目錄下每個檔案也必然被同一規則排除，跳過子樹是純優化、不改行為。
+// PATTERN 規則比對的是檔名，不能用來剪目錄。
+export function directoryExcluded(
+  relativePath: string,
+  rules: FilterRule[],
+  absolutePath?: string
+): boolean {
+  return rules.some(rule =>
+    rule.enabled &&
+    rule.action === 'EXCLUDE' &&
+    rule.type === 'PATH' &&
+    matchesRule(relativePath, rule, absolutePath)
+  );
+}
+
 export function overlapsDirectory(directoryPath: string, rulePath: string): boolean {
   const directory = normalizePath(directoryPath);
   const rule = normalizePath(rulePath);
