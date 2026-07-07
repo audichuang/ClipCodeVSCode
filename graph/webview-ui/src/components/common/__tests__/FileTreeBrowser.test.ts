@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import FileTreeBrowser from '../FileTreeBrowser.svelte';
 
-interface TreeEntry { mode: string; type: 'blob' | 'tree'; hash: string; name: string; }
+interface TreeEntry { mode: string; type: 'blob' | 'tree' | 'commit'; hash: string; name: string; }
 
 function deliverTree(entries: TreeEntry[]) {
   window.dispatchEvent(new MessageEvent('message', {
@@ -10,7 +10,7 @@ function deliverTree(entries: TreeEntry[]) {
   }));
 }
 
-function entry(name: string, type: 'blob' | 'tree' = 'blob'): TreeEntry {
+function entry(name: string, type: 'blob' | 'tree' | 'commit' = 'blob'): TreeEntry {
   return { mode: '100644', type, hash: 'h', name };
 }
 

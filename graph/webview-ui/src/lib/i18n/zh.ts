@@ -18,6 +18,7 @@ export const zh: Record<string, string> = {
   'toolbar.noRemotes': '未配置远程仓库。请先添加一个远程仓库。',
   'toolbar.addRemote': '添加远程仓库',
   'toolbar.detachedHead': '（分离头指针）',
+  'error.detachedPushPull': '目前不在任何分支上（分离头指针）——请先检出分支再推送或拉取。',
   /* SNIPCODE-HOOK start: PR tab (Task G3) */
   'toolbar.pr': 'PR',
   /* SNIPCODE-HOOK end */
@@ -25,7 +26,7 @@ export const zh: Record<string, string> = {
   // Push modal
   'push.title': '推送',
   'push.confirm': '将 {branch} 推送到远程仓库？',
-  'push.forceWithLease': 'Force with lease',
+  'push.forceWithLease': '安全强制推送',
   'push.forceWithLeaseWarning': '如果远程有未拉取的提交则失败，但若本地引用匹配则可能<span class="modal-emph modal-emph--danger">覆盖</span>远程更改。请谨慎使用。',
   'push.force': '强制推送',
   'push.forceWarning': '强制推送可能会<span class="modal-emph modal-emph--danger">覆盖</span>远程更改。请谨慎使用。',
@@ -132,8 +133,8 @@ export const zh: Record<string, string> = {
   'graph.notPushed': '未推送',
   'graph.remoteOnly': '仅远程',
   'graph.amendRef': "修正 '{ref}'",
-  'graph.stash': 'Stash 更改',
-  'graph.amendCommit': 'Amend Commit',
+  'graph.stash': '储藏更改',
+  'graph.amendCommit': '修正提交',
   'graph.reword': '修改提交信息…',
   'reword.title': '修改提交信息',
   'reword.message': '提交信息',
@@ -154,7 +155,7 @@ export const zh: Record<string, string> = {
   'amend.onlyNote': '不包含已暂存更改',
   'amend.pushAfter': 'Amend 后 push 分支',
   'amend.pushAfterWarning': 'Amend 会重写提交，因此将以 force push <span class="modal-emph modal-emph--danger">覆盖远程分支</span>。使用 --force-with-lease，若远程有你尚未拉取的提交则会中止。',
-  'amend.amend': 'Amend',
+  'amend.amend': '修正',
   'graph.dblClickCheckout': '双击 Checkout：{ref}',
 
   // Graph context menu
@@ -175,8 +176,8 @@ export const zh: Record<string, string> = {
   'graph.checkoutCommit': '检出提交',
   'graph.cherryPickCommit': '遴选提交',
   'graph.revertCommit': '还原提交',
-  'graph.commitFixup': 'Create Fixup Commit',
-  'graph.commitSquash': 'Create Squash Commit',
+  'graph.commitFixup': '创建 Fixup 提交',
+  'graph.commitSquash': '创建 Squash 提交',
   'graph.savePatch': '另存为补丁',
   'graph.compareToLocal': '与本地更改比较',
   'graph.viewChanges': '查看更改',
@@ -232,7 +233,7 @@ export const zh: Record<string, string> = {
   'rebase.moveUp': '上移',
   'rebase.moveDown': '下移',
   'rebase.cannotSquashFirst': '无法对最早的提交执行 squash/fixup',
-  'rebase.autosquash': 'Autosquash',
+  'rebase.autosquash': '自动 Squash',
   'rebase.autosquashHint': '将 fixup!/squash! 提交自动排列到目标提交下方',
   // Multi-select (squash / cherry-pick selected commits)
   'graph.squashCommits': 'Squash {count} 个提交',
@@ -253,12 +254,14 @@ export const zh: Record<string, string> = {
   'squash.title': 'Squash 提交',
   'squash.description': '将选中的 {count} 个提交合并为一个提交。',
   'squash.message': '提交消息',
-  'squash.squash': 'Squash',
+  'squash.squash': 'Squash 合并',
   'squash.loading': '正在加载提交',
   'squash.pushedWarning': '部分提交已推送。Squash 会重写历史记录，需要 <span class="modal-emph modal-emph--danger">force push</span>。',
 
   // Commit details
   'details.commit': '提交',
+  'details.staged': '已暂存',
+  'details.unstaged': '未暂存',
   'details.author': '作者',
   'details.committer': '提交者',
   'details.date': '日期',
@@ -283,6 +286,12 @@ export const zh: Record<string, string> = {
   'details.diffTruncated': '大型差异：显示 {total} 行中的 {shown} 行',
   'details.showFullDiff': '显示完整差异',
   'details.nestedRepoLabel': '嵌套仓库',
+  'status.added': '已添加',
+  'status.modified': '已修改',
+  'status.deleted': '已删除',
+  'status.renamed': '已重命名',
+  'status.copied': '已复制',
+  'status.untracked': '未跟踪',
   'details.nestedRepoHint': '这是一个未注册为子模块的嵌套 git 仓库。无法从父仓库追踪其内容。',
   'details.selectCommit': '选择一个提交以查看详情',
   'details.selectMoreCommits': '再选择一些提交进行比较',
@@ -301,10 +310,10 @@ export const zh: Record<string, string> = {
   'search.authorFilter': '作者筛选',
   'search.sourceFilter': '来源',
   'search.sourceFilterTooltip': '按来源筛选（本地 / 远程）',
-  'search.branchFilter': 'Branch',
+  'search.branchFilter': '分支',
   'search.branchFilterTooltip': '按特定分支筛选',
-  'search.allBranches': 'All',
-  'search.filterBranches': 'Search',
+  'search.allBranches': '全部',
+  'search.filterBranches': '搜索',
 
   // Activity log
   'activityLog.title': '活动日志',
@@ -412,14 +421,14 @@ export const zh: Record<string, string> = {
   'cherryPick.cherryPick': '遴选',
 
   // Fixup / squash (autosquash) modal
-  'fixup.title': 'Create Fixup Commit',
+  'fixup.title': '创建 Fixup 提交',
   'fixup.desc': '将已暂存的更改作为所选提交的 fixup 提交。',
   'fixup.checkingStaged': '正在检查已暂存更改',
   'fixup.stagedNone': '无已暂存更改',
   'fixup.stagedIncluded': '已暂存 {count} 个',
-  'autosquash.title': 'Create Squash Commit',
+  'autosquash.title': '创建 Squash 提交',
   'autosquash.desc': '将已暂存的更改作为所选提交的 squash 提交。',
-  'autosquash.button': 'Create',
+  'autosquash.button': '创建',
   'autosquash.preview': '将创建的提交消息',
 
   // Revert modal

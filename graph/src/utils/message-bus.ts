@@ -182,7 +182,7 @@ export type ExtensionMessage =
   | { type: 'conflictPrediction'; payload: { hasConflict: boolean; files: string[]; truncated?: boolean; requestId?: string } }
   | { type: 'bisectResult'; payload: { message: string } }
   | { type: 'statsData'; payload: { byAuthor: Array<{ author: string; email: string; count: number }>; byWeekdayHour: Array<{ weekday: number; hour: number; count: number }> } }
-  | { type: 'lsTreeData'; payload: { ref: string; path?: string; entries: Array<{ mode: string; type: 'blob' | 'tree'; hash: string; name: string }> } }
+  | { type: 'lsTreeData'; payload: { ref: string; path?: string; entries: Array<{ mode: string; type: 'blob' | 'tree' | 'commit'; hash: string; name: string }> } }
   | { type: 'submoduleData'; payload: Array<{ hash: string; path: string; status: string }> }
   | { type: 'lfsData'; payload: { files: Array<{ oid: string; path: string }>; locks: Array<{ path: string; owner: string; id: string }> } }
   | { type: 'tagDetailsData'; payload: { name: string; hash: string; message?: string; isAnnotated: boolean } }

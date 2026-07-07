@@ -982,6 +982,15 @@ describe('GitService', () => {
       ];
       await expect(service.pushCurrentBranch()).rejects.toThrow('current branch');
     });
+
+    it('throws on the detached pseudo-branch instead of pushing its literal name', async () => {
+      (service as any).branches = async () => [
+        { name: '(HEAD detached at abc1234)', current: true, detached: true, ahead: 0, behind: 0, hash: 'abc1234' },
+        { name: 'main', current: false, ahead: 0, behind: 0, hash: 'def5678' },
+      ];
+      await expect(service.pushCurrentBranch()).rejects.toThrow('detached HEAD');
+      expect(calls).toHaveLength(0);
+    });
   });
 
   describe('publishBranch', () => {
@@ -1079,6 +1088,88 @@ describe('GitService', () => {
       mockExec(service, async () => '');
       await service.removeRemote('origin');
       expect((service as any).cachedRemoteNames).toBeNull();
+    });
+  });
+
+  describe('read-list caching', () => {
+    it('caches stashList briefly and invalidates it after a stash mutation', async () => {
+      const calls: string[][] = [];
+      let listVersion = 0;
+      mockExec(service, async (args) => {
+        calls.push(args);
+        if (args[0] === 'stash' && args[1] === 'list') {
+          listVersion++;
+          return `stash@{0}\x00wip ${listVersion}\x002024-01-01T00:00:00Z\x00parent\x00hash\n`;
+        }
+        return '';
+      });
+
+      expect((await service.stashList())[0].message).toBe('wip 1');
+      expect((await service.stashList())[0].message).toBe('wip 1');
+      expect(calls.filter(c => c[0] === 'stash' && c[1] === 'list')).toHaveLength(1);
+
+      await service.stashSave('new');
+
+      expect((await service.stashList())[0].message).toBe('wip 2');
+      expect(calls.filter(c => c[0] === 'stash' && c[1] === 'list')).toHaveLength(2);
+    });
+
+    it('does not let an in-flight read cache its pre-invalidation result', async () => {
+      let resolveFirst!: (v: string) => void;
+      let callCount = 0;
+      mockExec(service, async (args) => {
+        if (args[0] === 'stash' && args[1] === 'list') {
+          callCount++;
+          if (callCount === 1) {
+            return new Promise<string>(r => { resolveFirst = r; });
+          }
+          return `stash@{0}\x00fresh\x002024-01-01T00:00:00Z\x00parent\x00hash\n`;
+        }
+        return '';
+      });
+
+      const stale = service.stashList();               // starts before the mutation
+      service.clearReadCache();                        // external change invalidates
+      resolveFirst(`stash@{0}\x00stale\x002024-01-01T00:00:00Z\x00parent\x00hash\n`);
+      expect((await stale)[0].message).toBe('stale');  // caller still gets its result…
+
+      // …but the next read must spawn fresh, not serve the stale cache or
+      // dedupe onto the pre-invalidation in-flight promise.
+      expect((await service.stashList())[0].message).toBe('fresh');
+      expect(callCount).toBe(2);
+    });
+
+    it('clearReadCache also drops the 30s remote-name cache', () => {
+      (service as any).cachedRemoteNames = ['origin'];
+      (service as any).remoteNamesCacheTime = Date.now();
+      service.clearReadCache();
+      expect((service as any).cachedRemoteNames).toBeNull();
+    });
+
+    it('does not invalidate the cache on read-only commands (--format is a single token)', () => {
+      const invalidates = (args: string[]) =>
+        (service as unknown as { invalidatesReadCache(a: string[]): boolean }).invalidatesReadCache(args);
+
+      // Reads — must NOT clear the cache. branches() passes --format=<fmt> as
+      // one token; an exact includes('--format') match would misclassify it as
+      // a mutation and wipe the cache on every refresh.
+      expect(invalidates(['branch', '-a', '--format=%(HEAD)%(refname:short)'])).toBe(false);
+      expect(invalidates(['branch', '--list'])).toBe(false);
+      expect(invalidates(['tag', '-l', '--sort=-creatordate'])).toBe(false);
+      expect(invalidates(['remote', '-v'])).toBe(false);
+      expect(invalidates(['remote', 'get-url', 'origin'])).toBe(false);
+      expect(invalidates(['stash', 'list', '--format=%gd'])).toBe(false);
+      expect(invalidates(['worktree', 'list', '--porcelain'])).toBe(false);
+      expect(invalidates(['log', '--all'])).toBe(false);
+
+      // Mutations — must clear.
+      expect(invalidates(['branch', '-D', 'feature'])).toBe(true);
+      expect(invalidates(['branch', '-m', 'old', 'new'])).toBe(true);
+      expect(invalidates(['checkout', 'main'])).toBe(true);
+      expect(invalidates(['stash', 'push', '-m', 'wip'])).toBe(true);
+      expect(invalidates(['tag', 'v1.0'])).toBe(true);
+      expect(invalidates(['worktree', 'add', '/tmp/wt'])).toBe(true);
+      expect(invalidates(['remote', 'add', 'origin', 'url'])).toBe(true);
     });
   });
 
@@ -1342,6 +1433,7 @@ describe('GitService', () => {
       expect(args).toContain('--author=jane');
       expect(args).toContain('--after=2024-01-01');
       expect(args).toContain('--before=2024-12-31');
+      expect(args).not.toContain('--topo-order');
     });
   });
 
@@ -1426,6 +1518,32 @@ describe('GitService', () => {
   });
 
   describe('multiCommitSections', () => {
+    it('batch-loads commit parents for multi-select', async () => {
+      const svc = new GitService('/tmp/test-repo');
+      const calls: string[][] = [];
+      mockExec(svc, async (args: string[]) => {
+        calls.push(args);
+        if (args[0] === 'stash') return '';
+        if (args[0] === 'log' && args[1] === '--no-walk') return 'c2\x00p2\nc1\x00p1\n';
+        const range = args.find(a => a.includes('..')) ?? '';
+        if (args[0] === 'diff' && args.includes('--name-status')) {
+          if (range === 'p2..c2') return 'M\ta.txt\n';
+          if (range === 'p1..c1') return 'A\tb.txt\n';
+          return '';
+        }
+        if (args[0] === 'diff' && args.includes('--no-color')) {
+          if (range === 'c2^..c2') return `diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+c2\n`;
+          if (range === 'c1^..c1') return `diff --git a/b.txt b/b.txt\n--- /dev/null\n+++ b/b.txt\n@@ -0,0 +1 @@\n+new\n`;
+        }
+        return '';
+      });
+
+      await svc.multiCommitSections(['c2', 'c1']);
+
+      expect(calls.filter(c => c[0] === 'log' && c[1] === '--no-walk')).toHaveLength(1);
+      expect(calls.filter(c => c[0] === 'log' && c.includes('--format=%P'))).toHaveLength(0);
+    });
+
     it('returns union files and per-commit diff sections for each file', async () => {
       const svc = new GitService('/tmp/test-repo');
       mockExec(svc, async (args: string[]) => {

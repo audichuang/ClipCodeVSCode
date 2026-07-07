@@ -51,10 +51,10 @@
   let baseFilter = $state('');
   let headFilter = $state('');
   let filteredBaseBranches = $derived(
-    branchStore.branches.filter((b) => b.name.toLowerCase().includes(baseFilter.trim().toLowerCase()))
+    branchStore.branches.filter((b) => !b.detached && b.name.toLowerCase().includes(baseFilter.trim().toLowerCase()))
   );
   let filteredHeadBranches = $derived(
-    branchStore.branches.filter((b) => b.name.toLowerCase().includes(headFilter.trim().toLowerCase()))
+    branchStore.branches.filter((b) => !b.detached && b.name.toLowerCase().includes(headFilter.trim().toLowerCase()))
   );
 
   function closeBaseDropdown() {
@@ -187,7 +187,10 @@
 
   /* SNIPCODE-HOOK start: PR tab two-sided compare */
   function defaultHead(): string | null {
-    return branchStore.currentBranch?.name ?? null;
+    // Detached HEAD: the pseudo-branch name "(HEAD detached at …)" is not a
+    // real ref — leave head unselected instead of sending it to git.
+    const cur = branchStore.currentBranch;
+    return cur && !cur.detached ? cur.name : null;
   }
 
   function selectHead(h: string) {
@@ -427,11 +430,11 @@
 
   function statusLabel(s?: string): string {
     switch (s) {
-      case 'A': return 'Added';
-      case 'M': return 'Modified';
-      case 'D': return 'Deleted';
-      case 'R': return 'Renamed';
-      case 'C': return 'Copied';
+      case 'A': return t('status.added');
+      case 'M': return t('status.modified');
+      case 'D': return t('status.deleted');
+      case 'R': return t('status.renamed');
+      case 'C': return t('status.copied');
       default: return '';
     }
   }
@@ -577,7 +580,7 @@
         </div>
       {/if}
     </div>
-    <button class="pr-swap-btn" onclick={swap} use:tooltip={'Swap base and head'}>
+    <button class="pr-swap-btn" aria-label="Swap base and head" onclick={swap} use:tooltip={'Swap base and head'}>
       <i class="codicon codicon-arrow-swap"></i>
     </button>
     <!-- SNIPCODE-HOOK end -->

@@ -69,6 +69,13 @@ export class GitService {
   // a tree-view sidebar refresh and the webview panel refresh kicked off in
   // the same tick during repo switch) collapse onto a single git subprocess.
   private inflight = new Map<string, Promise<unknown>>();
+  private readCache = new Map<string, { expires: number; value: unknown }>();
+  // Bumped on every invalidation. A read that started before a mutation must
+  // not write its (pre-mutation) result into the cache after the mutation
+  // cleared it, and a caller arriving after the mutation must not dedupe onto
+  // that stale in-flight read — both are keyed to the generation they saw.
+  private readCacheGeneration = 0;
+  private static readonly READ_CACHE_TTL_MS = 1500;
 
   private dedupe<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.inflight.get(key) as Promise<T> | undefined;
@@ -78,7 +85,96 @@ export class GitService {
     return p;
   }
 
+  private cachedRead<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const hit = this.readCache.get(key);
+    if (hit && hit.expires > Date.now()) return Promise.resolve(hit.value as T);
+    const generation = this.readCacheGeneration;
+    return this.dedupe(`${key}@${generation}`, async () => {
+      const value = await fn();
+      if (generation === this.readCacheGeneration) {
+        this.readCache.set(key, { value, expires: Date.now() + GitService.READ_CACHE_TTL_MS });
+      }
+      return value;
+    });
+  }
+
+  /** Public so watcher-triggered refreshes can drop entries cached before an
+   *  external change (git run in a terminal never passes through exec()). */
+  clearReadCache(): void {
+    this.readCache.clear();
+    this.readCacheGeneration++;
+    // Keep the older 30s remote-name cache consistent with the same external
+    // change (e.g. `git remote add` in a terminal): stale remote names make
+    // log()'s %D parsing misclassify new remotes' branches as local.
+    this.cachedRemoteNames = null;
+  }
+
+  private invalidatesReadCache(args: string[]): boolean {
+    const [cmd, sub] = args;
+    switch (cmd) {
+      case 'add':
+      case 'apply':
+      case 'bisect':
+      case 'checkout':
+      case 'cherry-pick':
+      case 'clean':
+      case 'commit':
+      case 'fetch':
+      case 'flow':
+      case 'merge':
+      case 'pull':
+      case 'push':
+      case 'rebase':
+      case 'reset':
+      case 'revert':
+        return true;
+      case 'branch':
+        // Read-only forms carry --list or --format=<fmt> (a single token, so
+        // exact includes('--format') would never match — compare by prefix).
+        return !args.some(a => a === '--list' || a.startsWith('--format'));
+      case 'remote':
+        return !(args.length === 1 || sub === '-v' || sub === 'get-url');
+      case 'stash':
+        return sub !== 'list' && sub !== 'show';
+      case 'tag':
+        return !(sub === '-l' || sub === '--list');
+      case 'worktree':
+        return sub !== 'list';
+      default:
+        return false;
+    }
+  }
+
   constructor(private repoPath: string) {}
+
+  private parseStatusPorcelainZ(raw: string): Array<{ x: string; y: string; path: string; oldPath?: string }> {
+    if (raw && !raw.includes('\0')) {
+      return raw.split('\n').filter(Boolean).map(line => {
+        const x = line[0] ?? ' ';
+        const y = line[1] ?? ' ';
+        let path = line.slice(3);
+        if (path.includes(' -> ')) path = path.split(' -> ')[1];
+        path = path.trim();
+        return { x, y, path };
+      });
+    }
+    const fields = raw.split('\0');
+    const entries: Array<{ x: string; y: string; path: string; oldPath?: string }> = [];
+    let i = 0;
+    while (i < fields.length) {
+      const head = fields[i++];
+      if (!head) continue;
+      const x = head[0] ?? ' ';
+      const y = head[1] ?? ' ';
+      const path = head.slice(3);
+      if (x === 'R' || x === 'C' || y === 'R' || y === 'C') {
+        entries.push({ x, y, path, oldPath: fields[i++] ?? '' });
+      } else {
+        entries.push({ x, y, path });
+      }
+    }
+    return entries;
+  }
 
   /**
    * Override the default per-command timeout (in milliseconds). Non-positive
@@ -428,6 +524,7 @@ export class GitService {
         const stderr = stderrBuf.toString();
         recordActivity(code === 0);
         if (code === 0) {
+          if (this.invalidatesReadCache(args)) this.clearReadCache();
           resolve(stdout);
         } else {
           reject(new GitError(stderr, code, args, stdout));
@@ -501,7 +598,7 @@ export class GitService {
     // could throw first and leave this an unhandled rejection. On failure it
     // warns and yields null → "no summary row".
     const porcelainPromise = !options?.skip
-      ? this.exec(['status', '--porcelain', '-uall']).catch((err) => {
+      ? this.exec(['status', '--porcelain', '-z', '-uall']).catch((err) => {
           this.warn(`failed to check uncommitted status: ${err instanceof Error ? err.message : err}`);
           return null;
         })
@@ -608,11 +705,10 @@ export class GitService {
       // porcelain is null when the probe failed (already warned).
       const porcelain = await porcelainPromise;
       if (porcelain !== null) {
-        const lines = porcelain.split('\n').filter(Boolean);
-        if (commits.length > 0 && lines.length > 0) {
+        const entries = this.parseStatusPorcelainZ(porcelain);
+        if (commits.length > 0 && entries.length > 0) {
           let staged = 0, unstaged = 0;
-          for (const line of lines) {
-            const x = line[0], y = line[1];
+          for (const { x, y } of entries) {
             if (x !== ' ' && x !== '?') staged++;
             if (y !== ' ' && y !== '?') unstaged++;
             if (x === '?' && y === '?') unstaged++;
@@ -625,7 +721,7 @@ export class GitService {
             abbreviatedHash: 'UNCOMMITTED',
             parents: [],
             refs: [],
-            subject: `Uncommitted changes (${lines.length})`,
+            subject: `Uncommitted changes (${entries.length})`,
             body: JSON.stringify({ staged, unstaged }),
             author: { name: '', email: '', date: '' },
             committer: { name: '', email: '', date: '' },
@@ -673,7 +769,7 @@ export class GitService {
    * The graph characters are parsed to determine exact column positions.
    */
   async branches(): Promise<BranchInfo[]> {
-    return this.dedupe('branches', async () => {
+    return this.cachedRead('branches', async () => {
       const raw = await this.exec([
         'branch', '-a', '--format=%(HEAD)%(refname:short)%00%(objectname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(refname)',
       ]);
@@ -682,7 +778,7 @@ export class GitService {
   }
 
   async tags(): Promise<TagInfo[]> {
-    return this.dedupe('tags', async () => {
+    return this.cachedRead('tags', async () => {
       const raw = await this.exec([
         'tag', '-l', '--sort=-creatordate', '--format=%(refname:short)%00%(if)%(*objectname:short)%(then)%(*objectname:short)%(else)%(objectname:short)%(end)%00%(objecttype)%00%(contents:subject)%00%(contents:body)%01%02%03',
       ]);
@@ -691,14 +787,14 @@ export class GitService {
   }
 
   async remotes(): Promise<RemoteInfo[]> {
-    return this.dedupe('remotes', async () => {
+    return this.cachedRead('remotes', async () => {
       const raw = await this.exec(['remote', '-v']);
       return parseRemotes(raw);
     });
   }
 
   async stashList(): Promise<StashEntry[]> {
-    return this.dedupe('stashList', async () => {
+    return this.cachedRead('stashList', async () => {
       try {
         const raw = await this.exec([
           'stash', 'list', '--format=%gd%x00%gs%x00%aI%x00%P%x00%H',
@@ -742,18 +838,12 @@ export class GitService {
   }
 
   async getUncommittedDiff(): Promise<{ staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> }> {
-    const raw = await this.exec(['status', '--porcelain', '-uall']);
+    const raw = await this.exec(['status', '--porcelain', '-z', '-uall']);
     const staged: Array<{ path: string; status: string }> = [];
     const unstaged: Array<{ path: string; status: string }> = [];
-    // Do not trim the whole output: porcelain lines may start with a space
-    // (e.g. " M file" for unstaged-only modifications), and a leading trim
-    // would shift the first line's columns and chop the filename's first char.
-    for (const line of raw.split('\n').filter(Boolean)) {
-      const x = line[0];
-      const y = line[1];
-      let path = line.slice(3);
-      if (path.includes(' -> ')) path = path.split(' -> ')[1];
-      path = path.trim();
+    for (const entry of this.parseStatusPorcelainZ(raw)) {
+      const { x, y } = entry;
+      let { path } = entry;
       // Untracked entries with a trailing slash are nested git repositories that
       // aren't registered as submodules — git refuses to descend into them, so
       // they surface as a single directory entry. Strip the slash and mark them
@@ -1083,11 +1173,11 @@ export class GitService {
   async diffFiles(ref1: string, ref2?: string): Promise<Array<{ path: string; status: string; oldPath?: string }>> {
     this.assertSafeRef(ref1, 'diff');
     if (ref2) this.assertSafeRef(ref2, 'diff');
-    const args = ['diff', '--name-status'];
+    const args = ['diff', '-M', '-z', '--name-status'];
     args.push(ref1);
     if (ref2) args.push(ref2);
     const raw = await this.exec(args);
-    return this.parseNameStatus(raw);
+    return this.parseNameStatusZ(raw);
   }
 
   private async commitParents(hash: string): Promise<string[]> {
@@ -1097,6 +1187,24 @@ export class GitService {
     } catch {
       return [];
     }
+  }
+
+  private async commitParentsMany(hashes: string[]): Promise<Map<string, string[]>> {
+    const parentsByHash = new Map<string, string[]>();
+    if (hashes.length === 0) return parentsByHash;
+    try {
+      const raw = await this.exec(['log', '--no-walk', '--format=%H%x00%P', ...hashes], { silent: true });
+      for (const line of raw.split('\n').filter(Boolean)) {
+        const [hash = '', parents = ''] = line.split('\x00');
+        if (hash) parentsByHash.set(hash, parents.trim().split(/\s+/).filter(Boolean));
+      }
+    } catch {
+      // Fall through to per-commit lookup below.
+    }
+    for (const hash of hashes) {
+      if (!parentsByHash.has(hash)) parentsByHash.set(hash, await this.commitParents(hash));
+    }
+    return parentsByHash;
   }
 
   private mergeNameStatus(
@@ -1128,11 +1236,15 @@ export class GitService {
    * and the untracked files as "deleted" (issue #45). Callers special-case
    * stashes so the changes view shows only what the stash actually changed.
    */
-  private async stashParents(hash: string): Promise<string[] | null> {
-    const stashes = await this.stashList();
-    const isStash = stashes.some(s =>
+  private isStashHash(hash: string, stashes: StashEntry[]): boolean {
+    return stashes.some(s =>
       s.hash && (s.hash === hash || s.hash.startsWith(hash) || hash.startsWith(s.hash)),
     );
+  }
+
+  private async stashParents(hash: string): Promise<string[] | null> {
+    const stashes = await this.stashList();
+    const isStash = this.isStashHash(hash, stashes);
     if (!isStash) return null;
     return this.commitParents(hash);
   }
@@ -1140,22 +1252,22 @@ export class GitService {
   async showCommitFiles(hash: string): Promise<Array<{ path: string; status: string; oldPath?: string }>> {
     this.assertSafeRef(hash, 'show');
 
-    const stashParents = await this.stashParents(hash);
-    if (stashParents) {
-      return this.showStashFiles(hash, stashParents);
-    }
-
+    const stashes = await this.stashList();
     const parents = await this.commitParents(hash);
+    if (this.isStashHash(hash, stashes)) return this.showStashFiles(hash, parents);
+    return this.showCommitFilesWithParents(hash, parents);
+  }
 
+  private async showCommitFilesWithParents(hash: string, parents: string[]): Promise<Array<{ path: string; status: string; oldPath?: string }>> {
     if (parents.length === 0) {
       // Root commit has no parent - --root compares against empty tree
-      const raw = await this.exec(['diff-tree', '--no-commit-id', '--name-status', '-r', '--root', hash]);
-      return this.parseNameStatus(raw);
+      const raw = await this.exec(['diff-tree', '-M', '-z', '--no-commit-id', '--name-status', '-r', '--root', hash]);
+      return this.parseNameStatusZ(raw);
     }
 
     if (parents.length === 1) {
-      const raw = await this.exec(['diff', '--name-status', `${hash}^..${hash}`]);
-      return this.parseNameStatus(raw);
+      const raw = await this.exec(['diff', '-M', '-z', '--name-status', `${hash}^..${hash}`]);
+      return this.parseNameStatusZ(raw);
     }
 
     // Merge commit: union of files changed vs each parent. Using `hash^..hash`
@@ -1163,8 +1275,8 @@ export class GitService {
     // came in from parent 2..N (silent data loss for every octopus merge).
     const perParent = await Promise.all(parents.map(async parent => {
       this.assertSafeRef(parent, 'diff');
-      const raw = await this.exec(['diff', '--name-status', `${parent}..${hash}`]);
-      return this.parseNameStatus(raw);
+      const raw = await this.exec(['diff', '-M', '-z', '--name-status', `${parent}..${hash}`]);
+      return this.parseNameStatusZ(raw);
     }));
     return this.mergeNameStatus(perParent);
   }
@@ -1181,15 +1293,15 @@ export class GitService {
     const lists: Array<Array<{ path: string; status: string; oldPath?: string }>> = [];
 
     this.assertSafeRef(parents[0], 'diff');
-    const tracked = await this.exec(['diff', '--name-status', `${parents[0]}..${hash}`]);
-    lists.push(this.parseNameStatus(tracked));
+    const tracked = await this.exec(['diff', '-M', '-z', '--name-status', `${parents[0]}..${hash}`]);
+    lists.push(this.parseNameStatusZ(tracked));
 
     if (parents.length >= 3) {
       this.assertSafeRef(parents[2], 'diff');
       const untracked = await this.exec(
-        ['diff-tree', '--no-commit-id', '--name-status', '-r', '--root', parents[2]],
+        ['diff-tree', '-z', '--no-commit-id', '--name-status', '-r', '--root', parents[2]],
       );
-      lists.push(this.parseNameStatus(untracked));
+      lists.push(this.parseNameStatusZ(untracked));
     }
 
     return this.mergeNameStatus(lists);
@@ -1208,8 +1320,11 @@ export class GitService {
       return (await this.commitFileDiff(hash, file)).parsed;
     }
 
-    // Overview (no specific file).
     const parents = await this.commitParents(hash);
+    return this.showCommitDiffOverviewWithParents(hash, parents);
+  }
+
+  private async showCommitDiffOverviewWithParents(hash: string, parents: string[]): Promise<DiffData[]> {
     if (parents.length === 0) {
       // Root commit: diff against empty tree.
       return parseDiff(await this.exec(['show', '--no-color', '--format=', hash]));
@@ -1325,13 +1440,30 @@ export class GitService {
   }> {
     if (hashes.length === 0) throw new GitError('multiCommitSections requires at least one commit', null, []);
     for (const h of hashes) this.assertSafeRef(h, 'diff');
+    const [stashes, parentsByHash] = await Promise.all([
+      this.stashList(),
+      this.commitParentsMany(hashes),
+    ]);
     const perCommit = await Promise.all(
-      hashes.map(async commit => ({ commit, files: await this.showCommitFiles(commit) })),
+      hashes.map(async commit => {
+        const parents = parentsByHash.get(commit) ?? [];
+        const isStash = this.isStashHash(commit, stashes);
+        return {
+          commit,
+          parents,
+          isStash,
+          files: isStash
+            ? await this.showStashFiles(commit, parents)
+            : await this.showCommitFilesWithParents(commit, parents),
+        };
+      }),
     );
     const files = this.mergeNameStatus(perCommit.map(p => p.files));
     const sections: Array<{ file: string; commit: string; diff: DiffData }> = [];
-    for (const { commit, files: cf } of perCommit) {
-      const allDiffs = await this.showCommitDiff(commit);          // whole-commit diff, 1 git call
+    for (const { commit, files: cf, parents, isStash } of perCommit) {
+      const allDiffs = isStash
+        ? await this.showStashDiff(commit, parents)
+        : await this.showCommitDiffOverviewWithParents(commit, parents);
       const byFile = new Map(allDiffs.map(d => [d.file, d]));
       for (const f of cf) {
         let d = byFile.get(f.path);
@@ -1406,7 +1538,7 @@ export class GitService {
    */
   async pushCurrentBranch(options?: { force?: 'with-lease' | 'force' }): Promise<{ pushed: boolean; reason?: 'no-remote' }> {
     const current = (await this.branches()).find(b => b.current);
-    if (!current) {
+    if (!current || current.detached) {
       throw new GitError('No current branch to push (detached HEAD)', null, []);
     }
     if (current.upstream) {
@@ -1739,36 +1871,37 @@ export class GitService {
     this.assertSafeRef(base, 'commitsBetween');
     this.assertSafeRef(head, 'commitsBetween');
 
-    let commits: Array<{ hash: string; subject: string; author: string; date: string }> = [];
-    try {
-      const raw = await this.exec(['log', '--pretty=%H%x00%s%x00%an%x00%aI', `${base}..${head}`], { silent: true });
-      commits = raw.split('\n').filter(Boolean).map(line => {
+    const commitsPromise = this.exec(['log', '--pretty=%H%x00%s%x00%an%x00%aI', `${base}..${head}`], { silent: true })
+      .then((raw) => raw.split('\n').filter(Boolean).map(line => {
         const [hash = '', subject = '', author = '', date = ''] = line.split('\x00');
         return { hash, subject, author, date };
+      }))
+      .catch((err) => {
+        this.warn(`commitsBetween: log failed: ${err instanceof Error ? err.message : err}`);
+        return [] as Array<{ hash: string; subject: string; author: string; date: string }>;
       });
-    } catch (err) {
-      this.warn(`commitsBetween: log failed: ${err instanceof Error ? err.message : err}`);
-    }
 
     // No common ancestor (or an unresolvable ref) — webview falls back to
     // treating `base` itself as the two-dot compare point.
-    let mergeBase: string | null = null;
-    try {
-      mergeBase = (await this.exec(['merge-base', base, head], { silent: true })).trim() || null;
-    } catch {
-      // intentionally silent: absence of a merge-base is an expected outcome, not an error to log.
-    }
+    const mergeBasePromise = this.exec(['merge-base', base, head], { silent: true })
+      .then((raw) => raw.trim() || null)
+      .catch(() => null);
 
-    let ahead = 0;
-    let behind = 0;
-    try {
-      const raw = (await this.exec(['rev-list', '--left-right', '--count', `${base}...${head}`], { silent: true })).trim();
-      const [behindStr = '0', aheadStr = '0'] = raw.split('\t');
-      behind = parseInt(behindStr, 10) || 0;
-      ahead = parseInt(aheadStr, 10) || 0;
-    } catch (err) {
-      this.warn(`commitsBetween: rev-list failed: ${err instanceof Error ? err.message : err}`);
-    }
+    const countsPromise = this.exec(['rev-list', '--left-right', '--count', `${base}...${head}`], { silent: true })
+      .then((raw) => {
+        const [behindStr = '0', aheadStr = '0'] = raw.trim().split('\t');
+        return {
+          behind: parseInt(behindStr, 10) || 0,
+          ahead: parseInt(aheadStr, 10) || 0,
+        };
+      })
+      .catch((err) => {
+        this.warn(`commitsBetween: rev-list failed: ${err instanceof Error ? err.message : err}`);
+        return { ahead: 0, behind: 0 };
+      });
+
+    const [commits, mergeBase, counts] = await Promise.all([commitsPromise, mergeBasePromise, countsPromise]);
+    const { ahead, behind } = counts;
 
     /* SNIPCODE-HOOK start: PR tab (Important 1) — rename/encoding-correct file list.
        The generic diffFiles()/parseNameStatus() path (`git diff --name-status`,
@@ -1781,13 +1914,12 @@ export class GitService {
        `base` itself when there's no merge-base, matching the mergeBase-or-base
        fallback the webview already uses for its Files diff. */
     const diffBase = mergeBase ?? base;
-    let files: Array<{ path: string; status: string; oldPath?: string }> = [];
-    try {
-      const raw = await this.exec(['diff', '-M', '-z', '--name-status', diffBase, head], { silent: true });
-      files = this.parseNameStatusZ(raw);
-    } catch (err) {
-      this.warn(`commitsBetween: diff failed: ${err instanceof Error ? err.message : err}`);
-    }
+    const filesPromise = this.exec(['diff', '-M', '-z', '--name-status', diffBase, head], { silent: true })
+      .then((raw) => this.parseNameStatusZ(raw))
+      .catch((err) => {
+        this.warn(`commitsBetween: diff failed: ${err instanceof Error ? err.message : err}`);
+        return [] as Array<{ path: string; status: string; oldPath?: string }>;
+      });
 
     /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — full parsed diffs
        alongside the file list above, so the webview's PR Files sub-tab can
@@ -1797,15 +1929,15 @@ export class GitService {
        reuses the shared parseDiff() (git-parser) that diffCommits() already
        goes through. Independent try/catch: a diff-text parse failure must not
        take down the file list this method also returns. */
-    let diffs: DiffData[] = [];
-    try {
-      const raw = await this.exec(['diff', '-M', '--no-color', diffBase, head], { silent: true });
-      diffs = parseDiff(raw);
-    } catch (err) {
-      this.warn(`commitsBetween: diff (parsed) failed: ${err instanceof Error ? err.message : err}`);
-    }
+    const diffsPromise = this.exec(['diff', '-M', '--no-color', diffBase, head], { silent: true })
+      .then((raw) => parseDiff(raw))
+      .catch((err) => {
+        this.warn(`commitsBetween: diff (parsed) failed: ${err instanceof Error ? err.message : err}`);
+        return [] as DiffData[];
+      });
     /* SNIPCODE-HOOK end */
 
+    const [files, diffs] = await Promise.all([filesPromise, diffsPromise]);
     return { commits, mergeBase, ahead, behind, files, diffs };
   }
 
@@ -1816,6 +1948,7 @@ export class GitService {
    *  path that itself contains a tab or newline, and pairs correctly with
    *  `-M` rename detection. Ported from the deleted src/branchDiff.ts. */
   private parseNameStatusZ(raw: string): Array<{ path: string; status: string; oldPath?: string }> {
+    if (raw && !raw.includes('\0')) return this.parseNameStatus(raw);
     const fields = raw.split('\0');
     const files: Array<{ path: string; status: string; oldPath?: string }> = [];
     let i = 0;
@@ -1900,8 +2033,8 @@ export class GitService {
 
   async getConflictFiles(): Promise<string[]> {
     try {
-      const raw = await this.exec(['diff', '--name-only', '--diff-filter=U']);
-      return raw.trim().split('\n').filter(Boolean);
+      const raw = await this.exec(['diff', '--name-only', '-z', '--diff-filter=U']);
+      return raw.split('\0').filter(Boolean);
     } catch (err) {
       console.warn('Git Graph+: failed to get conflict files:', err instanceof Error ? err.message : err);
       return [];
@@ -1929,8 +2062,10 @@ export class GitService {
   }
 
   async continueOperation(): Promise<void> {
-    // Stage all resolved conflict files before continuing
-    await this.exec(['add', '-A']);
+    const conflictFiles = await this.getConflictFiles();
+    if (conflictFiles.length > 0) {
+      await this.exec(['add', '--', ...conflictFiles]);
+    }
     const state = await this.getOperationState();
     switch (state.type) {
       case 'merge': await this.exec(['commit', '--no-edit']); break;
@@ -1945,7 +2080,7 @@ export class GitService {
     const state = await this.getOperationState();
     switch (state.type) {
       case 'merge': await this.abortMerge(); break;
-      case 'squash': await this.exec(['reset', '--hard', 'HEAD']); break;
+      case 'squash': await this.exec(['reset', '--merge', 'HEAD']); break;
       case 'rebase': await this.abortRebase(); break;
       case 'cherry-pick': await this.exec(['cherry-pick', '--abort']); break;
       case 'revert': await this.exec(['revert', '--abort']); break;
@@ -1966,6 +2101,7 @@ export class GitService {
       args.push('--keep-index');
     }
     await this.exec(args);
+    this.clearReadCache();
   }
 
   async stashApply(index: number): Promise<void> {
@@ -2088,7 +2224,6 @@ export class GitService {
       'log',
       '--format=%x01%x02%x03%H%x00%h%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%P%x00%D%x00%b',
       '--all',
-      '--topo-order',
       `--max-count=${options?.limit ?? 200}`,
     ];
 
@@ -2258,7 +2393,7 @@ export class GitService {
 
   // --- File tree at commit ---
 
-  async lsTree(ref: string, path?: string): Promise<Array<{ mode: string; type: 'blob' | 'tree'; hash: string; name: string }>> {
+  async lsTree(ref: string, path?: string): Promise<Array<{ mode: string; type: 'blob' | 'tree' | 'commit'; hash: string; name: string }>> {
     this.assertSafeRef(ref, 'ls-tree');
     const args = ['ls-tree', ref];
     if (path) {
@@ -2268,9 +2403,9 @@ export class GitService {
     const raw = await this.exec(args);
     if (!raw.trim()) { return []; }
     return raw.trim().split('\n').filter(Boolean).map(line => {
-      const match = line.match(/^(\d+)\s+(blob|tree)\s+([0-9a-f]+)\s+(.+)$/);
+      const match = line.match(/^(\d+)\s+(blob|tree|commit)\s+([0-9a-f]+)\s+(.+)$/);
       if (!match) { return { mode: '', type: 'blob' as const, hash: '', name: line }; }
-      return { mode: match[1], type: match[2] as 'blob' | 'tree', hash: match[3], name: match[4] };
+      return { mode: match[1], type: match[2] as 'blob' | 'tree' | 'commit', hash: match[3], name: match[4] };
     });
   }
 
@@ -2437,7 +2572,7 @@ export class GitService {
   // --- Worktree ---
 
   async worktreeList(): Promise<WorktreeInfo[]> {
-    return this.dedupe('worktreeList', async () => {
+    return this.cachedRead('worktreeList', async () => {
       const raw = await this.exec(['worktree', 'list', '--porcelain']);
       return parseWorktreeList(raw);
     });

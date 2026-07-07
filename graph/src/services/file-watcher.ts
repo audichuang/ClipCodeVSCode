@@ -15,7 +15,8 @@ export class FileWatcher implements vscode.Disposable {
 
   constructor(
     private repoPath: string,
-    private onChange: (what: string) => void
+    private onChange: (what: string) => void,
+    options: { watchWorkingTree?: boolean } = {},
   ) {
     const resolved = resolveGitDirs(repoPath);
     this.gitDir = resolved.gitDir;
@@ -39,8 +40,10 @@ export class FileWatcher implements vscode.Disposable {
     this.addWatcher(new vscode.RelativePattern(this.commonDir, 'worktrees/**'));
 
     // Watch working tree for file changes (exclude heavy dirs via specific patterns)
-    // Using {src,lib,app,...}/** would be too restrictive, so we watch ** but filter
-    this.addWatcher(new vscode.RelativePattern(repoPath, '**'), true);
+    // Using {src,lib,app,...}/** would be too restrictive, so we watch ** but filter.
+    if (options.watchWorkingTree !== false) {
+      this.addWatcher(new vscode.RelativePattern(repoPath, '**'), true);
+    }
   }
 
   // Directories to ignore for working tree changes (Set for O(1) lookup)

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { commitStore } from '../../lib/stores/commits.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { tooltip } from '../../lib/actions/tooltip';
@@ -47,7 +47,7 @@
 
   const localBranches = $derived(
     (remoteFilter.length === 0 || remoteFilter.includes('local'))
-      ? branches.filter(b => !b.remote)
+      ? branches.filter(b => !b.remote && !b.detached)
       : []
   );
 
@@ -110,28 +110,41 @@
     return list;
   });
 
-  function doSearch() {
+  function runSearch(navigate: boolean, source = haystacks) {
     const q = query.trim().toLowerCase();
     if (!q) {
       clear();
       return;
     }
 
+    const previousCurrent = currentIndex >= 0 ? matchedHashes[currentIndex] : null;
     const matched: string[] = [];
-    for (const { hash, text } of haystacks) {
+    for (const { hash, text } of source) {
       if (text.includes(q)) {
         matched.push(hash);
       }
     }
 
     matchedHashes = matched;
-    currentIndex = matched.length > 0 ? 0 : -1;
+    const preservedIndex = previousCurrent ? matched.indexOf(previousCurrent) : -1;
+    currentIndex = matched.length > 0 ? (preservedIndex >= 0 ? preservedIndex : 0) : -1;
     onResults(matched.length > 0 ? new Set(matched) : new Set());
 
-    if (matched.length > 0) {
-      onNavigate(matched[0]);
+    if (navigate && matched.length > 0) {
+      onNavigate(matched[currentIndex]);
     }
   }
+
+  function doSearch() {
+    runSearch(true);
+  }
+
+  $effect(() => {
+    const source = haystacks;
+    if (untrack(() => query.trim().length > 0)) {
+      untrack(() => runSearch(false, source));
+    }
+  });
 
   function navigatePrev() {
     if (matchedHashes.length === 0) return;

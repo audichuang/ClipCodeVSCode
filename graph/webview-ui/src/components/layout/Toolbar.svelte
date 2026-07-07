@@ -94,16 +94,8 @@
   }
 
   onMount(() => {
-    // Note: App.svelte also listens for `message` events. The two handlers write to
-    // disjoint state (App: rebasePaused/conflict, this: uiStore.operating) and read
-    // nothing from each other, so the registration order is irrelevant. If a future
-    // change introduces cross-dependency between them, route everything through a
-    // single dispatcher instead.
     function handler(event: MessageEvent) {
       const msg = event.data;
-      if ((msg.type === 'operationComplete' || msg.type === 'error') && uiStore.operating) {
-        uiStore.operating = null;
-      }
       if (msg.type === 'logData' && uiStore.operating === 'refresh') {
         uiStore.operating = null;
       }
@@ -182,7 +174,7 @@
       <span class="current-branch" use:tooltip={branchStore.currentBranch.name}>
         <i class="codicon codicon-git-branch branch-icon"></i>
         <span class="branch-name">
-          {branchStore.currentBranch.name.startsWith('(HEAD detached') ? t('toolbar.detachedHead') : branchStore.currentBranch.name}
+          {branchStore.currentBranch.detached || branchStore.currentBranch.name.startsWith('(HEAD detached') ? t('toolbar.detachedHead') : branchStore.currentBranch.name}
         </span>
       </span>
     {/if}
@@ -234,7 +226,7 @@
       class="toolbar-btn"
       class:has-badge={behind > 0}
       onclick={doPull}
-      disabled={uiStore.operating !== null}
+      disabled={uiStore.operating !== null || branchStore.currentBranch?.detached}
       use:tooltip={t('toolbar.pullDesc')}
     >
       {#if uiStore.operating === 'pull'}<span class="spinner"></span>{:else}<i class="codicon codicon-arrow-down"></i>{/if}
@@ -244,12 +236,12 @@
       class="toolbar-btn"
       class:has-badge={ahead > 0}
       onclick={doPush}
-      disabled={uiStore.operating !== null}
+      disabled={uiStore.operating !== null || branchStore.currentBranch?.detached}
       use:tooltip={t('toolbar.pushDesc')}
     >
       {#if uiStore.operating === 'push'}
         <span class="spinner"></span>
-      {:else if !hasUpstream && branchStore.currentBranch}
+      {:else if !hasUpstream && branchStore.currentBranch && !branchStore.currentBranch.detached}
         <i class="codicon codicon-cloud-upload unpublished-icon"></i>
       {:else}
         <i class="codicon codicon-arrow-up"></i>

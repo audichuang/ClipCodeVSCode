@@ -154,12 +154,12 @@ describe('Toolbar — refresh', () => {
     });
   });
 
-  it('operationComplete clears any operating state', async () => {
+  it('operationComplete does not clear a mutating operation before the refresh lands', async () => {
     uiStore.operating = 'fetch';
     render(Toolbar);
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'operationComplete' } }));
     await waitFor(() => {
-      expect(uiStore.operating).toBeNull();
+      expect(uiStore.operating).toBe('fetch');
     });
   });
 });

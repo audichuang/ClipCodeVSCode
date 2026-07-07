@@ -685,12 +685,12 @@
 
   function statusLabel(s?: string): string {
     switch (s) {
-      case 'A': return 'Added';
-      case 'M': return 'Modified';
-      case 'D': return 'Deleted';
-      case 'R': return 'Renamed';
-      case 'C': return 'Copied';
-      case 'U': return 'Untracked';
+      case 'A': return t('status.added');
+      case 'M': return t('status.modified');
+      case 'D': return t('status.deleted');
+      case 'R': return t('status.renamed');
+      case 'C': return t('status.copied');
+      case 'U': return t('status.untracked');
       case 'N': return t('details.nestedRepoLabel');
       default: return '';
     }
@@ -713,10 +713,10 @@
   <div class="top-tabs">
     {#if commit?.hash === 'UNCOMMITTED'}
       <button class="top-tab" class:active={uncommittedTab === 'staged'} onclick={() => { uncommittedTab = 'staged'; selectedFile = null; selectedUncommittedFiles = new Set(); }}>
-        Staged <span class="tab-count">{uncommittedFiles?.staged.length ?? 0}</span>
+        {t('details.staged')} <span class="tab-count">{uncommittedFiles?.staged.length ?? 0}</span>
       </button>
       <button class="top-tab" class:active={uncommittedTab === 'unstaged'} onclick={() => { uncommittedTab = 'unstaged'; selectedFile = null; selectedUncommittedFiles = new Set(); }}>
-        Unstaged <span class="tab-count">{uncommittedFiles?.unstaged.length ?? 0}</span>
+        {t('details.unstaged')} <span class="tab-count">{uncommittedFiles?.unstaged.length ?? 0}</span>
       </button>
     {:else}
       {#if commit}

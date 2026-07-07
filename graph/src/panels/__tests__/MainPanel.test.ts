@@ -17,6 +17,7 @@ const H = vi.hoisted(() => {
     stashPop: vi.fn(async () => {}),
     showCommitDiff: vi.fn(async () => []),
     showCommitFiles: vi.fn(async () => []),
+    getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [] })),
     resolveDiffBaseRef: vi.fn(async () => 'parentsha'),
     getConflictFiles: vi.fn(async () => []),
     getOperationState: vi.fn(async () => ({ type: null })),
@@ -123,6 +124,7 @@ beforeEach(() => {
   H.git.getConflictFiles.mockResolvedValue([]);
   H.git.getRemoteUrl.mockResolvedValue('');
   H.git.showCommitDiff.mockResolvedValue([]);
+  H.git.getUncommittedDiff.mockResolvedValue({ staged: [], unstaged: [] });
   H.repos = [{ path: '/repo', name: 'repo', type: 'root' }];
   (MainPanel as unknown as { currentPanel: unknown }).currentPanel = undefined;
   MainPanel.createOrShow(extUri, '/repo');
@@ -164,6 +166,27 @@ describe('MainPanel message routing', () => {
     const data = postedOfType('logData').at(-1)!;
     expect(data.payload!.hasMore).toBe(true);
     expect((data.payload!.commits as unknown[]).length).toBe(1);
+  });
+
+  it('getLog does not count uncommitted or stash rows toward the page boundary', async () => {
+    const stash = { ...commit('stash123'), refs: [{ type: 'stash' as const, name: 'stash@{0}' }] };
+    H.git.log.mockResolvedValue([
+      { ...commit('UNCOMMITTED'), subject: 'Uncommitted changes (1)' },
+      stash,
+      commit('aaaaaaa1'),
+      commit('bbbbbbb2'),
+    ]);
+
+    await dispatch({ type: 'getLog', payload: { limit: 2 } });
+
+    const data = postedOfType('logData').at(-1)!;
+    expect(data.payload!.hasMore).toBe(false);
+    expect((data.payload!.commits as Array<{ hash: string }>).map(c => c.hash)).toEqual([
+      'UNCOMMITTED',
+      'stash123',
+      'aaaaaaa1',
+      'bbbbbbb2',
+    ]);
   });
 
   it('openDiff for a commit builds the left URI from the resolved parent SHA, not the ~1 shorthand', async () => {
@@ -254,6 +277,39 @@ describe('MainPanel error handling', () => {
     const data = postedOfType('conflictData').at(-1)!;
     expect(data.payload!.operation).toBe('merge');
     expect((data.payload!.files as unknown[]).length).toBe(1);
+  });
+
+  it('posts an error when the post-operation refresh fails', async () => {
+    H.git.log.mockRejectedValue(new GitError('fatal: refresh blew up', 1, ['log']));
+    await dispatch({ type: 'merge', payload: { branch: 'feature' } });
+
+    expect(postedOfType('operationComplete').length).toBeGreaterThan(0);
+    const err = postedOfType('error').at(-1)!;
+    expect(err.payload!.message).toContain('refresh blew up');
+  });
+
+  it('does not probe the new repo for conflicts when the op fails after a repo switch', async () => {
+    H.repos = [
+      { path: '/repo', name: 'repo', type: 'root' },
+      { path: '/repo-b', name: 'repo-b', type: 'nested' },
+    ];
+    await dispatch({ type: 'getRepoList' });
+
+    let rejectMerge!: (e: unknown) => void;
+    H.git.merge.mockImplementationOnce(() => new Promise((_, rej) => { rejectMerge = rej; }));
+    H.git.getConflictFiles.mockClear();
+
+    const mergeRequest = dispatch({ type: 'merge', payload: { branch: 'feature' } });
+    await dispatch({ type: 'switchRepo', payload: { path: '/repo-b' } });
+    rejectMerge(new GitError('CONFLICT', 1, ['merge']));
+    await mergeRequest;
+
+    // The conflict probe would run against repo-b's service — it must be
+    // skipped, and no conflictData for the wrong repo may reach the webview.
+    expect(postedOfType('conflictData')).toHaveLength(0);
+    expect(H.git.getConflictFiles).not.toHaveBeenCalled();
+    const err = postedOfType('error').at(-1)!;
+    expect(err.payload!.message).toBeTruthy();
   });
 });
 
@@ -352,6 +408,31 @@ describe('MainPanel orchestration logic', () => {
     expect(logs.some(l => (l.payload!.commits as Array<{ hash: string }>).some(c => c.hash === 'aaaaaaa1'))).toBe(false);
   });
 
+  it('discards stale branch sidebar data from the previous repo after switching repos', async () => {
+    H.repos = [
+      { path: '/repo', name: 'repo', type: 'root' },
+      { path: '/repo-b', name: 'repo-b', type: 'nested' },
+    ];
+    await dispatch({ type: 'getRepoList' });
+    H.panel!.webview.postMessage.mockClear();
+
+    let resolveOldBranches!: (v: unknown) => void;
+    H.git.branches
+      .mockImplementationOnce(() => new Promise(r => { resolveOldBranches = r as (v: unknown) => void; }))
+      .mockResolvedValue([{ name: 'new-main', current: true, ahead: 0, behind: 0, hash: 'b' }] as never);
+
+    const oldRequest = dispatch({ type: 'getBranches' });
+    await dispatch({ type: 'switchRepo', payload: { path: '/repo-b' } });
+
+    resolveOldBranches([{ name: 'old-main', current: true, ahead: 0, behind: 0, hash: 'a' }]);
+    await oldRequest;
+
+    expect(postedOfType('branchData')).toHaveLength(0);
+    const full = postedOfType('fullRefresh').at(-1)!;
+    const branches = (full.payload!.branchData as { branches: Array<{ name: string }> }).branches;
+    expect(branches.map(b => b.name)).toEqual(['new-main']);
+  });
+
   it('refreshAll applies the saved filter before the first getLog so it does not flash the full unfiltered graph', async () => {
     const M = MainPanel as unknown as { savedRemoteFilter?: string[]; savedBranchFilter?: string[] };
     const prevRemote = M.savedRemoteFilter;
@@ -378,5 +459,41 @@ describe('MainPanel orchestration logic', () => {
       M.savedRemoteFilter = prevRemote;
       M.savedBranchFilter = prevBranch;
     }
+  });
+
+  it('initial refresh uses the configured initial count before any getLog request', async () => {
+    H.git.log.mockResolvedValue([commit('aaaaaaa1')] as never);
+
+    await (MainPanel.currentPanel as unknown as { refreshAll(): Promise<void> }).refreshAll();
+
+    const logArgs = H.git.log.mock.calls.at(-1)![0] as { limit?: number };
+    expect(logArgs.limit).toBe(201);
+    const refresh = postedOfType('fullRefresh').at(-1)!;
+    const logData = (refresh.payload as { logData: { currentLimit?: number } }).logData;
+    expect(logData.currentLimit).toBe(200);
+  });
+
+  it('status refresh reuses the cached graph instead of re-running a large paged log', async () => {
+    H.git.log.mockResolvedValue([commit('aaaaaaa1'), commit('bbbbbbb2')] as never);
+    await dispatch({ type: 'getLog', payload: { limit: 5000 } });
+    H.panel!.webview.postMessage.mockClear();
+    H.git.log.mockClear();
+    H.git.branches.mockClear();
+    H.git.getUncommittedDiff.mockResolvedValue({
+      staged: [{ path: 'staged.ts', status: 'M' }],
+      unstaged: [{ path: 'unstaged.ts', status: 'M' }],
+    });
+
+    await (MainPanel.currentPanel as unknown as { refreshAll(scope: 'status'): Promise<void> }).refreshAll('status');
+
+    expect(H.git.log).not.toHaveBeenCalled();
+    expect(H.git.branches).not.toHaveBeenCalled();
+    const data = postedOfType('logData').at(-1)!;
+    expect((data.payload!.commits as Array<{ hash: string; subject: string }>).map(c => c.hash)).toEqual([
+      'UNCOMMITTED',
+      'aaaaaaa1',
+      'bbbbbbb2',
+    ]);
+    expect((data.payload!.commits as Array<{ hash: string; subject: string }>)[0].subject).toBe('Uncommitted changes (2)');
   });
 });

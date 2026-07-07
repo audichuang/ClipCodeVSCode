@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import SearchBar from '../SearchBar.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
 import { commitStore } from '../../../lib/stores/commits.svelte';
@@ -75,6 +76,28 @@ describe('SearchBar — basic search', () => {
     const matched = onResults.mock.calls.at(-1)![0] as Set<string>;
     expect(matched).toBeInstanceOf(Set);
     expect(matched.size).toBe(0);
+  });
+
+  it('recomputes matches when commits refresh without navigating again', async () => {
+    setCommits([commit({ hash: 'h1', subject: 'fix login' })]);
+    const onResults = vi.fn();
+    const onNavigate = vi.fn();
+    const { container } = render(SearchBar, { ...baseProps, onResults, onNavigate });
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+
+    await fireEvent.input(input, { target: { value: 'login' } });
+    vi.advanceTimersByTime(150);
+    expect(onNavigate).toHaveBeenCalledWith('h1');
+
+    onResults.mockClear();
+    onNavigate.mockClear();
+    setCommits([commit({ hash: 'h2', subject: 'fix login again' })]);
+    await tick();
+
+    const matched = onResults.mock.calls.at(-1)![0] as Set<string>;
+    expect(matched.has('h2')).toBe(true);
+    expect(matched.has('h1')).toBe(false);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it('matches on author name, email, hash, and refs', async () => {

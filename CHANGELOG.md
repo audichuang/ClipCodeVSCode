@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.32
+
+- **Faster refresh, fewer duplicate git spawns.** Git Graph+ now caches
+  read-only ref lookups (branches/tags/remotes/stashes/worktrees) for a short
+  window and shares one `GitService` instance between the sidebar and the
+  panel, cutting the redundant git subprocess spawns that ran after every
+  refresh and repo switch. Multi-select commit diffs batch their parent
+  lookups instead of looking them up one at a time.
+- **Fix: filenames with spaces or quotes broke the uncommitted-changes view.**
+  `git status`'s porcelain output quotes such paths; staging or diffing them
+  silently failed. Status/diff parsing now uses `-z` (NUL-separated,
+  never quoted) throughout.
+- **Fix: resolving a merge/rebase conflict could stage unrelated changes.**
+  `continueOperation` used to `git add -A` (the whole working tree) instead of
+  only the files that were actually in conflict.
+- **Fix: the busy indicator could clear before the graph actually repainted**,
+  letting a second git operation start while the first was still refreshing.
+- **Fix: "Load More" could get stuck disabled forever** if the underlying
+  fetch failed.
+- **Fix: switching repos could leave stale selection, search highlighting, or
+  another repo's branch/commit data on screen** if a slow request from the
+  previous repo resolved after the switch.
+- **Fix: detached HEAD showed a phantom branch** in the branch list/picker and
+  could be pushed to by name; it's now flagged and excluded from branch
+  pickers, with push/pull disabled and the toolbar showing "Detached HEAD".
+- Misc: submodule entries in the file-tree browser are no longer clickable
+  (they can't be opened as files); `git submodule` entries no longer show up
+  as bogus file rows.
+
 ## 0.3.31
 
 - **Fix: PR compare swap button was flung to the far end of the toolbar.** In

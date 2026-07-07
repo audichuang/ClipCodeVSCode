@@ -131,7 +131,7 @@ export function parseBranches(raw: string): BranchInfo[] {
     return [];
   }
 
-  return raw.trim().split('\n').filter(Boolean).map((line) => {
+  return raw.trim().split('\n').filter(Boolean).map((line): BranchInfo | null => {
     const current = line.startsWith('*');
     const rest = current ? line.substring(1) : line;
     const fields = rest.split(FIELD_SEP);
@@ -153,13 +153,20 @@ export function parseBranches(raw: string): BranchInfo[] {
 
     // Use full refname to distinguish local from remote branches
     const fullRefname = fields[4]?.trim() ?? '';
+    // Detached HEAD: `git branch -a --format` emits an extra pseudo-row whose
+    // refname is the literal "(HEAD detached at <hash>)". Keep it, flagged, so
+    // the toolbar can show the detached state — every branch *list* surface
+    // (dropdowns, sidebar, push targets) must filter on `detached`.
+    if (fullRefname && !fullRefname.startsWith('refs/')) {
+      return { name: rawName, current, upstream, upstreamGone, ahead, behind, hash, detached: true };
+    }
     const isRemote = fullRefname.startsWith('refs/remotes/');
     const remote = isRemote ? rawName.split('/')[0] : undefined;
     // Strip heads/ prefix added by git when tag and branch names collide
     const name = !isRemote && rawName.startsWith('heads/') ? rawName.substring(6) : rawName;
 
     return { name, current, remote, upstream, upstreamGone, ahead, behind, hash };
-  }).filter(b => b.name.length > 0);
+  }).filter((b): b is BranchInfo => b !== null && b.name.length > 0);
 }
 
 export function parseTags(raw: string): TagInfo[] {
@@ -488,4 +495,3 @@ function unescapeGitPath(p: string): string {
   }
   return result;
 }
-

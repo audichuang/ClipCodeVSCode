@@ -11,7 +11,9 @@ class BranchStore {
   // access. currentBranch in particular is read many times while building a
   // single context menu, where the old plain-getter Array.find() re-ran each
   // time.
-  private _localBranches = $derived(this.branches.filter((b) => !b.remote));
+  // The detached-HEAD pseudo-row stays out of the branch lists but IS the
+  // currentBranch (its `detached` flag drives the toolbar indicator).
+  private _localBranches = $derived(this.branches.filter((b) => !b.remote && !b.detached));
   private _remoteBranches = $derived(this.branches.filter((b) => !!b.remote));
   private _currentBranch = $derived(this.branches.find((b) => b.current));
 

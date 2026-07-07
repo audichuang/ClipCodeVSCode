@@ -36,7 +36,11 @@ by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
   copy/restore, git-aware copy, path filtering, the git history view.
 - **`graph/`** — a *vendored* copy of git-graph-plus (its own Svelte webview and
   build). It has its own context — see `graph/CLAUDE.md`. The host bundles its
-  built assets via `scripts/copy-graph-assets.mjs`. Don't install the standalone
+  webview assets via `scripts/copy-graph-assets.mjs`; its **extension-host** code
+  (`graph/src/*.ts`) ships because root `src/extension.ts` does
+  `require('../graph/src/extension')`, so `build:host` (esbuild) pulls it into
+  `dist/extension.js`. To confirm a graph change shipped, grep `dist/extension.js`
+  (host) or `dist/graph-webview/main.js` (webview). Don't install the standalone
   git-graph-plus extension alongside Snipcode (command/view id clash).
 
 ## Build / test
