@@ -23,6 +23,7 @@ import {
 } from '../utils/path-validation';
 import { SequenceGuard } from '../utils/sequence-guard';
 import { resolveDefaultWorktreePath } from '../utils/worktree-path';
+import type { BranchInfo, Commit } from '../git/types';
 
 export class MainPanel {
   public static currentPanel: MainPanel | undefined;
@@ -65,7 +66,7 @@ export class MainPanel {
   private fileWatcher: FileWatcher;
   private disposables: vscode.Disposable[] = [];
   private allConflictFiles: string[] = [];
-  private currentLimit = 1000;
+  private currentLimit = 0;
   private currentRemoteFilter: string[] | undefined = undefined;
   private currentBranchFilter: string[] | undefined = undefined;
   private isFirstGetLog = true;
@@ -80,10 +81,15 @@ export class MainPanel {
   private commitFilesSequence = new SequenceGuard();
   private fileDiffSequence = new SequenceGuard();
   private multiCommitSectionsSequence = new SequenceGuard();
+  private cachedLogCommits: Commit[] = [];
+  private cachedLogBranches: BranchInfo[] = [];
+  private cachedLogHasMore = false;
+  private cachedLogLimit = 0;
   private cachedRepos: RepoInfo[] = [];
   private disposed = false;
   public static onSidebarRefresh: (() => void) | null = null;
   public static onRepoChange: ((repoPath: string) => void) | null = null;
+  private static gitServiceProvider: ((repoPath: string) => GitService | undefined) | null = null;
 
   /** Safe postMessage: drops messages after disposal and swallows the throw
    *  that VS Code raises if the underlying webview has gone away. Use this
@@ -96,6 +102,95 @@ export class MainPanel {
       // Webview was torn down between our check and the call (e.g., user
       // closed the panel mid-flight). Nothing to do.
     }
+  }
+
+  private isCurrentRepoSnapshot(repoPath: string): boolean {
+    return samePath(repoPath, this.repoPath);
+  }
+
+  private isSyntheticLogRow(commit: Commit): boolean {
+    return commit.hash === 'UNCOMMITTED' || commit.refs.some(r => r.type === 'stash');
+  }
+
+  private trimLogRows(allFetched: Commit[], historyLimit: number): { commits: Commit[]; hasMore: boolean } {
+    const commits: Commit[] = [];
+    let historyCount = 0;
+    let hasMore = false;
+    for (const commit of allFetched) {
+      if (this.isSyntheticLogRow(commit)) {
+        if (commit.hash === 'UNCOMMITTED' || historyCount < historyLimit) {
+          commits.push(commit);
+        }
+        continue;
+      }
+      historyCount++;
+      if (historyCount <= historyLimit) {
+        commits.push(commit);
+      } else {
+        hasMore = true;
+      }
+    }
+    return { commits, hasMore };
+  }
+
+  private buildUncommittedSummary(diff: { staged: Array<{ path: string }>; unstaged: Array<{ path: string }> }): Commit | null {
+    const staged = diff.staged.length;
+    const unstaged = diff.unstaged.length;
+    // Unique-file count: a file that is both staged and unstaged (MM) appears
+    // in both lists but is one porcelain entry, and the full-refresh path in
+    // GitService.log() counts entries — keep both subjects showing the same N.
+    const total = new Set([...diff.staged, ...diff.unstaged].map(f => f.path)).size;
+    if (total === 0) return null;
+    return {
+      hash: 'UNCOMMITTED',
+      abbreviatedHash: 'UNCOMMITTED',
+      parents: [],
+      refs: [],
+      subject: `Uncommitted changes (${total})`,
+      body: JSON.stringify({ staged, unstaged }),
+      author: { name: '', email: '', date: '' },
+      committer: { name: '', email: '', date: '' },
+    };
+  }
+
+  private applyUncommittedSummary(commits: Commit[], diff: { staged: Array<{ path: string }>; unstaged: Array<{ path: string }> }): Commit[] {
+    const base = commits.filter(c => c.hash !== 'UNCOMMITTED');
+    const summary = this.buildUncommittedSummary(diff);
+    return summary && base.length > 0 ? [summary, ...base] : base;
+  }
+
+  private buildLogPayload(
+    commits: Commit[],
+    branches: BranchInfo[],
+    hasMore: boolean,
+    currentLimit: number,
+    remoteFilter: string[] | undefined,
+    branchFilter: string[] | undefined,
+    preserveSignatures = false,
+  ) {
+    const fullGraph = commits.length > 0
+      ? buildFullGraph(commits, branches, this.makeBranchColorResolver())
+      : { paths: [], links: [], dots: [], commitLeftMargin: [] };
+    return {
+      commits,
+      hasMore,
+      currentLimit,
+      graph: [],
+      paths: fullGraph.paths,
+      links: fullGraph.links,
+      dots: fullGraph.dots,
+      commitLeftMargin: fullGraph.commitLeftMargin,
+      remoteFilter,
+      branches: branchFilter,
+      ...(preserveSignatures ? { preserveSignatures: true } : {}),
+    };
+  }
+
+  private cacheLogSnapshot(commits: Commit[], branches: BranchInfo[], hasMore: boolean, currentLimit: number): void {
+    this.cachedLogCommits = commits;
+    this.cachedLogBranches = branches;
+    this.cachedLogHasMore = hasMore;
+    this.cachedLogLimit = currentLimit;
   }
 
   public static setExtraEnv(env: Record<string, string>): void {
@@ -126,7 +221,7 @@ export class MainPanel {
   }
 
   private createGitService(repoPath: string): GitService {
-    const svc = new GitService(repoPath);
+    const svc = MainPanel.gitServiceProvider?.(repoPath) ?? new GitService(repoPath);
     if (MainPanel.extraEnv) svc.setExtraEnv(MainPanel.extraEnv);
     svc.setWarningHandler(msg => {
       // Surface non-fatal git failures (e.g., stash log / uncommitted status / remote list
@@ -140,6 +235,13 @@ export class MainPanel {
     svc.setAuthRetryHandler(remote => triggerVSCodeGitAuth(repoPath, remote));
     svc.setDefaultTimeout(readTimeoutMs());
     return svc;
+  }
+
+  public static setGitServiceProvider(provider: ((repoPath: string) => GitService | undefined) | null): void {
+    this.gitServiceProvider = provider;
+    if (this.currentPanel) {
+      this.currentPanel.gitService = this.currentPanel.createGitService(this.currentPanel.repoPath);
+    }
   }
 
   private readModalDefaults(): ModalDefaults {
@@ -368,12 +470,23 @@ export class MainPanel {
    */
   private swapRepo(newPath: string): void {
     this.repoPath = newPath;
+    // Notify the extension BEFORE creating our GitService: onRepoChange swaps
+    // the extension's shared instance to newPath, so gitServiceProvider hands
+    // us that instance instead of a private one (panel + sidebar must share a
+    // service or the read cache never dedupes their refreshes). Re-entry is
+    // safe — extension calls back into switchRepo, whose samePath guard sees
+    // this.repoPath already updated and returns immediately.
+    MainPanel.onRepoChange?.(newPath);
     this.gitService = this.createGitService(newPath);
 
     this.allConflictFiles = [];
     this.isFirstGetLog = true;
     this.currentRemoteFilter = undefined;
     this.currentBranchFilter = undefined;
+    this.cachedLogCommits = [];
+    this.cachedLogBranches = [];
+    this.cachedLogHasMore = false;
+    this.cachedLogLimit = 0;
 
     const oldWatcher = this.fileWatcher;
     oldWatcher.dispose();
@@ -382,8 +495,6 @@ export class MainPanel {
     this.fileWatcher = new FileWatcher(newPath, (what) => this.onRepoChanged(what));
     this.fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
     this.disposables.push(this.fileWatcher);
-
-    MainPanel.onRepoChange?.(newPath);
   }
 
   public async switchRepo(newPath: string): Promise<void> {
@@ -423,6 +534,7 @@ export class MainPanel {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    const repoAtMessageStart = this.repoPath;
     try {
       switch (message.type) {
         case 'getLog': {
@@ -447,27 +559,13 @@ export class MainPanel {
             this.gitService.log(logPayload),
             this.gitService.branches(),
           ]);
-          if (seq !== this.logSequence) break;
-          const hasMore = allFetched.length > requestedLimit;
-          const commits = hasMore ? allFetched.slice(0, requestedLimit) : allFetched;
-          const branchColorResolver = this.makeBranchColorResolver();
-          const fullGraph = commits.length > 0 ? buildFullGraph(commits, logBranches, branchColorResolver) : { paths: [], links: [], dots: [], commitLeftMargin: [] };
+          if (seq !== this.logSequence || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
+          const { commits, hasMore } = this.trimLogRows(allFetched, requestedLimit);
+          const payload = this.buildLogPayload(commits, logBranches, hasMore, requestedLimit, effectiveFilter, effectiveBranchFilter);
+          this.cacheLogSnapshot(commits, logBranches, hasMore, requestedLimit);
           this.post({
             type: 'logData',
-            payload: {
-              commits,
-              hasMore,
-              currentLimit: requestedLimit,
-              // The webview renders from paths/links/dots; the legacy GraphNode[] is
-              // unused, so we skip building and sending it (saves CPU + IPC payload).
-              graph: [],
-              paths: fullGraph.paths,
-              links: fullGraph.links,
-              dots: fullGraph.dots,
-              commitLeftMargin: fullGraph.commitLeftMargin,
-              remoteFilter: effectiveFilter,
-              branches: effectiveBranchFilter,
-            },
+            payload,
           });
           break;
         }
@@ -479,6 +577,7 @@ export class MainPanel {
             this.gitService.stashList(),
             this.gitService.worktreeList(),
           ]);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'branchData',
             payload: { branches, tags, remotes, stashes, worktrees },
@@ -495,7 +594,7 @@ export class MainPanel {
           // recently requested file list is delivered to the webview.
           const ticket = this.commitFilesSequence.issue();
           const commitFiles = await this.gitService.showCommitFiles(message.payload.hash);
-          if (!this.commitFilesSequence.isCurrent(ticket)) break;
+          if (!this.commitFilesSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'commitDiffData',
             payload: { hash: message.payload.hash, files: commitFiles },
@@ -510,6 +609,7 @@ export class MainPanel {
            anything; the webview's one-shot listener matches requestId). */
         case 'getCommitFilesForCopy': {
           const files = await this.gitService.showCommitFiles(message.payload.hash);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'commitFilesForCopy',
             payload: { hash: message.payload.hash, requestId: message.payload.requestId, files },
@@ -520,7 +620,7 @@ export class MainPanel {
         case 'getFileDiff': {
           const ticket = this.fileDiffSequence.issue();
           const diffs = await this.gitService.showCommitDiff(message.payload.hash, message.payload.file);
-          if (!this.fileDiffSequence.isCurrent(ticket)) break;
+          if (!this.fileDiffSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'fileDiffData',
             payload: { hash: message.payload.hash, file: message.payload.file, diff: diffs[0] || null },
@@ -530,7 +630,7 @@ export class MainPanel {
         case 'getMultiCommitSections': {
           const ticket = this.multiCommitSectionsSequence.issue();
           const result = await this.gitService.multiCommitSections(message.payload.hashes);
-          if (!this.multiCommitSectionsSequence.isCurrent(ticket)) break;
+          if (!this.multiCommitSectionsSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'multiCommitSectionsData',
             payload: {
@@ -546,6 +646,7 @@ export class MainPanel {
            commit/file selection, so a latest-wins guard isn't needed here. */
         case 'getCommitsBetween': {
           const result = await this.gitService.commitsBetween(message.payload.base, message.payload.head);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'commitsBetween',
             payload: { base: message.payload.base, requestId: message.payload.requestId, ...result },
@@ -555,11 +656,13 @@ export class MainPanel {
         /* SNIPCODE-HOOK end */
         case 'checkDirty': {
           const dirty = await this.gitService.isDirty();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'dirtyState', payload: { dirty, requestId: message.payload?.requestId } });
           break;
         }
         case 'getUncommittedDiff': {
           const result = await this.gitService.getUncommittedDiff();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'uncommittedDiffData', payload: result });
           break;
         }
@@ -568,7 +671,7 @@ export class MainPanel {
           // must not let a slow earlier diff overwrite the current selection.
           const ticket = this.fileDiffSequence.issue();
           const diff = await this.gitService.getUncommittedFileDiff(message.payload.file, message.payload.staged);
-          if (!this.fileDiffSequence.isCurrent(ticket)) break;
+          if (!this.fileDiffSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           const key = (message.payload.staged ? 'staged' : 'unstaged') + ':' + message.payload.file;
           this.post({ type: 'fileDiffData', payload: { hash: 'UNCOMMITTED', file: message.payload.file, key, diff } });
           break;
@@ -577,6 +680,7 @@ export class MainPanel {
           const result = message.payload.mode === 'rebase'
             ? await this.gitService.predictRebaseConflicts(message.payload.ours, message.payload.theirs)
             : await this.gitService.predictConflicts(message.payload.ours, message.payload.theirs, message.payload.mergeBase);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'conflictPrediction',
             payload: { ...result, requestId: message.payload.requestId },
@@ -1039,6 +1143,7 @@ export class MainPanel {
         }
         case 'getRebaseCommits': {
           const rebaseCommits = await this.gitService.getRebaseCommits(message.payload.base);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'rebaseCommitsData', payload: { base: message.payload.base, commits: rebaseCommits } });
           break;
         }
@@ -1087,6 +1192,7 @@ export class MainPanel {
         }
         case 'worktreeAddModalRequest': {
           const defaultPath = await resolveDefaultWorktreePath(this.gitService, this.gitService.rootPath);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.postShowModal({ modal: 'addWorktree', defaultPath, startPoint: message.payload.startPoint });
           break;
         }
@@ -1202,6 +1308,7 @@ export class MainPanel {
         }
         case 'showTagDetails': {
           const tags = await this.gitService.tags();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           const tag = tags.find(t => t.name === message.payload.name);
           if (tag) {
             this.post({ type: 'tagDetailsData', payload: tag });
@@ -1210,6 +1317,7 @@ export class MainPanel {
         }
         case 'getCommitData': {
           const commit = await this.gitService.searchByHash(message.payload.hash);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           if (commit) {
             this.post({ type: 'commitData', payload: { commit } });
           }
@@ -1217,6 +1325,7 @@ export class MainPanel {
         }
         case 'getCommitSignature': {
           const signature = await this.gitService.getCommitSignature(message.payload.hash);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'commitSignatureData', payload: { hash: message.payload.hash, signature } });
           break;
         }
@@ -1229,21 +1338,21 @@ export class MainPanel {
             after: message.payload.after,
             before: message.payload.before,
           });
-          if (seq !== this.searchSequence) break;
+          if (seq !== this.searchSequence || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'searchResults', payload: { commits: results, graph: [] } });
           break;
         }
         case 'searchByHash': {
           const seq = ++this.searchSequence;
           const found = await this.gitService.searchByHash(message.payload.hash);
-          if (seq !== this.searchSequence) break;
+          if (seq !== this.searchSequence || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'searchResults', payload: { commits: found ? [found] : [], graph: [] } });
           break;
         }
         case 'searchByFile': {
           const seq = ++this.searchSequence;
           const results = await this.gitService.searchByFile(message.payload.file);
-          if (seq !== this.searchSequence) break;
+          if (seq !== this.searchSequence || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'searchResults', payload: { commits: results, graph: [] } });
           break;
         }
@@ -1253,6 +1362,7 @@ export class MainPanel {
         }
         case 'getReflog': {
           const result = await this.gitService.getReflog(message.payload?.limit ?? 200, message.payload?.ref ?? 'HEAD');
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'reflogData', payload: result });
           break;
         }
@@ -1294,6 +1404,7 @@ export class MainPanel {
             this.gitService.statsCommitsByAuthor(),
             this.gitService.statsCommitsByWeekdayHour(),
           ]);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'statsData',
             payload: { byAuthor, byWeekdayHour },
@@ -1354,6 +1465,7 @@ export class MainPanel {
             this.gitService.diffCommitToWorking(message.payload.hash),
             this.gitService.diffFiles(message.payload.hash),
           ]);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'commitDiffData', payload: { hash: '', diffs: workingDiffs, files: workingFiles } });
           break;
         }
@@ -1362,12 +1474,14 @@ export class MainPanel {
             this.gitService.diffCommits(message.payload.ref1, message.payload.ref2),
             this.gitService.diffFiles(message.payload.ref1, message.payload.ref2),
           ]);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'commitDiffData', payload: { hash: '', diffs: compareDiffs, files: compareFiles } });
           break;
         }
         // --- File tree at commit ---
         case 'lsTree': {
           const entries = await this.gitService.lsTree(message.payload.ref, message.payload.path);
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'lsTreeData', payload: { ref: message.payload.ref, path: message.payload.path, entries } });
           break;
         }
@@ -1382,6 +1496,7 @@ export class MainPanel {
               config = await this.gitService.getFlowConfig();
             }
           }
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'flowStatus', payload: { installed, initialized, config } });
           break;
         }
@@ -1412,12 +1527,14 @@ export class MainPanel {
         }
         case 'getFlowBranches': {
           const branches = await this.gitService.getFlowBranches();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'flowBranches', payload: branches });
           break;
         }
         // --- Submodule ---
         case 'getSubmodules': {
           const submodules = await this.gitService.submoduleStatus();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'submoduleData', payload: submodules });
           break;
         }
@@ -1430,6 +1547,7 @@ export class MainPanel {
         case 'getLfsFiles': {
           const lfsFiles = await this.gitService.lfsLsFiles();
           const lfsLocks = await this.gitService.lfsLocks();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'lfsData', payload: { files: lfsFiles, locks: lfsLocks } });
           break;
         }
@@ -1439,6 +1557,7 @@ export class MainPanel {
           // Refresh LFS data
           const lfsFiles = await this.gitService.lfsLsFiles();
           const lfsLocks = await this.gitService.lfsLocks();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'lfsData', payload: { files: lfsFiles, locks: lfsLocks } });
           break;
         }
@@ -1448,12 +1567,14 @@ export class MainPanel {
           // Refresh LFS data
           const lfsFiles2 = await this.gitService.lfsLsFiles();
           const lfsLocks2 = await this.gitService.lfsLocks();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'lfsData', payload: { files: lfsFiles2, locks: lfsLocks2 } });
           break;
         }
         // --- Worktree ---
         case 'getWorktrees': {
           const worktrees = await this.gitService.worktreeList();
+          if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({ type: 'worktreeData', payload: worktrees });
           break;
         }
@@ -1520,11 +1641,13 @@ export class MainPanel {
             } else {
               base64 = await this.gitService.getImageBase64(ref, filePath);
             }
+            if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
             this.post({
               type: 'imageData',
               payload: { ref, path: filePath, base64, mimeType },
             });
           } catch {
+            if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
             this.post({
               type: 'imageData',
               payload: { ref, path: filePath, base64: '', mimeType },
@@ -1638,6 +1761,15 @@ export class MainPanel {
     } catch (err: unknown) {
       // Use stderr directly for GitError (cleaner than the full "git xxx failed (exit N): ..." message)
       const errorMessage = err instanceof GitError ? formatGitError(err.stderr) : err instanceof Error ? err.message : String(err);
+
+      // The repo was switched while this operation was in flight: every probe
+      // below (getRemoteUrl, getConflictFiles, getOperationState) would run
+      // against the NEW repo's gitService and could post the wrong repo's
+      // conflict state to the webview. Surface the error and stop.
+      if (!this.isCurrentRepoSnapshot(repoAtMessageStart)) {
+        this.post({ type: 'error', payload: { message: errorMessage, source: message.type } });
+        return;
+      }
 
       // Detect non-git-repo errors early to avoid unnecessary follow-up git calls
       if (err instanceof GitError && /not a git repository/.test(err.stderr)) {
@@ -1839,25 +1971,39 @@ export class MainPanel {
       const logArgs = { limit: refreshLimit + 1, sortOrder, remoteFilter, branches: branchFilter, includeSignature };
 
       const buildLogData = (allFetched: Awaited<ReturnType<typeof this.gitService.log>>, branches: Awaited<ReturnType<typeof this.gitService.branches>>) => {
-        const hasMore = allFetched.length > refreshLimit;
-        const allCommits = hasMore ? allFetched.slice(0, refreshLimit) : allFetched;
-        // Handle empty repository (0 commits) gracefully. The webview renders from
-        // paths/links/dots; the legacy GraphNode[] is unused so we don't build it.
-        const fg = allCommits.length > 0 ? buildFullGraph(allCommits, branches, this.makeBranchColorResolver()) : { paths: [], links: [], dots: [], commitLeftMargin: [] };
+        const { commits, hasMore } = this.trimLogRows(allFetched, refreshLimit);
         // preserveSignatures: this refresh path fetches the log with
         // includeSignature:false (off the hot path), so tell the webview to carry
         // each commit's last-known signature badge forward instead of blanking it.
-        return { commits: allCommits, hasMore, currentLimit: this.currentLimit, graph: [], paths: fg.paths, links: fg.links, dots: fg.dots, commitLeftMargin: fg.commitLeftMargin, remoteFilter, branches: branchFilter, preserveSignatures: true };
+        return this.buildLogPayload(commits, branches, hasMore, refreshLimit, remoteFilter, branchFilter, true);
       };
 
       if (scope === 'status') {
-        // branches is still needed to colour the graph, but the rest of the ref
-        // data and the sidebar can't have changed from a working-tree edit.
-        const [allFetched, branches] = await Promise.all([
-          this.gitService.log(logArgs),
-          this.gitService.branches(),
-        ]);
-        this.post({ type: 'logData', payload: buildLogData(allFetched, branches) });
+        if (this.cachedLogCommits.length > 0) {
+          const diff = await this.gitService.getUncommittedDiff();
+          const commits = this.applyUncommittedSummary(this.cachedLogCommits, diff);
+          const payload = this.buildLogPayload(
+            commits,
+            this.cachedLogBranches,
+            this.cachedLogHasMore,
+            this.cachedLogLimit || refreshLimit,
+            remoteFilter,
+            branchFilter,
+            true,
+          );
+          this.cacheLogSnapshot(commits, this.cachedLogBranches, this.cachedLogHasMore, this.cachedLogLimit || refreshLimit);
+          this.post({ type: 'logData', payload });
+        } else {
+          // No cache yet (early watcher/config refresh before the first getLog):
+          // fall back to the regular log path.
+          const [allFetched, branches] = await Promise.all([
+            this.gitService.log(logArgs),
+            this.gitService.branches(),
+          ]);
+          const payload = buildLogData(allFetched, branches);
+          this.cacheLogSnapshot(payload.commits, branches, payload.hasMore, refreshLimit);
+          this.post({ type: 'logData', payload });
+        }
       } else {
         const [allFetched, branches, tags, remotes, stashes, worktrees] = await Promise.all([
           this.gitService.log(logArgs),
@@ -1867,11 +2013,13 @@ export class MainPanel {
           this.gitService.stashList(),
           this.gitService.worktreeList(),
         ]);
+        const logData = buildLogData(allFetched, branches);
+        this.cacheLogSnapshot(logData.commits, branches, logData.hasMore, refreshLimit);
         // Send as single combined message to ensure atomic update
         this.post({
           type: 'fullRefresh',
           payload: {
-            logData: buildLogData(allFetched, branches),
+            logData,
             branchData: { branches, tags, remotes, stashes, worktrees },
           },
         });
@@ -1881,6 +2029,11 @@ export class MainPanel {
       console.warn('Git Graph+: refresh failed:', err instanceof Error ? err.message : err);
       if (err instanceof GitError && /not a git repository/.test(err.stderr)) {
         try { this.post({ type: 'notGitRepo' }); } catch { /* panel disposed */ }
+      } else {
+        const message = err instanceof GitError
+          ? formatGitError(err.stderr)
+          : err instanceof Error ? err.message : String(err);
+        try { this.post({ type: 'error', payload: { message } }); } catch { /* panel disposed */ }
       }
     } finally {
       this.refreshing = false;
@@ -1955,6 +2108,10 @@ export class MainPanel {
   }
 
   private async onRepoChanged(what: string): Promise<void> {
+    // The change came from outside GitService (terminal, another window), so
+    // exec()'s mutation hook never saw it — drop the read cache or this
+    // refresh could serve refs cached up to TTL ago and never self-heal.
+    this.gitService.clearReadCache();
     this.post({
       type: 'repoChanged',
       payload: { what },

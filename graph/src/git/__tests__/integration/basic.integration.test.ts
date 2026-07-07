@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GitService } from '../../git-service';
-import { TempRepo, commit, createTempRepo, runGit, seedBranches } from './helpers';
+import { TempRepo, commit, createTempRepo, runGit, seedBranches, writeFile } from './helpers';
 
 describe('GitService integration — basic queries', () => {
   let repo: TempRepo;
@@ -189,6 +189,26 @@ describe('GitService integration — basic queries', () => {
       const result = await svc.getUncommittedDiff();
       const paths = [...result.staged, ...result.unstaged].map(s => s.path);
       expect(paths).toContain('한글.txt');
+    });
+
+    it('returns quoted porcelain paths literally so file diffs work', async () => {
+      commit(repo.path, 'init', { 'a.txt': 'a\n' });
+      const { writeFileSync } = await import('fs');
+      const pathWithSpace = 'dir/name with space.txt';
+      const pathWithTab = 'dir/name\twith\ttab.txt';
+      writeFile(repo.path, pathWithSpace, 'space\n');
+      writeFile(repo.path, pathWithTab, 'tab\n');
+
+      const result = await svc.getUncommittedDiff();
+      const paths = result.unstaged.map(s => s.path);
+      expect(paths).toContain(pathWithSpace);
+      expect(paths).toContain(pathWithTab);
+      expect(paths).not.toContain(`"${pathWithSpace}"`);
+      expect(paths).not.toContain('"dir/name\\twith\\ttab.txt"');
+
+      writeFileSync(`${repo.path}/a.txt`, 'changed\n');
+      const diff = await svc.getUncommittedFileDiff(pathWithSpace, false);
+      expect(diff?.file).toBe(pathWithSpace);
     });
 
     it('marks an untracked nested git repo with status N (not a plain untracked)', async () => {

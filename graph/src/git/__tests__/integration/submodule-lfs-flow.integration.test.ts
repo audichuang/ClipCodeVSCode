@@ -72,6 +72,16 @@ describe('GitService integration — submodule', () => {
     expect(lib?.status).toBe('modified');
   });
 
+  it('lsTree parses submodule gitlinks as commit entries', async () => {
+    const entries = await svc.lsTree('HEAD', 'libs/lib');
+    const lib = entries.find(e => e.name === 'libs/lib');
+
+    expect(lib).toBeDefined();
+    expect(lib?.mode).toBe('160000');
+    expect(lib?.type).toBe('commit');
+    expect(lib?.hash).toMatch(/^[0-9a-f]{40}$/);
+  });
+
   it('submoduleStatus returns [] when no submodules', async () => {
     const standalone = createTempRepo();
     try {

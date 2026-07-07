@@ -11,7 +11,7 @@
 
   interface TreeEntry {
     mode: string;
-    type: 'blob' | 'tree';
+    type: 'blob' | 'tree' | 'commit';
     hash: string;
     name: string;
   }
@@ -85,9 +85,10 @@
       }) as entry}
         <button
           class="tree-item"
-          onclick={() => entry.type === 'tree' ? navigateInto(entry.name) : openFile(entry.name)}
+          disabled={entry.type === 'commit'}
+          onclick={() => entry.type === 'tree' ? navigateInto(entry.name) : entry.type === 'commit' ? undefined : openFile(entry.name)}
         >
-          <span class="tree-icon">{entry.type === 'tree' ? '📁' : '📄'}</span>
+          <span class="tree-icon">{entry.type === 'tree' ? '📁' : entry.type === 'commit' ? '↪' : '📄'}</span>
           <span class="tree-name truncate">{entry.name}</span>
         </button>
       {/each}

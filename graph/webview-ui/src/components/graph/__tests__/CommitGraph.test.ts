@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import CommitGraph from '../CommitGraph.svelte';
@@ -87,6 +87,28 @@ describe('CommitGraph smoke', () => {
     // Selection is deferred until the dbl-click timer expires; do a soft
     // assertion that the row is at least focusable / clickable.
     expect(rows[0]).toBeTruthy();
+  });
+
+  it('rapid clicks on two different commits select the second commit', async () => {
+    vi.useFakeTimers();
+    try {
+      commitStore.setData(makeGraphData([
+        makeCommit('h1', 'first'),
+        makeCommit('h2', 'second', ['h1']),
+      ]));
+      const { container } = render(CommitGraph, {});
+      await tick();
+      const rows = container.querySelectorAll<HTMLElement>('.commit-row');
+
+      await fireEvent.click(rows[0]);
+      await fireEvent.click(rows[1]);
+      await vi.advanceTimersByTimeAsync(151);
+      await tick();
+
+      expect(uiStore.selectedCommitHash).toBe('h2');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clicking the UNCOMMITTED row opens the SCM view instead of selecting it', async () => {

@@ -116,6 +116,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   let activeGitService = new GitService(activeRepoPath);
   activeGitService.setDefaultTimeout(readTimeoutMs());
+  MainPanel.setGitServiceProvider((repoPath) => samePath(repoPath, activeRepoPath) ? activeGitService : undefined);
+  context.subscriptions.push({
+    dispose: () => MainPanel.setGitServiceProvider(null),
+  });
 
   // Inject VS Code's built-in git extension askpass env so authentication prompts work
   const builtinGit = vscode.extensions.getExtension('vscode.git');
@@ -196,8 +200,11 @@ export function activate(context: vscode.ExtensionContext) {
   // sidebar. (The sidebar refresh shares one debounce timer with the panel
   // watcher's onSidebarRefresh, so they coalesce rather than double up.)
   let fileWatcher = new FileWatcher(activeRepoPath, () => {
+    // External change (terminal git, another window): the shared read cache
+    // was populated before it happened — drop it before re-reading.
+    activeGitService.clearReadCache();
     refreshAll();
-  });
+  }, { watchWorkingTree: false });
   fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
   context.subscriptions.push({ dispose: () => fileWatcher.dispose() });
 
@@ -242,8 +249,11 @@ export function activate(context: vscode.ExtensionContext) {
       // Update file watcher (sidebar-only; see the watcher above for why).
       fileWatcher.dispose();
       fileWatcher = new FileWatcher(activeRepoPath, () => {
+        // External change (terminal git, another window): the shared read cache
+        // was populated before it happened — drop it before re-reading.
+        activeGitService.clearReadCache();
         refreshAll();
-      });
+      }, { watchWorkingTree: false });
       fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
     }
   }).catch((err) => { console.warn('Git Graph+: repo discovery failed:', err instanceof Error ? err.message : err); });
@@ -339,8 +349,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     fileWatcher.dispose();
     fileWatcher = new FileWatcher(newPath, () => {
+      // External change (terminal git, another window): the shared read cache
+      // was populated before it happened — drop it before re-reading.
+      activeGitService.clearReadCache();
       refreshAll();
-    });
+    }, { watchWorkingTree: false });
     fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
 
     // If the webview panel is open, sync it to the new repo as well.
@@ -349,6 +362,24 @@ export function activate(context: vscode.ExtensionContext) {
     MainPanel.currentPanel?.switchRepo(newPath);
 
     refreshAll();
+  }
+
+  let editorRepoSwitchTimer: ReturnType<typeof setTimeout> | null = null;
+  context.subscriptions.push({
+    dispose: () => {
+      if (editorRepoSwitchTimer) {
+        clearTimeout(editorRepoSwitchTimer);
+        editorRepoSwitchTimer = null;
+      }
+    },
+  });
+  function scheduleEditorRepoSwitch(newPath: string) {
+    if (samePath(newPath, activeRepoPath)) return;
+    if (editorRepoSwitchTimer) clearTimeout(editorRepoSwitchTimer);
+    editorRepoSwitchTimer = setTimeout(() => {
+      editorRepoSwitchTimer = null;
+      switchToRepo(newPath);
+    }, 150);
   }
 
   MainPanel.onSidebarRefresh = refreshAll;
@@ -401,7 +432,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.onDidChangeActiveTextEditor(editor => {
             if (!editor) { return; }
             const repo = gitApi.getRepository(editor.document.uri);
-            if (repo?.rootUri) { switchToRepo(repo.rootUri.fsPath); }
+            if (repo?.rootUri) { scheduleEditorRepoSwitch(repo.rootUri.fsPath); }
           })
         );
       } catch { /* git API unavailable */ }
@@ -629,4 +660,5 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   MainPanel.onSidebarRefresh = null;
   MainPanel.onRepoChange = null;
+  MainPanel.setGitServiceProvider(null);
 }

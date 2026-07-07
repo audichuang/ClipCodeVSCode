@@ -206,6 +206,21 @@ describe('parseBranches', () => {
 
     expect(result[0].upstreamGone).toBeFalsy();
   });
+
+  it('flags the detached HEAD pseudo-branch row instead of listing it as a branch', () => {
+    const raw = [
+      '*(HEAD detached at abc1234)\x00abc1234\x00\x00\x00(HEAD detached at abc1234)',
+      ' main\x00abc1234\x00\x00\x00refs/heads/main',
+    ].join('\n');
+    const result = parseBranches(raw);
+
+    const detached = result.find(b => b.detached);
+    expect(detached).toBeDefined();
+    expect(detached?.current).toBe(true);
+    expect(detached?.hash).toBe('abc1234');
+    // Real branches never carry the flag.
+    expect(result.filter(b => !b.detached).map(b => b.name)).toEqual(['main']);
+  });
 });
 
 describe('parseTags', () => {
@@ -586,4 +601,3 @@ describe('splitUpstreamRef', () => {
     expect(splitUpstreamRef('upstream/release/2.0')).toEqual({ remote: 'upstream', branch: 'release/2.0' });
   });
 });
-

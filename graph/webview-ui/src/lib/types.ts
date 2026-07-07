@@ -100,6 +100,9 @@ export interface BranchInfo {
   ahead: number;
   behind: number;
   hash: string;
+  /** Detached-HEAD pseudo-row ("(HEAD detached at <hash>)"). Carries the
+   *  current flag for the toolbar indicator; excluded from branch lists. */
+  detached?: boolean;
 }
 
 export interface RemoteInfo {

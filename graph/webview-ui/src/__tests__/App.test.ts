@@ -14,6 +14,7 @@ function postMsg(type: string, payload?: unknown) {
 function resetStores() {
   commitStore.commits = [];
   commitStore.loading = false;
+  commitStore.loadingMore = false;
   commitStore.notGitRepo = false;
   branchStore.branches = [];
   branchStore.tags = [];
@@ -22,7 +23,12 @@ function resetStores() {
   branchStore.worktrees = [];
   uiStore.viewMode = 'graph';
   uiStore.selectedCommitHash = null;
+  uiStore.selectedCommitHashes = [];
+  uiStore.anchorHash = null;
+  uiStore.multiSelectArmed = false;
   uiStore.comparing = false;
+  uiStore.compareRef1 = null;
+  uiStore.compareRef2 = null;
   uiStore.commitDetailFullscreen = false;
   uiStore.showBottomPanel = true;
   uiStore.commitFileSelected = false;
@@ -115,6 +121,34 @@ describe('App — message handling', () => {
     });
   });
 
+  it('repoList clears stale commit selection and compare state when the active repo changes', async () => {
+    uiStore.activeRepo = '/r/old';
+    uiStore.selectedCommitHash = 'old-commit';
+    uiStore.selectedCommitHashes = ['old-commit', 'older-commit'];
+    uiStore.anchorHash = 'old-commit';
+    uiStore.multiSelectArmed = true;
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'old-base';
+    uiStore.compareRef2 = 'old-head';
+
+    render(App);
+    postMsg('repoList', {
+      repos: [{ path: '/r/new', name: 'new', type: 'root' }],
+      active: '/r/new',
+    });
+
+    await waitFor(() => {
+      expect(uiStore.activeRepo).toBe('/r/new');
+      expect(uiStore.selectedCommitHash).toBeNull();
+      expect(uiStore.selectedCommitHashes).toEqual([]);
+      expect(uiStore.anchorHash).toBeNull();
+      expect(uiStore.multiSelectArmed).toBe(false);
+      expect(uiStore.comparing).toBe(false);
+      expect(uiStore.compareRef1).toBeNull();
+      expect(uiStore.compareRef2).toBeNull();
+    });
+  });
+
   it('notGitRepo flips commitStore.notGitRepo', async () => {
     render(App);
     postMsg('notGitRepo');
@@ -134,6 +168,15 @@ describe('App — message handling', () => {
       expect(uiStore.errorMessage).toBe('boom');
       expect(modalStore.deleteBranch.show).toBe(false);
       expect(modalStore.createBranch.show).toBe(true);
+    });
+  });
+
+  it('error clears a pending Load More spinner', async () => {
+    commitStore.loadingMore = true;
+    render(App);
+    postMsg('error', { message: 'load failed' });
+    await waitFor(() => {
+      expect(commitStore.loadingMore).toBe(false);
     });
   });
 

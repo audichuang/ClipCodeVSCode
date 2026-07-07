@@ -42,10 +42,10 @@ export class BranchesViewProvider implements vscode.TreeDataProvider<BranchTreeI
     try {
       const branches = await this.gitService.branches();
       if (id !== this.fetchId) return; // superseded by newer request
-      const { items, currentItem } = buildBranchTree(branches.filter(b => !b.remote));
+      const { items, currentItem } = buildBranchTree(branches.filter(b => !b.remote && !b.detached));
       this.cache = items;
       this.currentItem = currentItem;
-      const current = branches.find(b => b.current && !b.remote);
+      const current = branches.find(b => b.current && !b.remote && !b.detached);
       // A "gone" upstream (remote branch deleted) counts as no upstream so the
       // sidebar shows Publish instead of Push, matching the toolbar button.
       vscode.commands.executeCommand('setContext', 'gitGraphPlus.currentBranchHasUpstream', current ? (!!current.upstream && !current.upstreamGone) : true);
@@ -78,7 +78,7 @@ export class BranchesViewProvider implements vscode.TreeDataProvider<BranchTreeI
     // Direct fetch as fallback - always returns data
     try {
       const branches = await this.gitService.branches();
-      const { items, currentItem } = buildBranchTree(branches.filter(b => !b.remote));
+      const { items, currentItem } = buildBranchTree(branches.filter(b => !b.remote && !b.detached));
       this.cache = items;
       this.currentItem = currentItem;
     } catch { /* ignore */ }

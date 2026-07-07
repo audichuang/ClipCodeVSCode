@@ -41,6 +41,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
   import { graphColorsStore } from './lib/stores/graph-colors.svelte';
   import { commitLinkRulesStore } from './lib/stores/commit-link-rules.svelte';
   import { avatarStore } from './lib/stores/avatars.svelte';
+  import { samePath } from './lib/utils/path';
   import SetUpstreamModal from './components/modals/SetUpstreamModal.svelte';
   import FlowInitModal from './components/modals/FlowInitModal.svelte';
   import FlowStartModal from './components/modals/FlowStartModal.svelte';
@@ -58,6 +59,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
   let bisectMessage = $state<string | null>(null);
   let searchMatchedHashes = $state<Set<string> | null>(null);
   let searchNavigateHash = $state<string | null>(null);
+  let searchNavigateNonce = $state(0);
   let headOffscreen = $state(false);
   let headJumpNonce = $state(0);
   let remoteFilter = $state<string[]>([]);
@@ -145,6 +147,12 @@ import RewordModal from './components/modals/RewordModal.svelte';
           avatarStore.receive(msg.payload.email, msg.payload.size, msg.payload.dataUri);
           break;
         case 'repoList':
+          if (uiStore.activeRepo && msg.payload.active && !samePath(uiStore.activeRepo, msg.payload.active)) {
+            uiStore.exitMultiSelect();
+            searchMatchedHashes = null;
+            searchNavigateHash = null;
+            searchNavigateNonce++;
+          }
           uiStore.repos = msg.payload.repos;
           uiStore.activeRepo = msg.payload.active;
           commitStore.notGitRepo = false;
@@ -162,6 +170,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
         case 'error':
           uiStore.setError(msg.payload.message);
           commitStore.setLoading(false);
+          commitStore.setLoadingMore(false);
           // Close only the modal that originated the failing operation. An
           // unrelated background failure (e.g. a getStats refresh) used to
           // close any in-progress modal — including one the user was
@@ -224,9 +233,20 @@ import RewordModal from './components/modals/RewordModal.svelte';
           } else if (msg.payload.modal === 'fetch') {
             modalStore.openFetch();
           } else if (msg.payload.modal === 'pull') {
-            modalStore.openPull();
+            // Command-palette path: the toolbar buttons are disabled in
+            // detached HEAD, but gitGraphPlus.pull/push still arrive here —
+            // the pseudo-branch name is not a pushable/pullable ref.
+            if (branchStore.currentBranch?.detached) {
+              uiStore.setError(t('error.detachedPushPull'));
+            } else {
+              modalStore.openPull();
+            }
           } else if (msg.payload.modal === 'push') {
-            modalStore.openPush();
+            if (branchStore.currentBranch?.detached) {
+              uiStore.setError(t('error.detachedPushPull'));
+            } else {
+              modalStore.openPush();
+            }
           }
           break;
       }
@@ -312,6 +332,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
 
   function handleSearchNavigate(hash: string) {
     searchNavigateHash = hash;
+    searchNavigateNonce++;
   }
 
   function handleJumpToHead() {
@@ -501,7 +522,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
       {/if}
       {#if !uiStore.commitDetailFullscreen}
         <div class="graph-area">
-          <CommitGraph {searchMatchedHashes} {searchNavigateHash} headJumpNonce={headJumpNonce} onHeadOffscreenChange={(v) => headOffscreen = v} bisectActive={bisectMessage !== null} bisectCulpritHash={bisectMessage?.includes('is the first bad commit') ? bisectMessage.match(/^([a-f0-9]{7,40})/)?.[1] ?? null : null} {remoteFilter} />
+          <CommitGraph {searchMatchedHashes} {searchNavigateHash} {searchNavigateNonce} headJumpNonce={headJumpNonce} onHeadOffscreenChange={(v) => headOffscreen = v} bisectActive={bisectMessage !== null} bisectCulpritHash={bisectMessage?.includes('is the first bad commit') ? bisectMessage.match(/^([a-f0-9]{7,40})/)?.[1] ?? null : null} {remoteFilter} />
         </div>
       {/if}
       {#if uiStore.showBottomPanel && (uiStore.selectedCommitHash || uiStore.comparing)}

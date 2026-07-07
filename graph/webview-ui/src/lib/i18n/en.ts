@@ -18,6 +18,7 @@ export const en: Record<string, string> = {
   'toolbar.noRemotes': 'No remotes configured. Add a remote first.',
   'toolbar.addRemote': 'Add Remote',
   'toolbar.detachedHead': '(Detached HEAD)',
+  'error.detachedPushPull': 'Not on a branch (detached HEAD) — check out a branch before pushing or pulling.',
   /* SNIPCODE-HOOK start: PR tab (Task G3) */
   'toolbar.pr': 'PR',
   /* SNIPCODE-HOOK end */
@@ -259,6 +260,8 @@ export const en: Record<string, string> = {
 
   // Commit details
   'details.commit': 'Commit',
+  'details.staged': 'Staged',
+  'details.unstaged': 'Unstaged',
   'details.author': 'Author',
   'details.committer': 'Committer',
   'details.date': 'Date',
@@ -283,6 +286,12 @@ export const en: Record<string, string> = {
   'details.diffTruncated': 'Large diff: showing {shown} of {total} lines',
   'details.showFullDiff': 'Show full diff',
   'details.nestedRepoLabel': 'Nested repository',
+  'status.added': 'Added',
+  'status.modified': 'Modified',
+  'status.deleted': 'Deleted',
+  'status.renamed': 'Renamed',
+  'status.copied': 'Copied',
+  'status.untracked': 'Untracked',
   'details.nestedRepoHint': 'This is a nested git repository that is not registered as a submodule. Its contents cannot be tracked from the parent repository.',
   'details.selectCommit': 'Select a commit to view details',
   'details.selectMoreCommits': 'Select more commits to compare',

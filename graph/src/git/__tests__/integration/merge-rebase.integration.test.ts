@@ -60,6 +60,28 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
       expect(cleared.type).toBeNull();
     });
 
+    it('continueOperation stages only conflict files, not unrelated local changes', async () => {
+      commit(repo.path, 'init', { 'a.txt': 'base\n', 'unrelated.txt': 'keep\n' });
+      runGit(repo.path, ['checkout', '-b', 'left']);
+      commit(repo.path, 'left edit', { 'a.txt': 'left\n' });
+      runGit(repo.path, ['checkout', 'main']);
+      commit(repo.path, 'right edit', { 'a.txt': 'right\n' });
+      writeFile(repo.path, 'unrelated.txt', 'local edit\n');
+      writeFile(repo.path, 'stray.txt', 'untracked\n');
+
+      await expect(svc.merge('left')).rejects.toThrow();
+      writeFile(repo.path, 'a.txt', 'resolved\n');
+      await svc.continueOperation();
+
+      const committedFiles = runGit(repo.path, ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n');
+      expect(committedFiles).toContain('a.txt');
+      expect(committedFiles).not.toContain('unrelated.txt');
+      expect(committedFiles).not.toContain('stray.txt');
+      const status = runGit(repo.path, ['status', '--porcelain', '-uall']);
+      expect(status).toContain(' M unrelated.txt');
+      expect(status).toContain('?? stray.txt');
+    });
+
     it('squash merge collapses the branch into a single non-merge commit', async () => {
       commit(repo.path, 'init', { 'a.txt': 'a\n' });
       const mainBase = head(repo.path);
@@ -935,22 +957,24 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
       expect(head(repo.path)).toBe(topicTip);
     });
 
-    it('resets a squashed merge left in the SQUASH_MSG state', async () => {
-      commit(repo.path, 'init', { 'a.txt': 'base\n' });
+    it('aborts a squashed merge without discarding unrelated local changes', async () => {
+      commit(repo.path, 'init', { 'a.txt': 'base\n', 'unrelated.txt': 'keep\n' });
       const mainTip = head(repo.path);
       runGit(repo.path, ['checkout', '-b', 'feature']);
       commit(repo.path, 'feature work', { 'f.txt': 'f\n' });
       runGit(repo.path, ['checkout', 'main']);
+      writeFile(repo.path, 'unrelated.txt', 'local edit\n');
+      writeFile(repo.path, 'stray.txt', 'untracked\n');
 
       // Stage a squash merge but do not commit it.
       runGit(repo.path, ['merge', '--squash', 'feature']);
       expect((await svc.getOperationState()).type).toBe('squash');
 
-      // abortOperation runs `reset --hard HEAD`, discarding the staged squash
-      // changes and leaving HEAD untouched.
       await svc.abortOperation();
       expect(head(repo.path)).toBe(mainTip);
       expect(existsSync(join(repo.path, 'f.txt'))).toBe(false);
+      expect(readFileSync(join(repo.path, 'unrelated.txt'), 'utf-8')).toBe('local edit\n');
+      expect(readFileSync(join(repo.path, 'stray.txt'), 'utf-8')).toBe('untracked\n');
     });
   });
 });

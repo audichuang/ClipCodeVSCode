@@ -55,6 +55,7 @@ vi.mock('../panels/MainPanel', () => ({
     static setAvatarCacheDir = vi.fn();
     static createOrShow = vi.fn();
     static showModalWithPanel = vi.fn();
+    static setGitServiceProvider = vi.fn();
     static onSidebarRefresh: unknown = null;
     static onRepoChange: unknown = null;
   },
@@ -79,6 +80,7 @@ function makeContext() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   H.registeredCommands = [];
   H.commandHandlers = {};
   H.treeViewsCreated = [];
@@ -140,6 +142,15 @@ describe('activate', () => {
       'gitGraphPlus.stashes',
       'gitGraphPlus.worktrees',
     ]);
+  });
+
+  it('shares the active GitService with MainPanel', async () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+
+    const { MainPanel } = await import('../panels/MainPanel');
+    expect(MainPanel.setGitServiceProvider).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it('addWorktree defaults beside the main worktree even when active repo is linked worktree', async () => {

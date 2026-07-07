@@ -75,6 +75,7 @@
   interface Props {
     searchMatchedHashes?: Set<string> | null;
     searchNavigateHash?: string | null;
+    searchNavigateNonce?: number;
     bisectActive?: boolean;
     bisectCulpritHash?: string | null;
     remoteFilter?: string[];
@@ -82,7 +83,7 @@
     onHeadOffscreenChange?: (offscreen: boolean) => void;
   }
 
-  let { searchMatchedHashes = null, searchNavigateHash = null, bisectActive = false, bisectCulpritHash = null, remoteFilter = [], headJumpNonce = 0, onHeadOffscreenChange = () => {} }: Props = $props();
+  let { searchMatchedHashes = null, searchNavigateHash = null, searchNavigateNonce = 0, bisectActive = false, bisectCulpritHash = null, remoteFilter = [], headJumpNonce = 0, onHeadOffscreenChange = () => {} }: Props = $props();
 
   const vscode = getVsCodeApi();
 
@@ -93,8 +94,8 @@
   const worktreeBranches = $derived(new Set(branchStore.worktrees.filter(w => !w.isMain).map(w => w.branch)));
 
   // Maps for O(1) local branch lookup (replaces repeated branches.find())
-  const localBranchMap = $derived(new Map(branchStore.branches.filter(b => !b.remote).map(b => [b.name, b])));
-  const upstreamBranchMap = $derived(new Map(branchStore.branches.filter(b => !b.remote && b.upstream).map(b => [b.upstream!, b])));
+  const localBranchMap = $derived(new Map(branchStore.branches.filter(b => !b.remote && !b.detached).map(b => [b.name, b])));
+  const upstreamBranchMap = $derived(new Map(branchStore.branches.filter(b => !b.remote && !b.detached && b.upstream).map(b => [b.upstream!, b])));
 
   // Cache key fingerprint avoids rerunning BFS when commits array is recreated
   // but logically identical (e.g., file watcher refresh while only the synthesized
@@ -208,6 +209,7 @@
     }
   });
   let clickTimer: ReturnType<typeof setTimeout> | null = null;
+  let clickTimerHash: string | null = null;
   let interactiveRebaseBase = $state<string | null>(null);
   let showResetModal = $state(false);
   let resetTarget = $state('');
@@ -374,9 +376,14 @@
     if (next !== null) container.scrollTop = next;
   }
 
-  // Scroll to search result when navigating
+  let lastSearchNavigateNonce = $state(-1);
+
+  // Scroll to search result only when navigation changes. Refreshing commits
+  // while the same search result remains highlighted must not yank the user's
+  // scroll position back to that row.
   $effect(() => {
-    if (searchNavigateHash && container) {
+    if (searchNavigateHash && container && searchNavigateNonce !== lastSearchNavigateNonce) {
+      lastSearchNavigateNonce = searchNavigateNonce;
       navPath = [];
       scrollHashIntoView(searchNavigateHash, 'center');
     }
@@ -582,7 +589,7 @@
     // The uncommitted-changes row opens VS Code's Source Control view
     // (where the user stages/commits) instead of the in-graph detail panel.
     if (commit.hash === 'UNCOMMITTED') {
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
       uiStore.selectedCommitHash = null;
       vscode.postMessage({ type: 'openScmView' });
       return;
@@ -592,24 +599,36 @@
     // the range, Ctrl/Cmd toggles membership. A plain click falls through to the
     // debounced single-select below, which exits the mode and selects just this row.
     if (uiStore.multiSelectArmed && e && e.shiftKey) {
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
       uiStore.selectRange(commit.hash, displayCommits.map(c => c.hash));
       return;
     }
     if (uiStore.multiSelectArmed && e && (e.ctrlKey || e.metaKey)) {
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
       uiStore.toggleHash(commit.hash);
       return;
     }
     // Not armed: Ctrl/Cmd or Shift click promotes to multi-select directly.
     if (e && (e.ctrlKey || e.metaKey || e.shiftKey)) {
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
       uiStore.modifierSelect(commit.hash, { range: e.shiftKey, orderedHashes: displayCommits.map(c => c.hash) });
       return;
     }
     // Plain click single-selects (debounced).
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
-    clickTimer = setTimeout(() => { clickTimer = null; selectCommit(commit.hash); }, 150);
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      if (clickTimerHash === commit.hash) {
+        clickTimerHash = null;
+        return;
+      }
+    }
+    clickTimerHash = commit.hash;
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      clickTimerHash = null;
+      selectCommit(commit.hash);
+    }, 150);
   }
 
   // Derive the hovered row from the pointer's Y position over the whole scroll
@@ -627,7 +646,7 @@
     // In selection / compare mode a double-click is just two membership toggles —
     // never a checkout.
     if (uiStore.multiSelectArmed || uiStore.comparing) return;
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
     const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
     if (localRefs.length === 1) {
       doCheckout(localRefs[0].name, false, {}, true);

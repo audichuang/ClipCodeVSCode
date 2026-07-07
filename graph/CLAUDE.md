@@ -48,7 +48,7 @@ npm run package            # vsce package → .vsix file
 
 ### Extension Host (Backend) — `src/`
 - **`extension.ts`** — Entry point. Registers commands, tree views, file watcher, auto-fetch timer.
-- **`git/git-service.ts`** — Core Git operations (wraps `git` CLI via child_process). This is the central hub (~90KB); nearly all git commands go through it.
+- **`git/git-service.ts`** — Core Git operations (wraps `git` CLI via child_process). This is the central hub; nearly all git commands go through it.
 - **`git/git-parser.ts`** — Parses raw git output (log, diff, branch list, etc.) into typed structures.
 - **`git/git-graph-builder.ts`** — Builds the visual graph layout (rail assignment, merge lines) from parsed commits.
 - **`git/patch-builder.ts`** — Builds patches for reverse-changes (undo file/hunk/line against working tree) and `.patch` export.
@@ -81,6 +81,10 @@ npm run package            # vsce package → .vsix file
 All communication is via `postMessage` / `onDidReceiveMessage`. Message types are defined in `src/utils/message-bus.ts` (`WebviewMessage` for webview→extension, `ExtensionMessage` for extension→webview). `MainPanel.ts` is the message router that dispatches webview requests to `GitService`.
 
 > ⚠️ Svelte 5 `$state` values are reactive proxies. Passing one directly to `postMessage` throws `DataCloneError` (silently failing). Spread/snapshot the value (`$state.snapshot(...)` or `{ ...value }`) before posting.
+
+> ⚠️ **Repo switch posts only `repoList`** (updating `active`), NOT `repoChanged` — that's file-watcher-only. A view that must re-fetch on repo change should react to `uiStore.activeRepo` (e.g. `$effect`), not listen for `repoChanged`.
+
+> ⚠️ **Mutating-op refresh order:** handlers post `operationComplete` BEFORE `await refreshAll()`; the graph repaints only on `fullRefresh` (full scope) / `logData` (status scope). Webview state meaning "op done + graph updated" must key off `fullRefresh`/`logData` (+ `error`/`operationPaused`/`conflictData`), never the premature `operationComplete`.
 
 ### Internationalization
 - Extension strings: `l10n/bundle.l10n.json` (English), `l10n/bundle.l10n.ko.json` (Korean), `l10n/bundle.l10n.zh-cn.json` (Chinese Simplified), using VS Code's `vscode.l10n.t()`.
