@@ -23,12 +23,31 @@ Both sides must agree on:
 
 Format authority on this side: `src/clipboardFormat.ts` — `buildPayloadInternal`
 + `escapeContent` (build), `parseClipboard` + `unescapeContent` + `joinContent`
-(parse). The IntelliJ mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ChangeTypeLabel.kt`
-(+ `GitClipboardFormatter.kt` / `CopyFileContentAction.kt` / `ClipboardRestoreParser.kt`).
+(parse). The IntelliJ mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ClipboardPayloadFormatter.kt`
+(build) + `ChangeTypeLabel.kt` / `ClipboardRestoreParser.kt` (labels + parse).
 **Change labels, bracket syntax, header rules, or the escape marker on one side →
-update the other, or cross-tool restore silently breaks.** Round-trip is guarded
-by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
-`test-e2e/suite/roundtrip.test.ts`.
+update the other, or cross-tool restore silently breaks.**
+
+Strict-alignment invariants (must match the Kotlin mirror byte-for-byte):
+- Header + label regexes use the explicit `ASCII_WS` class, NOT JS Unicode `\s`
+  (which would treat a full-width-space-indented line as a header when Kotlin does
+  not, splitting a phantom file cross-tool).
+- `formatHeader` substitutes `$FILE_PATH` via `split('$FILE_PATH').join(...)`, never
+  `replaceAll(str, str)` — a string replacement expands `$&`/`$$` and corrupts paths
+  containing them (even in this tool's own round-trip).
+- Known accepted residual: `.trim()`/`\s`-blank tests differ from Kotlin on
+  U+001C–U+001F and U+FEFF; only matters when a whole structural line is such
+  control/BOM chars, which real payloads never contain.
+
+**Cross-tool contract is pinned by golden fixtures.** `test/fixtures/clipboard-contract.json`
+is committed byte-identically here and in `ClipCode/src/test/resources/`; it is
+generated from THIS implementation (the format authority) by
+`scripts/gen-contract-fixtures.cjs`. `test/contract.test.ts` (here) and
+`ContractFixturesTest` (IntelliJ) both assert build + parse match those frozen bytes,
+with a SHA guard so the copies can't drift. To change the format: edit both impls,
+`npm run compile`, rerun the generator, copy the JSON to both repos, and update
+`EXPECTED_FIXTURES_SHA` on both sides. Round-trip is also guarded by
+`test/clipboardFormat.test.ts` and the e2e `test-e2e/suite/roundtrip.test.ts`.
 
 ## Two parts of this repo
 
