@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.34
+
+- **Copy notifications now show an estimated token count** (`~N tokens`) for the
+  copied payload — file copy, open-editor copy, Git-changes copy, and the graph
+  "copy full source" all report it, matching the IntelliJ ClipCode plugin.
+
 ## 0.3.33
 
 - **Fix: file paths containing `$` (e.g. `$&`, `$$`) were corrupted in copied

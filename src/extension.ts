@@ -4,7 +4,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
-import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
+import { collectCopyFiles, collectCopyTextFiles, estimateTokens, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
@@ -143,6 +143,12 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
 // succeed on SSH-remote hosts where bare 'git' isn't on the spawn PATH.
 interface CopyRuntime { gitPath?: string; gitEnv?: Record<string, string>; }
 
+// " ~1,234 tokens." — appended to copy toasts so the user sees roughly how large a
+// chunk they just copied (mirrors the IntelliJ ClipCode notification).
+function tokenNote(copiedText: string): string {
+  return ` ~${estimateTokens(copiedText).toLocaleString()} tokens.`;
+}
+
 async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyRuntime): Promise<void> {
   const api = await getGitApi();
   if (!api || api.repositories.length === 0) {
@@ -159,7 +165,7 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
+    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}${tokenNote(result.text)}`;
     // Offer the actual skipped paths/sizes behind a button so the toast stays short.
     // Fire-and-forget: do NOT await — an action-button notification never
     // auto-dismisses, so awaiting it would block the copy from returning (hangs
@@ -199,7 +205,7 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${suffix}.`);
+    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${suffix}.${tokenNote(result.payload)}`);
   }
 }
 
@@ -238,7 +244,7 @@ async function copyAllOpenEditors(): Promise<void> {
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} open editor file(s) copied${suffix}.`);
+    vscode.window.showInformationMessage(`${result.copiedFileCount} open editor file(s) copied${suffix}.${tokenNote(result.payload)}`);
   }
 }
 
@@ -282,7 +288,7 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`);
+    vscode.window.showInformationMessage(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}${tokenNote(payload)}`);
   }
 }
 
