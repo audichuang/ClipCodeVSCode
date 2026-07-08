@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.33
+
+- **Fix: file paths containing `$` (e.g. `$&`, `$$`) were corrupted in copied
+  headers.** The header builder used `String.replaceAll` with a string
+  replacement, which expands `$&`/`$$`/`` $` `` patterns; such paths now insert
+  verbatim, so copy → restore round-trips them intact.
+- **Fix: a header-like line indented with a full-width (or other Unicode)
+  space could split into a phantom file on restore.** Header and change-label
+  detection now use an ASCII-only whitespace class, matching the IntelliJ
+  ClipCode parser exactly, so a line like `　// file: …` is treated as content
+  on both tools.
+- **Cross-tool format contract is now pinned by a shared golden test suite.**
+  The same fixtures are verified in both the VS Code and IntelliJ repos, so the
+  clipboard format cannot drift between the two tools without a failing test.
+
 ## 0.3.32
 
 - **Faster refresh, fewer duplicate git spawns.** Git Graph+ now caches
