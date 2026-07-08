@@ -5,6 +5,18 @@ import { fileSize, listFilesRecursive, readTextFile } from './fileSystem.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
+/**
+ * Rough token estimate for a copied payload, shown in the copy notification so the
+ * user sees how large a chunk they're about to paste into an AI assistant. Mirrors
+ * the IntelliJ ClipCode heuristic (CopyFileContentAction.estimateTokens): word count
+ * plus a few structural punctuation marks — deliberately crude, not a real tokenizer.
+ */
+export function estimateTokens(text: string): number {
+  const words = text.split(/\s+/).filter(w => w.length > 0).length;
+  const punctuation = (text.match(/[;{}()[\],]/g) ?? []).length;
+  return words + punctuation;
+}
+
 export interface CopyResult {
   files: PayloadFile[];
   payload: string;
