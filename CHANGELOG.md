@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.35
+
+- **Copy notifications now auto-dismiss** after ~5s instead of lingering, and
+  the History view also shows the token count. If the estimate exceeds ~1.5M
+  tokens the notification switches to a sticky warning so it can't be missed.
+- **Right-click a SCM group header** (staged / unstaged) to copy that whole
+  group at once — the command moved from an invisible inline slot to the
+  navigation menu.
+- **Git graph reliability fixes:** the Squash modal could hang (a late response
+  filled the wrong range); rebase/interactive-rebase could falsely report
+  success while paused on a conflict; remote/branch/path arguments are now
+  guarded against flag smuggling; and local mutating git operations take a
+  global lock to avoid concurrent-operation races.
+
 ## 0.3.34
 
 - **Copy notifications now show an estimated token count** (`~N tokens`) for the
