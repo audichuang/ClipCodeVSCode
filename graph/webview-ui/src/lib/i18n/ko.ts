@@ -256,6 +256,11 @@ export const ko: Record<string, string> = {
   'squash.message': '커밋 메시지',
   'squash.squash': 'Squash 병합',
   'squash.loading': 'Commit 로딩 중',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': 'Commit 범위를 불러오지 못했습니다. 닫고 다시 시도하세요.',
+  'squash.notOnHead': '선택한 commit이 현재 branch(HEAD)에 없습니다. 해당 branch를 먼저 checkout 하세요.',
+  'squash.mergeInRange': '선택 영역과 HEAD 사이에 merge commit이 있어 squash 시 merge history가 평탄화됩니다.',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': '이미 push된 commit이 포함되어 있습니다. Squash는 history를 재작성하므로 <span class="modal-emph modal-emph--danger">force push</span>가 필요합니다.',
 
   // Commit details

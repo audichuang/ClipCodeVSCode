@@ -77,6 +77,21 @@ export class GitService {
   private readCacheGeneration = 0;
   private static readonly READ_CACHE_TTL_MS = 1500;
 
+  // Serializes worktree/index-mutating commands: handleMessage handlers run
+  // concurrently, so two panel actions could otherwise race on .git/index.lock
+  // (loser dies with "another git process seems to be running"). Network-only
+  // fetch/push stay unlocked so a slow auto-fetch never queues a user action.
+  // ponytail: per-command lock; a multi-command handler sequence can still
+  // interleave with another — git's own locking makes that fail loudly rather
+  // than corrupt. Upgrade to per-handler locking if it ever bites.
+  private mutationChain: Promise<unknown> = Promise.resolve();
+
+  private withMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutationChain.then(fn, fn);
+    this.mutationChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   private dedupe<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.inflight.get(key) as Promise<T> | undefined;
     if (existing) return existing;
@@ -127,7 +142,13 @@ export class GitService {
       case 'rebase':
       case 'reset':
       case 'revert':
+      case 'restore':
+      case 'switch':
+      case 'am':
         return true;
+      case 'config':
+        // Writes (flowInit) must invalidate; reads (--get/--list) must not.
+        return !args.some(a => a === '--get' || a === '--list' || a === '-l');
       case 'branch':
         // Read-only forms carry --list or --format=<fmt> (a single token, so
         // exact includes('--format') would never match — compare by prefix).
@@ -423,6 +444,15 @@ export class GitService {
   }
 
   private exec(args: string[], options?: { stdin?: string; timeout?: number; silent?: boolean; maxBufferBytes?: number }): Promise<string> {
+    // Mutations go through the lock; reads (and network-only fetch/push) spawn
+    // freely. See withMutationLock for why.
+    if (this.invalidatesReadCache(args) && args[0] !== 'fetch' && args[0] !== 'push') {
+      return this.withMutationLock(() => this.execUnlocked(args, options));
+    }
+    return this.execUnlocked(args, options);
+  }
+
+  private execUnlocked(args: string[], options?: { stdin?: string; timeout?: number; silent?: boolean; maxBufferBytes?: number }): Promise<string> {
     const startTime = Date.now();
     const command = `git ${args.join(' ')}`;
     const timeoutMs = options?.timeout ?? this.defaultTimeoutMs;
@@ -468,12 +498,27 @@ export class GitService {
       // subsequent process 'close' logged the same command a second time.
       let settled = false;
 
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
+      // Timeout/overflow must NOT reject immediately: rejecting releases the
+      // mutation lock while the killed child may still be exiting and holding
+      // .git locks — the next queued mutation would race it. Record the
+      // failure, kill, and let 'close' deliver the rejection; the force timer
+      // is the backstop for a child that survives even SIGKILL.
+      let pendingFailure: GitError | null = null;
+      let forceTimer: ReturnType<typeof setTimeout> | undefined;
+      const failAfterExit = (err: GitError) => {
+        if (settled || pendingFailure) return;
+        pendingFailure = err;
         killHard();
-        recordActivity(false);
-        reject(new GitError(`Command timed out after ${timeoutMs}ms`, null, args));
+        forceTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          recordActivity(false);
+          reject(err);
+        }, 10_000);
+      };
+
+      const timer = setTimeout(() => {
+        failAfterExit(new GitError(`Command timed out after ${timeoutMs}ms`, null, args));
       }, timeoutMs);
 
       if (options?.stdin) {
@@ -488,18 +533,13 @@ export class GitService {
       }
 
       // Bound stdout/stderr to prevent a pathological git invocation from
-      // exhausting the extension host's memory. Overflow rejects immediately
-      // and signals the process to terminate.
+      // exhausting the extension host's memory. Overflow kills the process
+      // and fails once it has exited (see failAfterExit).
       const stdoutP = bufferStream(proc.stdout, maxBytes);
       const stderrP = bufferStream(proc.stderr, maxBytes);
       const onOverflow = (label: 'stdout' | 'stderr') => (err: unknown) => {
         if (!(err instanceof BufferOverflowError)) return;
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        killHard();
-        recordActivity(false);
-        reject(new GitError(
+        failAfterExit(new GitError(
           `git ${args[0] ?? ''}: ${label} exceeded ${err.limitBytes} bytes`,
           null,
           args,
@@ -510,16 +550,22 @@ export class GitService {
 
       proc.on('close', async (code) => {
         clearTimeout(timer);
-        // If overflow already rejected, these awaits resolve to empty
-        // buffers via the swallow below; the prior reject() wins.
+        clearTimeout(forceTimer);
+        // If overflow tripped, these awaits resolve to empty buffers via the
+        // swallow below; the recorded pendingFailure wins.
         const [stdoutBuf, stderrBuf] = await Promise.all([
           stdoutP.catch(() => Buffer.alloc(0)),
           stderrP.catch(() => Buffer.alloc(0)),
         ]);
-        // A timeout or overflow may have already settled while we awaited the
+        // The force timer may have already settled while we awaited the
         // buffers; if so, don't log or resolve a second time.
         if (settled) return;
         settled = true;
+        if (pendingFailure) {
+          recordActivity(false);
+          reject(pendingFailure);
+          return;
+        }
         const stdout = stdoutBuf.toString();
         const stderr = stderrBuf.toString();
         recordActivity(code === 0);
@@ -535,8 +581,9 @@ export class GitService {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(forceTimer);
         recordActivity(false);
-        reject(new GitError(err.message, null, args));
+        reject(pendingFailure ?? new GitError(err.message, null, args));
       });
     });
   }
@@ -1484,6 +1531,9 @@ export class GitService {
   async fetch(remote?: string, options?: { prune?: boolean }): Promise<string> {
     const args = ['fetch'];
     if (remote) {
+      // Same flag-smuggling guard as pushTag/deleteRemoteBranch: a remote like
+      // "--upload-pack=<cmd>" would otherwise be parsed as an option by git.
+      this.assertSafeRef(remote, 'fetch');
       args.push(remote);
     } else {
       args.push('--all');
@@ -1501,8 +1551,10 @@ export class GitService {
       args.push('--rebase');
     }
     if (remote) {
+      this.assertSafeRef(remote, 'pull');
       args.push(remote);
       if (branch) {
+        this.assertSafeRef(branch, 'pull');
         args.push(branch);
       }
     }
@@ -1520,8 +1572,10 @@ export class GitService {
       args.push('-u');
     }
     if (remote) {
+      this.assertSafeRef(remote, 'push');
       args.push(remote);
       if (branch) {
+        this.assertSafeRef(branch, 'push');
         // Use full refspec to avoid ambiguity when tag and branch names collide
         args.push(`refs/heads/${branch}`);
       }
@@ -1800,53 +1854,105 @@ export class GitService {
     }
 
     const todoContent = lines.join('\n') + '\n';
-    const todoFile = join(this.gitDir(), `ghg-rebase-todo-${randomUUID()}`);
+    const gitDir = this.gitDir();
+    const todoFile = join(gitDir, `ghg-rebase-todo-${randomUUID()}`);
 
     try {
-      await writeFile(todoFile, todoContent, 'utf-8');
+      await this.withMutationLock(async () => {
+        // A leftover rebase (host crash, never-aborted run) makes the new
+        // `rebase -i` refuse at startup — and the pause check below (dir
+        // exists) would then misread that hard failure as "paused now",
+        // reporting success for a rebase that never started. Refuse up front.
+        if (existsSync(join(gitDir, 'rebase-merge')) || existsSync(join(gitDir, 'rebase-apply'))) {
+          throw new GitError(
+            'A rebase is already in progress in this repository. Continue or abort it first.',
+            null,
+            ['rebase', '-i', base]
+          );
+        }
+        try {
+          await writeFile(todoFile, todoContent, 'utf-8');
 
-      // Use cp/copy to overlay the rebase-todo with our prebuilt one. The path
-      // is passed via env var rather than spliced into the command string so
-      // that cmd.exe / sh expansion handles repo paths containing &, |, (, ),
-      // ^, etc. safely without manual escaping.
-      await new Promise<void>((resolve, reject) => {
-        const rebaseArgs = ['rebase', '-i', ...(opts?.autostash ? ['--autostash'] : []), base];
-        const proc = spawn(getGitBinaryPath(), rebaseArgs, {
-          cwd: this.repoPath,
-          env: {
-            ...process.env,
-            GIT_TERMINAL_PROMPT: '0',
-            LC_ALL: 'C',
-            GIT_MERGE_AUTOEDIT: 'no',
-            GIT_EDITOR: 'true',
-            EDITOR: 'true',
-            GHG_TODO_FILE: todoFile,
-            GIT_SEQUENCE_EDITOR: `cp -- "$GHG_TODO_FILE"`,
-          },
-        });
+          // Use cp/copy to overlay the rebase-todo with our prebuilt one. The path
+          // is passed via env var rather than spliced into the command string so
+          // that cmd.exe / sh expansion handles repo paths containing &, |, (, ),
+          // ^, etc. safely without manual escaping.
+          await new Promise<void>((resolve, reject) => {
+            const rebaseArgs = ['rebase', '-i', ...(opts?.autostash ? ['--autostash'] : []), base];
+            const proc = spawn(getGitBinaryPath(), rebaseArgs, {
+              cwd: this.repoPath,
+              env: {
+                ...process.env,
+                GIT_TERMINAL_PROMPT: '0',
+                LC_ALL: 'C',
+                GIT_MERGE_AUTOEDIT: 'no',
+                GIT_EDITOR: 'true',
+                EDITOR: 'true',
+                GHG_TODO_FILE: todoFile,
+                GIT_SEQUENCE_EDITOR: `cp -- "$GHG_TODO_FILE"`,
+              },
+            });
 
-        let stderr = '';
-        proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-        proc.on('close', async (code) => {
-          if (code === 0) { resolve(); return; }
-          // git rebase -i exits non-zero when it intentionally pauses for an `edit`
-          // step or a conflict. In both cases `.git/rebase-merge` (or rebase-apply)
-          // remains on disk and the UI banner will guide the user to continue / abort.
-          // Treat that as a successful "paused" outcome instead of throwing, which
-          // would surface a redundant error dialog on top of the banner.
-          const gitDir = this.gitDir();
-          const paused =
-            existsSync(join(gitDir, 'rebase-merge')) ||
-            existsSync(join(gitDir, 'rebase-apply'));
-          if (paused) { resolve(); return; }
-          reject(new GitError(stderr, code, ['rebase', '-i', base]));
-        });
-        proc.on('error', (err) => {
-          reject(new GitError(err.message, null, ['rebase', '-i', base]));
-        });
+            // exec()'s hang-stopper, with the network-op floor: a big rebase
+            // (many exec-amend steps) legitimately outruns the local default,
+            // but a wedged one must not hold .git/index.lock forever. On
+            // timeout, kill but reject only after 'close' — rejecting earlier
+            // releases the mutation lock while the dying child still holds
+            // repo locks (the force timer backstops an unkillable child).
+            const timeoutMs = Math.max(this.defaultTimeoutMs, GitService.NETWORK_TIMEOUT_MS);
+            const timeoutError = new GitError(`rebase -i timed out after ${timeoutMs}ms`, null, ['rebase', '-i', base]);
+            let timedOut = false;
+            let forceTimer: ReturnType<typeof setTimeout> | undefined;
+            let settled = false;
+            const settle = (fn: () => void) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              clearTimeout(forceTimer);
+              fn();
+            };
+            const timer = setTimeout(() => {
+              timedOut = true;
+              try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+              setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* already dead */ } }, 5000);
+              forceTimer = setTimeout(() => settle(() => reject(timeoutError)), 10_000);
+            }, timeoutMs);
+
+            // Drain stdout: an unread pipe stalls git once the kernel buffer
+            // fills (each exec-amend step writes commit output to stdout).
+            proc.stdout.resume();
+            let stderr = '';
+            proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+            proc.on('close', (code) => settle(() => {
+              // A killed rebase leaves rebase-merge on disk — that must read
+              // as the timeout failure, never as a legitimate pause.
+              if (timedOut) { reject(timeoutError); return; }
+              if (code === 0) { resolve(); return; }
+              // git rebase -i exits non-zero when it intentionally pauses for an `edit`
+              // step or a conflict. In both cases `.git/rebase-merge` (or rebase-apply)
+              // remains on disk and the UI banner will guide the user to continue / abort.
+              // Treat that as a successful "paused" outcome instead of throwing, which
+              // would surface a redundant error dialog on top of the banner. Safe now:
+              // the up-front check proved the dir did not pre-exist.
+              const paused =
+                existsSync(join(gitDir, 'rebase-merge')) ||
+                existsSync(join(gitDir, 'rebase-apply'));
+              if (paused) { resolve(); return; }
+              reject(new GitError(stderr, code, ['rebase', '-i', base]));
+            }));
+            proc.on('error', (err) => {
+              settle(() => reject(timedOut ? timeoutError : new GitError(err.message, null, ['rebase', '-i', base])));
+            });
+          });
+        } finally {
+          await unlink(todoFile).catch(() => {});
+        }
       });
     } finally {
-      await unlink(todoFile).catch(() => {});
+      // This path bypasses exec(), so clear the read cache ourselves — a
+      // ≤TTL-old branches()/log snapshot from before the rebase must not be
+      // served to the post-op refresh.
+      this.clearReadCache();
     }
   }
 
@@ -2579,6 +2685,10 @@ export class GitService {
   }
 
   async worktreeAdd(worktreePath: string, branch?: string, newBranch?: string): Promise<void> {
+    // Worktree paths are legitimately absolute, so assertSafePath (which
+    // rejects absolutes) doesn't fit; assertSafeRef's non-empty +
+    // no-leading-dash check is exactly the flag-smuggling guard needed.
+    this.assertSafeRef(worktreePath, 'worktree add');
     if (newBranch) { this.assertSafeRef(newBranch, 'worktree add'); }
     if (branch) { this.assertSafeRef(branch, 'worktree add'); }
     const args = ['worktree', 'add'];
@@ -2593,6 +2703,7 @@ export class GitService {
   }
 
   async worktreeRemove(worktreePath: string, force?: boolean): Promise<void> {
+    this.assertSafeRef(worktreePath, 'worktree remove'); // flag-smuggling guard (see worktreeAdd)
     const args = ['worktree', 'remove'];
     if (force) { args.push('--force'); }
     args.push(worktreePath);

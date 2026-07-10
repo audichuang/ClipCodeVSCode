@@ -256,6 +256,11 @@ export const en: Record<string, string> = {
   'squash.message': 'Commit message',
   'squash.squash': 'Squash',
   'squash.loading': 'Loading commits',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': 'Failed to load the commit range. Close and try again.',
+  'squash.notOnHead': 'The selected commits are not on the current branch (HEAD). Check out their branch first.',
+  'squash.mergeInRange': 'A merge commit lies between the selection and HEAD; squashing would flatten the merge history.',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': 'Some of these commits are already pushed. Squashing rewrites history and will require a <span class="modal-emph modal-emph--danger">force push</span>.',
 
   // Commit details

@@ -31,6 +31,7 @@
   // whenever the index changes — e.g. the user stages/unstages in the SCM view
   // we opened alongside this modal.
   let stagedCount = $state<number | null>(null);
+  let probeFailed = $state(false); // SNIPCODE-HOOK
   onMount(() => {
     const vscode = getVsCodeApi();
     const request = () => vscode.postMessage({ type: 'getUncommittedDiff' });
@@ -42,12 +43,18 @@
         request();
       }
     };
+    /* SNIPCODE-HOOK start: the confirm button is gated on stagedCount, so a
+       failed/dropped getUncommittedDiff must not leave it locked forever.
+       After 5s treat the count as unknown and unlock — if nothing is actually
+       staged the host's commit --fixup fails with a visible error anyway. */
+    const fallback = setTimeout(() => { if (stagedCount === null) probeFailed = true; }, 5000);
+    /* SNIPCODE-HOOK end */
     window.addEventListener('message', handler);
     request();
-    return () => window.removeEventListener('message', handler);
+    return () => { clearTimeout(fallback); window.removeEventListener('message', handler); };
   });
 
-  const canConfirm = $derived((stagedCount ?? 0) > 0);
+  const canConfirm = $derived(probeFailed || (stagedCount ?? 0) > 0); // SNIPCODE-HOOK: probeFailed unlocks
   const title = $derived(t(mode === 'fixup' ? 'fixup.title' : 'autosquash.title'));
   const desc = $derived(t(mode === 'fixup' ? 'fixup.desc' : 'autosquash.desc'));
   const confirmLabel = $derived(t('autosquash.button'));
@@ -73,7 +80,10 @@
       class:is-warning={stagedCount === 0}
       class:is-success={(stagedCount ?? 0) > 0}
     >
-      {#if stagedCount === null}
+      <!-- SNIPCODE-HOOK: probeFailed → no status; count is unknown, confirm is unlocked -->
+      {#if probeFailed}
+        <span></span>
+      {:else if stagedCount === null}
         <span class="spinner"></span>
         <span>{t('fixup.checkingStaged')}</span>
       {:else if stagedCount === 0}

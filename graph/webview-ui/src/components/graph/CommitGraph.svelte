@@ -743,7 +743,9 @@
         pendingRebaseBase = null;
         uiStore.exitMultiSelect();
         contextMenuHash = null;
-      } else if (msg?.type === 'error') {
+      } else if (msg?.type === 'error' && msg.payload?.source === 'checkout') {
+        // SNIPCODE-HOOK: match the source — an unrelated background error (e.g.
+        // a failed stats fetch) must not silently cancel the pending rebase.
         // Checkout failed — drop the pending rebase so a later unrelated checkout
         // does not wrongly reopen the editor.
         pendingRebaseBase = null;

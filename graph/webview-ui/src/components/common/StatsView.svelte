@@ -23,6 +23,9 @@
         byAuthor = event.data.payload.byAuthor;
         byWeekdayHour = event.data.payload.byWeekdayHour;
         loading = false;
+      } else if (event.data.type === 'error' && event.data.payload?.source === 'getStats') {
+        // SNIPCODE-HOOK: a failed fetch must not leave the spinner forever.
+        loading = false;
       }
     }
     window.addEventListener('message', handleMessage);
@@ -36,6 +39,11 @@
   $effect(() => {
     uiStore.activeRepo; // track
     loading = true;
+    // SNIPCODE-HOOK: clear before refetch — if the new repo's getStats fails,
+    // the error branch only stops the spinner and the old repo's stats would
+    // otherwise keep rendering under the new repo.
+    byAuthor = [];
+    byWeekdayHour = [];
     vscode.postMessage({ type: 'getStats' });
   });
 

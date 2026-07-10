@@ -256,6 +256,11 @@ export const zh: Record<string, string> = {
   'squash.message': '提交消息',
   'squash.squash': 'Squash 合并',
   'squash.loading': '正在加载提交',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': '加载提交范围失败，请关闭后重试。',
+  'squash.notOnHead': '选中的提交不在当前分支 (HEAD) 上，请先检出所在分支。',
+  'squash.mergeInRange': '选中提交与 HEAD 之间存在 merge 提交，squash 会扁平化合并历史。',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': '部分提交已推送。Squash 会重写历史记录，需要 <span class="modal-emph modal-emph--danger">force push</span>。',
 
   // Commit details

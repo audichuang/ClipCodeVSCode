@@ -668,6 +668,52 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
       expect(fullMsg).toBe('combined title\n\n- item one\n- item two');
     });
 
+    /* SNIPCODE-HOOK start: the SquashModal payload shape end-to-end.
+       buildSquashTodos emits pick(+edited final message) followed by fixups —
+       fixup alone would discard the message, so the host must force it via the
+       exec-amend line. Assert both the message and the collapsed file contents. */
+    it('squash-modal shape: pick with edited message + fixups keeps the message and all changes', async () => {
+      commit(repo.path, 'init');
+      const base = head(repo.path);
+      const c1 = commit(repo.path, 'first', { 'a.txt': 'A\n' });
+      const c2 = commit(repo.path, 'second', { 'b.txt': 'B\n' });
+      const c3 = commit(repo.path, 'third', { 'c.txt': 'C\n' });
+
+      await svc.interactiveRebase(base, [
+        { action: 'pick', hash: c1, subject: 'first', message: 'edited: all three\n\ndetails' },
+        { action: 'fixup', hash: c2, subject: 'second' },
+        { action: 'fixup', hash: c3, subject: 'third' },
+      ]);
+
+      const subjects = runGit(repo.path, ['log', '--format=%s', `${base}..HEAD`])
+        .trim().split('\n').filter(Boolean);
+      expect(subjects).toEqual(['edited: all three']);
+      expect(runGit(repo.path, ['log', '-1', '--format=%B']).trim())
+        .toBe('edited: all three\n\ndetails');
+      const files = runGit(repo.path, ['show', '--name-only', '--format=', 'HEAD'])
+        .trim().split('\n').sort();
+      expect(files).toEqual(['a.txt', 'b.txt', 'c.txt']);
+    });
+
+    it('squash-modal shape with newer commits above the selection keeps them as picks', async () => {
+      commit(repo.path, 'init');
+      const base = head(repo.path);
+      const c1 = commit(repo.path, 'first', { 'a.txt': 'A\n' });
+      const c2 = commit(repo.path, 'second', { 'b.txt': 'B\n' });
+      const c3 = commit(repo.path, 'newer untouched', { 'd.txt': 'D\n' });
+
+      await svc.interactiveRebase(base, [
+        { action: 'pick', hash: c1, subject: 'first', message: 'first+second' },
+        { action: 'fixup', hash: c2, subject: 'second' },
+        { action: 'pick', hash: c3, subject: 'newer untouched' },
+      ]);
+
+      const subjects = runGit(repo.path, ['log', '--format=%s', `${base}..HEAD`])
+        .trim().split('\n').filter(Boolean);
+      expect(subjects).toEqual(['newer untouched', 'first+second']);
+    });
+    /* SNIPCODE-HOOK end */
+
     it('fixup discards the squashed commits message (no exec amend)', async () => {
       commit(repo.path, 'init');
       const base = head(repo.path);
@@ -747,6 +793,33 @@ describe('GitService integration — merge / rebase / cherry-pick / revert', () 
       await svc.abortOperation();
       expect((await svc.getOperationState()).type).toBeNull();
     });
+
+    /* SNIPCODE-HOOK start: a leftover in-progress rebase must be refused up
+       front — previously the startup failure was misread as "paused now" and
+       reported as success for a rebase that never started. */
+    it('refuses to start while another rebase is in progress', async () => {
+      commit(repo.path, 'init', { 'a.txt': '1\n' });
+      const base = head(repo.path);
+      const c1 = commit(repo.path, 'set to 2', { 'a.txt': '2\n' });
+      const c2 = commit(repo.path, 'set to 3', { 'a.txt': '3\n' });
+
+      // Leave a paused (conflicted) rebase on disk.
+      await svc.interactiveRebase(base, [
+        { action: 'pick', hash: c2, subject: 'set to 3' },
+        { action: 'pick', hash: c1, subject: 'set to 2' },
+      ]);
+      expect((await svc.getOperationState()).type).toBe('rebase');
+
+      await expect(svc.interactiveRebase(base, [
+        { action: 'pick', hash: c1, subject: 'set to 2' },
+      ])).rejects.toThrow('already in progress');
+
+      // The original paused rebase is untouched and still abortable.
+      expect((await svc.getOperationState()).type).toBe('rebase');
+      await svc.abortOperation();
+      expect((await svc.getOperationState()).type).toBeNull();
+    });
+    /* SNIPCODE-HOOK end */
   });
 
   describe('rewordCommit', () => {
