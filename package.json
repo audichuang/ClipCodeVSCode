@@ -285,7 +285,7 @@
         {
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
-          "group": "inline"
+          "group": "navigation@20"
         }
       ],
       "view/title": [

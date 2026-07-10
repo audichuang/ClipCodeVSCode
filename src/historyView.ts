@@ -4,6 +4,7 @@ import { fileMatchesFilters } from './filterMatcher.js';
 import { type HistoryRepo, readFileAtCommit } from './gitHistory.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
+import { notifyCopied } from './notify.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 
@@ -111,11 +112,12 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
 
   if (payloadFiles.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
   const opts = { headerFormat: settings.headerFormat, preText: settings.preText, postText: settings.postText, addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles, files: payloadFiles };
-  await vscode.env.clipboard.writeText(usesFallback ? buildGitPayload(opts) : buildPayload(opts));
+  const payload = usesFallback ? buildGitPayload(opts) : buildPayload(opts);
+  await vscode.env.clipboard.writeText(payload);
   if (settings.showCopyNotification) {
     const s = skippedSize > 0 ? ` (${skippedSize} skipped: size exceeded)` : '';
     const l = limitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    vscode.window.showInformationMessage(`${copied} Git file(s) copied${s}.${l}`);
+    notifyCopied(`${copied} Git file(s) copied${s}.${l}`, payload);
   }
 }
 

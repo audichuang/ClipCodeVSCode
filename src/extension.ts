@@ -8,6 +8,7 @@ import { collectCopyFiles, collectCopyTextFiles, estimateTokens, type CopyTextFi
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
+import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
@@ -165,23 +166,26 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}${tokenNote(result.text)}`;
-    // Offer the actual skipped paths/sizes behind a button so the toast stays short.
-    // Fire-and-forget: do NOT await — an action-button notification never
-    // auto-dismisses, so awaiting it would block the copy from returning (hangs
-    // headless e2e and leaves the caller waiting on a toast).
-    const actions = result.skippedFiles.length > 0 ? ['Show skipped'] : [];
-    void vscode.window.showInformationMessage(message, ...actions).then(picked => {
-      if (picked === 'Show skipped') {
-        const list = result.skippedFiles
-          .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
-          .join('\n');
-        void vscode.window.showInformationMessage(
-          `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
-          { modal: true, detail: list }
-        );
-      }
-    });
+    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
+    if (result.skippedFiles.length > 0) {
+      // Offer the actual skipped paths/sizes behind a button so the toast stays short.
+      // Fire-and-forget: do NOT await — an action-button notification never
+      // auto-dismisses, so awaiting it would block the copy from returning (hangs
+      // headless e2e and leaves the caller waiting on a toast).
+      void vscode.window.showInformationMessage(`${message}${tokenNote(result.text)}`, 'Show skipped').then(picked => {
+        if (picked === 'Show skipped') {
+          const list = result.skippedFiles
+            .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
+            .join('\n');
+          void vscode.window.showInformationMessage(
+            `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
+            { modal: true, detail: list }
+          );
+        }
+      });
+    } else {
+      notifyCopied(message, result.text);
+    }
   }
 }
 
@@ -205,7 +209,7 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${suffix}.${tokenNote(result.payload)}`);
+    notifyCopied(`${result.copiedFileCount} file(s) copied${suffix}.`, result.payload);
   }
 }
 
@@ -244,7 +248,7 @@ async function copyAllOpenEditors(): Promise<void> {
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} open editor file(s) copied${suffix}.${tokenNote(result.payload)}`);
+    notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.`, result.payload);
   }
 }
 
@@ -288,7 +292,7 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}${tokenNote(payload)}`);
+    notifyCopied(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`, payload);
   }
 }
 
