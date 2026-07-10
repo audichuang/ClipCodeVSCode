@@ -29,6 +29,7 @@
   let todos = $state<TodoEntry[]>([]);
   let initialOrder = $state<string[]>([]);
   let loading = $state(true);
+  let loadError = $state<string | null>(null); // SNIPCODE-HOOK
   let dragIndex = $state<number | null>(null);
   let showActionMenu = $state<number | null>(null);
   let dropdownPos = $state<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -165,7 +166,15 @@
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
-      if (msg.type === 'rebaseCommitsData') {
+      /* SNIPCODE-HOOK start: base match + failure states (same family as
+         SquashModal). Without the base comparison, a LATE rebaseCommitsData
+         from a previously open modal (different base) would populate this
+         editor with the WRONG range — starting the rebase then silently drops
+         every commit of the real base..HEAD range missing from the todo list.
+         Without the error/timeout branches the editor spins forever when the
+         host errors or the response is dropped on a repo switch. */
+      if (msg.type === 'rebaseCommitsData' && msg.payload?.base === base) {
+        clearTimeout(loadTimer);
         const picks: TodoEntry[] = msg.payload.commits.map((c: Commit) => ({
           action: 'pick' as const,
           hash: c.hash,
@@ -180,8 +189,18 @@
         // Autosquash is on by default when fixup!/squash! commits are present;
         // the modal is a preview, so nothing is applied until "Start Rebase".
         rebuildTodos(hasAutosquashTargets(picks));
+      } else if (msg.type === 'error' && msg.payload?.source === 'getRebaseCommits') {
+        clearTimeout(loadTimer);
+        loadError = String(msg.payload.message || t('squash.loadFailed'));
+        loading = false;
       }
+      /* SNIPCODE-HOOK end */
     }
+    /* SNIPCODE-HOOK start */
+    const loadTimer = setTimeout(() => {
+      if (loading) { loadError = t('squash.loadFailed'); loading = false; }
+    }, 30_000);
+    /* SNIPCODE-HOOK end */
     window.addEventListener('message', handleMessage);
     vscode.postMessage({ type: 'getRebaseCommits', payload: { base } });
 
@@ -191,6 +210,7 @@
     window.addEventListener('click', handleClickOutside);
 
     return () => {
+      clearTimeout(loadTimer); // SNIPCODE-HOOK
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('click', handleClickOutside);
     };
@@ -269,6 +289,10 @@
 <Modal title={t('rebase.title')} {onClose}>
   {#if loading}
     <div class="rebase-loading"><span class="spinner"></span> {t('rebase.loading')}</div>
+  <!-- SNIPCODE-HOOK start -->
+  {:else if loadError}
+    <div class="rebase-empty rebase-load-error" role="alert"><i class="codicon codicon-error"></i> {loadError}</div>
+  <!-- SNIPCODE-HOOK end -->
   {:else if todos.length === 0}
     <div class="rebase-empty">{t('rebase.noCommits')}</div>
   {:else}
@@ -415,6 +439,12 @@
 </Modal>
 
 <style>
+  /* SNIPCODE-HOOK start */
+  .rebase-load-error {
+    color: var(--vscode-errorForeground, #f14c4c);
+  }
+  /* SNIPCODE-HOOK end */
+
   .rebase-loading, .rebase-empty {
     padding: 24px;
     text-align: center;

@@ -25,14 +25,28 @@
     const vscode = getVsCodeApi();
     const requestId = `rv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     vscode.postMessage({ type: 'predictConflicts', payload: { ours: 'HEAD', theirs: commit + '^', mergeBase: commit, requestId } });
+    /* SNIPCODE-HOOK start: bound the wait (same as CherryPickModal) — a root
+       commit's `commit^` never resolves, so the prediction fails and the
+       spinner would otherwise spin forever. */
+    const timeoutId = window.setTimeout(() => {
+      if (conflictPrediction === null) {
+        conflictPrediction = { hasConflict: false, files: [] };
+      }
+      window.removeEventListener('message', handler);
+    }, 5000);
+    /* SNIPCODE-HOOK end */
     const handler = (event: MessageEvent) => {
       if (event.data.type !== 'conflictPrediction') { return; }
       if (event.data.payload?.requestId !== requestId) { return; }
       conflictPrediction = event.data.payload;
+      window.clearTimeout(timeoutId); // SNIPCODE-HOOK
       window.removeEventListener('message', handler);
     };
     window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      window.clearTimeout(timeoutId); // SNIPCODE-HOOK
+      window.removeEventListener('message', handler);
+    };
   });
 </script>
 

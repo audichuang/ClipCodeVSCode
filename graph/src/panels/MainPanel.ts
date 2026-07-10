@@ -1128,13 +1128,21 @@ export class MainPanel {
         }
         case 'interactiveRebase': {
           await this.gitService.interactiveRebase(message.payload.base, message.payload.todos);
-          this.post({ type: 'operationComplete', payload: { operation: 'interactiveRebase', success: true } });
+          // interactiveRebase deliberately RESOLVES when the rebase pauses on a
+          // conflict/edit step (the banner guides continue/abort). Same guard
+          // as rewordCommit: only claim success — and only toast — when no
+          // rebase is left in progress, or a squash that hit a conflict would
+          // show "Squashed N" while HEAD is mid-rebase.
+          const rebasePaused = (await this.gitService.getOperationState()).type === 'rebase';
+          this.post({ type: 'operationComplete', payload: { operation: 'interactiveRebase', success: !rebasePaused } });
           await this.refreshAll();
           // Toast AFTER the refresh so the "squashed N" confirmation coincides
           // with the graph repaint instead of leading it. A squash routes through
           // this same backend; surface a dedicated confirmation, otherwise a
           // generic one so the rebase never completes silently.
-          if (message.payload.squashCount) {
+          if (rebasePaused) {
+            // The refresh surfaces the conflict banner; no success toast.
+          } else if (message.payload.squashCount) {
             vscode.window.showInformationMessage(vscode.l10n.t('squashed', String(message.payload.squashCount)));
           } else {
             vscode.window.showInformationMessage(vscode.l10n.t('interactiveRebaseComplete'));

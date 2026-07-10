@@ -6,6 +6,7 @@
   import ResetModal from '../modals/ResetModal.svelte';
   import CheckoutCommitModal from '../modals/CheckoutCommitModal.svelte';
   import { branchStore } from '../../lib/stores/branches.svelte';
+  import { uiStore } from '../../lib/stores/ui.svelte'; // SNIPCODE-HOOK
   import { tooltip } from '../../lib/actions/tooltip';
   import LinkifiedText from './LinkifiedText.svelte';
 
@@ -164,6 +165,24 @@
   // and the racing responses could overwrite each other.
   $effect(() => { if (active) untrack(() => load()); });
 
+  /* SNIPCODE-HOOK start: a repo switch posts only repoList/fullRefresh (never
+     repoChanged — that's file-watcher-only, see graph/CLAUDE.md), so without
+     tracking activeRepo this view kept showing the PREVIOUS repo's reflog and
+     kept a selectedRef that may not exist there. */
+  let lastRepo = uiStore.activeRepo;
+  $effect(() => {
+    const repo = uiStore.activeRepo;
+    untrack(() => {
+      if (repo === lastRepo) return;
+      lastRepo = repo;
+      selectedRef = 'HEAD';
+      currentLimit = 200;
+      entries = [];
+      if (active) load();
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   onMount(() => {
     function handleMessage(e: MessageEvent) {
       const msg = e.data;
@@ -174,6 +193,10 @@
         loadingMore = false;
       } else if (msg.type === 'repoChanged' || msg.type === 'operationComplete') {
         if (active) load();
+      } else if (msg.type === 'error' && msg.payload?.source === 'getReflog') {
+        // SNIPCODE-HOOK: a failed fetch must not leave the spinner forever.
+        loading = false;
+        loadingMore = false;
       }
     }
     window.addEventListener('message', handleMessage);

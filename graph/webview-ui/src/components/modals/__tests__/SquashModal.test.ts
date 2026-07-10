@@ -86,6 +86,46 @@ describe('SquashModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // SNIPCODE-HOOK start: load-failure + range-validation states
+  it('shows the host error instead of spinning forever when getRebaseCommits fails', async () => {
+    const { container } = render(SquashModal, {
+      chain, base: 'r', hasPushedCommits: false, onClose: vi.fn(),
+    });
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'error', payload: { message: 'boom', source: 'getRebaseCommits' } },
+    }));
+    await tick();
+    expect(container.querySelector('.squash-status--error')?.textContent).toContain('boom');
+    expect(container.querySelector('.spinner')).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('button.primary')!.disabled).toBe(true);
+  });
+
+  it('refuses when a selected commit is missing from base..HEAD (not on current branch)', async () => {
+    const { container } = render(SquashModal, {
+      chain, base: 'r', hasPushedCommits: false, onClose: vi.fn(),
+    });
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'rebaseCommitsData', payload: { base: 'r', commits: [chain[0]] } },
+    }));
+    await tick();
+    expect(container.querySelector('.squash-status--error')).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('button.primary')!.disabled).toBe(true);
+  });
+
+  it('refuses when a merge commit lies in the replayed range', async () => {
+    const { container } = render(SquashModal, {
+      chain, base: 'r', hasPushedCommits: false, onClose: vi.fn(),
+    });
+    const range = [...chain, mkCommit('m', ['b', 'x'], 'merge')];
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'rebaseCommitsData', payload: { base: 'r', commits: range } },
+    }));
+    await tick();
+    expect(container.querySelector('.squash-status--error')).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('button.primary')!.disabled).toBe(true);
+  });
+  // SNIPCODE-HOOK end
+
   it('tags the interactiveRebase with squashCount so the host can notify', async () => {
     const { container } = render(SquashModal, {
       chain, base: 'r', hasPushedCommits: false, onClose: vi.fn(),
