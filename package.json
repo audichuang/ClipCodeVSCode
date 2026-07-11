@@ -483,7 +483,7 @@
         },
         {
           "command": "snipcode.git.copyAsClipCode",
-          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "when": "view == snipcode.changes && viewItem =~ /^(file|repo|group)-/",
           "group": "navigation@10"
         },
         {

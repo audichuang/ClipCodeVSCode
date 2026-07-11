@@ -3,7 +3,7 @@ import { estimateTokens } from './copy.js';
 
 // ponytail: fixed threshold; promote to a setting only if someone asks.
 export const TOKEN_WARNING_THRESHOLD = 1_500_000;
-const COPY_TOAST_MS = 5_000;
+const COPY_TOAST_MS = 2_000;
 
 // Copy toast that auto-dismisses. A plain showInformationMessage stays in the
 // notification area until manually closed; a progress notification closes
