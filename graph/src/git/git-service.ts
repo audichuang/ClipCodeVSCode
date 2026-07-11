@@ -2167,6 +2167,25 @@ export class GitService {
     return { type: null };
   }
 
+  /**
+   * Flat operation verdict for the commit workbench's D4 gate. Reuses
+   * getOperationState() for merge/rebase/cherry-pick/revert and adds the bisect
+   * check it lacks. A leftover SQUASH_MSG (getOperationState → 'squash') is not
+   * an active operation that blocks committing, so it maps to 'clean' here.
+   */
+  async getRepoOperationState(): Promise<'clean' | 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect'> {
+    const { type } = await this.getOperationState();
+    if (type === 'merge' || type === 'rebase' || type === 'cherry-pick' || type === 'revert') {
+      return type;
+    }
+    // BISECT_LOG exists for the lifetime of a bisect session (removed by
+    // `git bisect reset`); getOperationState() does not look at it.
+    if (existsSync(join(this.gitDir(), 'BISECT_LOG'))) {
+      return 'bisect';
+    }
+    return 'clean';
+  }
+
   async continueOperation(): Promise<void> {
     const conflictFiles = await this.getConflictFiles();
     if (conflictFiles.length > 0) {
