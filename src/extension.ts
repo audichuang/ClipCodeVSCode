@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
@@ -210,9 +211,22 @@ function runtimeGitPath(): string {
   return cachedGitApi?.git?.path ?? 'git';
 }
 
+// True when `targetFsPath` is `rootFsPath` itself or a path underneath it.
+// Uses path.relative instead of a bare startsWith so a repo at `/repo` never
+// matches a sibling like `/repo-other` (no separator boundary with startsWith).
+function isWithinRoot(rootFsPath: string, targetFsPath: string): boolean {
+  const rel = path.relative(rootFsPath, targetFsPath);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 function resolveRepoRootFor(uri: vscode.Uri): { repoRoot: string; head: string } | undefined {
-  const repo = cachedGitApi?.repositories.find(r => uri.fsPath.startsWith(r.rootUri.fsPath));
-  if (!repo) return undefined;
+  const matches = (cachedGitApi?.repositories ?? []).filter(r => isWithinRoot(r.rootUri.fsPath, uri.fsPath));
+  if (matches.length === 0) return undefined;
+  // Nested repos: prefer the deepest (longest) root so a file inside a
+  // nested repo is attributed to that repo, not its parent.
+  const repo = matches.reduce((deepest, r) =>
+    r.rootUri.fsPath.length > deepest.rootUri.fsPath.length ? r : deepest
+  );
   const head = repo.state.HEAD?.commit ?? repo.state.HEAD?.name ?? 'HEAD';
   return { repoRoot: repo.rootUri.fsPath, head };
 }
