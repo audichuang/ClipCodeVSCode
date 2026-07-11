@@ -447,6 +447,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('gitGraphPlus.open', (sourceControl?: vscode.SourceControl) => {
       if (sourceControl?.rootUri) { switchToRepo(sourceControl.rootUri.fsPath); }
       MainPanel.createOrShow(context.extensionUri, activeRepoPath);
+      /* SNIPCODE-HOOK start: webview boot handshake (e2e strategy #20)
+         Return the readiness promise so `executeCommand('gitGraphPlus.open')`
+         resolves only after the webview's first message (or rejects on boot
+         failure). The no-op catch prevents an unhandled rejection when the
+         caller doesn't await; awaiting callers still observe the rejection. */
+      const ready = MainPanel.currentPanel?.whenWebviewReady();
+      ready?.catch(() => {});
+      return ready;
+      /* SNIPCODE-HOOK end */
     }),
     vscode.commands.registerCommand('gitGraphPlus.refresh', () => {
       refreshAll();
