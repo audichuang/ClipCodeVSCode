@@ -28,7 +28,7 @@ vi.mock('vscode', () => ({
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
   },
   window: {
-    createTreeView: (id: string) => { H.treeViewsCreated.push(id); return { description: '', dispose() {} }; },
+    createTreeView: (id: string) => { H.treeViewsCreated.push(id); return { description: '', message: undefined, onDidChangeCheckboxState: () => ({ dispose() {} }), dispose() {} }; },
     showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(async () => undefined),
     showErrorMessage: vi.fn(),
@@ -48,6 +48,7 @@ vi.mock('vscode', () => ({
   EventEmitter: class { event = () => ({ dispose() {} }); fire() {} dispose() {} },
   TreeItem: class { constructor(public label: unknown, public collapsibleState?: unknown) {} },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+  TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
   ThemeIcon: class { constructor(public id: string) {} },
 }));
 

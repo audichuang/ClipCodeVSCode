@@ -3,7 +3,7 @@ import * as path from 'path';
 import { GitService } from '../git/git-service';
 import { RepoDiscoveryService } from '../services/repo-discovery';
 import { runExclusive } from '../services/mutation-coordinator';
-import { ChangesTreeProvider } from './changes-tree';
+import { ChangesTreeProvider, type ChangeTreeNode } from './changes-tree';
 import type { RepoStatus, FileNode } from './build-change-tree';
 
 export interface CommitResult { repoName: string; ok: boolean; error?: string }
@@ -24,13 +24,27 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  the chosen repo paths. Set via the "Filter Repos" command. */
   private repoFilter: Set<string> | null = null;
   private view: vscode.TreeView<unknown> | undefined;
+  /** Staged repos the user UNCHECKED (default = every staged repo is committed). */
+  private readonly uncheckedForCommit = new Set<string>();
 
   constructor() {
-    this.tree = new ChangesTreeProvider(() => this.loadStatus());
+    this.tree = new ChangesTreeProvider(
+      () => this.loadStatus(),
+      (repoPath) => !this.uncheckedForCommit.has(repoPath),
+    );
   }
 
   /** Lets the workbench show the active filter in the tree's message bar. */
   setView(view: vscode.TreeView<unknown>): void { this.view = view; }
+
+  /** Wired to TreeView.onDidChangeCheckboxState in extension.ts. */
+  handleCheckboxChange(items: ReadonlyArray<readonly [ChangeTreeNode, vscode.TreeItemCheckboxState]>): void {
+    for (const [node, state] of items) {
+      if (node.kind !== 'repo') continue;
+      if (state === vscode.TreeItemCheckboxState.Unchecked) this.uncheckedForCommit.add(node.repoPath);
+      else this.uncheckedForCommit.delete(node.repoPath);
+    }
+  }
 
   private svcFor(repoPath: string): GitService {
     let svc = this.svcs.get(repoPath);
@@ -96,7 +110,10 @@ export class ChangesWorkbench implements vscode.Disposable {
   /** Commit every repo that has staged changes with one shared message. amend is
    *  only allowed when exactly one repo has staged work (rewrites that HEAD). */
   async commit(message: string, amend: boolean): Promise<CommitResult[]> {
-    const status = (await this.loadStatus()).filter(r => r.staged.length > 0);
+    // Only repos with staged work AND left checked in the tree are committed.
+    const status = (await this.loadStatus())
+      .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath));
+    if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
     const results: CommitResult[] = [];
     for (const r of status) {
