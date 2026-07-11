@@ -25,6 +25,12 @@ export async function commitAcrossRepos(
   selections: PerRepoSelection[],
   opts?: { amend?: boolean },
 ): Promise<RepoCommitResult[]> {
+  // Amend rewrites HEAD (destructive), so the single-repo rule must not depend on
+  // the webview alone (a stale UI, a bug, or a raw postMessage could send amend
+  // spanning repos). Refuse before touching any repo.
+  if (opts?.amend && selections.length > 1) {
+    throw new Error('amend can only target a single repo');
+  }
   const results: RepoCommitResult[] = [];
   for (const sel of selections) {
     const files = sel.files.map((f) => ({
