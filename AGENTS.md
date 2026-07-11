@@ -76,6 +76,17 @@ Gotcha: piping a build/test command (`| tail`/`| grep`) gives the pipe's exit co
 npm/vitest/vsce's — judge pass/fail by the `pass N, fail 0` / `Tests …` / `BUILD SUCCESSFUL`
 TEXT in the output, not `$?`.
 
+**A green test is not a spec.** Suites here have repeatedly locked the CURRENT
+(buggy) behavior into their expectations — e.g. PR open/copy asserting symbolic
+refs, pull asserting an unconditional stash pop — so a correct fix turns them
+red. When a fix flips a test, first ask whether the assertion encoded intent or
+just the status quo; invert status-quo tests in the SAME change, don't weaken
+the fix to keep them green. Also know what green means: `test:e2e` covers
+activation, a webview boot handshake, and one copy→clipboard→restore round-trip
+— it does NOT exercise git mutations, multi-repo, or destructive restore.
+Coverage gaps + the agreed test matrix: `docs/research/2026-07-11-e2e-test-strategy.md`
+(risk audit behind it: `docs/research/2026-07-10-vscode-git-operations-audit.md`).
+
 ## Release
 
 Pushing a `v<version>` tag runs `.github/workflows/publish.yml` (test → build →
