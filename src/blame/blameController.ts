@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { runBlame, defaultSpawnBlame } from './blameRunner.js';
 import { BlameCache, blameCacheKey } from './blameCache.js';
+import { GenerationGate } from './blameGeneration.js';
 import { formatRelativeTime, ageBucket, AGE_BUCKETS } from './blameFormat.js';
 import type { BlameLine } from './blameParser.js';
 
@@ -15,8 +16,19 @@ export interface BlameDeps {
   resolveRepoRoot: (uri: vscode.Uri) => { repoRoot: string; head: string } | undefined;
 }
 
+// Per-editor toggle key: document URI is not enough because the same
+// document opened in a left/right split view shares one URI — bundling
+// viewColumn in makes each pane's blame toggle independent of the other.
+function editorKey(editor: vscode.TextEditor): string {
+  return `${editor.document.uri.toString()}::${editor.viewColumn ?? 'none'}`;
+}
+
 export class BlameController {
-  private readonly enabled = new Set<string>(); // document URI strings
+  private readonly enabled = new Set<string>(); // editor keys (doc URI + viewColumn)
+  // Bumped on every enable/disable so an in-flight render started under a
+  // stale generation can detect it was superseded and skip re-applying
+  // decorations after the user already toggled blame off.
+  private readonly gate = new GenerationGate();
   private readonly cache = new BlameCache();
   private readonly types: vscode.TextEditorDecorationType[] = [];
   private readonly docChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -45,9 +57,12 @@ export class BlameController {
   async toggle(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
-    const key = editor.document.uri.toString();
+    const key = editorKey(editor);
     if (this.enabled.has(key)) {
       this.enabled.delete(key);
+      // Invalidate any render already in flight for this editor so it can't
+      // resurrect decorations after we clear them below.
+      this.gate.bump(key);
       this.clearDecorations(editor);
     } else {
       if (editor.document.lineCount > MAX_LINES) {
@@ -55,12 +70,13 @@ export class BlameController {
         return;
       }
       this.enabled.add(key);
+      this.gate.bump(key);
       await this.render(editor);
     }
   }
 
   async onActiveEditor(editor: vscode.TextEditor | undefined): Promise<void> {
-    if (editor && this.enabled.has(editor.document.uri.toString())) {
+    if (editor && this.enabled.has(editorKey(editor))) {
       await this.render(editor);
     }
   }
@@ -79,7 +95,7 @@ export class BlameController {
 
   private async renderIfEnabled(doc: vscode.TextDocument): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (editor && editor.document === doc && this.enabled.has(doc.uri.toString())) {
+    if (editor && editor.document === doc && this.enabled.has(editorKey(editor))) {
       await this.render(editor);
     }
   }
@@ -89,6 +105,11 @@ export class BlameController {
   }
 
   private async render(editor: vscode.TextEditor): Promise<void> {
+    // Snapshot this editor's toggle identity before the first await — used
+    // below to detect a disable (or a pane's viewColumn changing) that
+    // happened while blame data was being fetched.
+    const key = editorKey(editor);
+    const generation = this.gate.current(key);
     const doc = editor.document;
     const info = this.deps.resolveRepoRoot(doc.uri);
     if (!info) return;
@@ -112,8 +133,17 @@ export class BlameController {
         return;
       }
     }
-    // Editor may have changed while awaiting.
-    if (vscode.window.activeTextEditor !== editor || doc.version !== editor.document.version) return;
+    // Editor/doc may have changed while awaiting, or the user may have
+    // toggled blame off (and possibly back on) for this editor in the
+    // meantime — any of those makes this render stale, so skip it instead of
+    // resurrecting decorations the user already turned off.
+    if (
+      vscode.window.activeTextEditor !== editor ||
+      doc.version !== editor.document.version ||
+      editorKey(editor) !== key ||
+      !this.enabled.has(key) ||
+      !this.gate.isCurrent(key, generation)
+    ) return;
     this.applyDecorations(editor, lines);
   }
 
