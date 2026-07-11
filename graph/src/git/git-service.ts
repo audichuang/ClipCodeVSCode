@@ -14,7 +14,7 @@ import { resolveGitDirs } from '../services/file-watcher-helpers';
  *  extension host. Callers can override per-invocation via `maxBufferBytes`. */
 const DEFAULT_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 import { parseLog, parseBranches, parseTags, parseRemotes, parseStashList, parseDiff, parseWorktreeList, parseLfsFiles, parseLfsLocks, mapSignatureStatus } from './git-parser';
-import { buildReversePatch } from './patch-builder';
+import { buildReversePatch, buildForwardPatch } from './patch-builder';
 import type { Commit, BranchInfo, TagInfo, RemoteInfo, StashEntry, LogOptions, DiffData, WorktreeInfo, CommitSignature } from './types';
 
 export class GitError extends Error {
@@ -2184,6 +2184,95 @@ export class GitService {
       return 'bisect';
     }
     return 'clean';
+  }
+
+  /**
+   * Raw HEAD→working-tree unified diff for a single file (no color), the text
+   * `buildForwardPatch` parses. Mirrors getUncommittedFileDiff's command
+   * selection but returns the raw string instead of a parsed DiffData: tracked
+   * files use `git diff -- file`; an untracked new file uses
+   * `git diff --no-index /dev/null file` (which exits 1 when it finds the
+   * additions — normal, its stdout carries the diff).
+   */
+  private async workingFileDiffRaw(file: string): Promise<string> {
+    this.assertSafePath(file, 'diff');
+    const isTracked = await this.exec(['ls-files', '--error-unmatch', '--', file])
+      .then(() => true)
+      .catch(() => false);
+    if (!isTracked) {
+      return this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file])
+        .catch(err => (err instanceof GitError && err.exitCode === 1) ? err.stdout : '');
+    }
+    return this.exec(['diff', '--no-color', '--', file]).catch(() => '');
+  }
+
+  /**
+   * Stage and commit ONLY the selected hunks of the given files, in one atomic
+   * unit under the mutation lock (D1 + D4).
+   *
+   * Preconditions enforced here:
+   *  - D4: the repo is not mid merge/rebase/cherry-pick/revert/bisect and has no
+   *    unmerged index entries — else throw.
+   *  - D1: the index is empty (nothing already staged) — else throw. With a
+   *    clean index the flow is simply apply --cached → commit; no staged/unstaged
+   *    reconciliation.
+   *
+   * The working tree is never modified, so unselected hunks remain as
+   * uncommitted working changes and no tree reset is needed. On a mid-apply
+   * failure the (partially staged) index is reset back to clean before the error
+   * is rethrown, so a failed call never leaves the repo polluted.
+   *
+   * NOTE: runs inside withMutationLock, so all MUTATING git commands use
+   * execUnlocked directly (exec would re-enter the lock and deadlock). Read-only
+   * commands use exec, which does not take the lock for reads.
+   */
+  async commitSelected(message: string, files: Array<{ path: string; hunkIndices: number[] }>): Promise<string> {
+    return this.withMutationLock(async () => {
+      // D4: no in-progress operation.
+      const opState = await this.getRepoOperationState();
+      if (opState !== 'clean') {
+        throw new Error(`repo has an in-progress ${opState}; resolve it first`);
+      }
+      // D4: no unmerged (conflicted) index entries.
+      const unmerged = await this.exec(['ls-files', '--unmerged']).catch(() => '');
+      if (unmerged.trim().length > 0) {
+        throw new Error('repo has unmerged paths; resolve conflicts first');
+      }
+
+      // D1: the index must be clean. `git diff --cached --quiet` exits 0 when
+      // nothing is staged, 1 when something is.
+      const indexClean = await this.exec(['diff', '--cached', '--quiet'], { silent: true })
+        .then(() => true)
+        .catch(err => {
+          if (err instanceof GitError && err.exitCode === 1) { return false; }
+          throw err;
+        });
+      if (!indexClean) {
+        throw new Error('index already has staged changes; commit or reset them first');
+      }
+
+      try {
+        for (const { path, hunkIndices } of files) {
+          const raw = await this.workingFileDiffRaw(path);
+          if (!raw.trim()) {
+            throw new Error(`no working-tree changes to stage for ${path}`);
+          }
+          const patch = buildForwardPatch(raw, hunkIndices);
+          // `git apply` reads the patch from stdin when no path argument is given
+          // (same as reverseCommitChanges); --cached stages into the index only.
+          await this.execUnlocked(['apply', '--cached'], { stdin: patch });
+        }
+        await this.execUnlocked(['commit', '-m', message]);
+      } catch (err) {
+        // Undo any partial staging so a failed commit leaves a clean index; the
+        // working tree was never touched, so a mixed reset restores the
+        // pre-call state exactly.
+        await this.execUnlocked(['reset', '--quiet']).catch(() => { /* best-effort cleanup */ });
+        throw err;
+      }
+
+      return (await this.exec(['rev-parse', 'HEAD'])).trim();
+    });
   }
 
   async continueOperation(): Promise<void> {
