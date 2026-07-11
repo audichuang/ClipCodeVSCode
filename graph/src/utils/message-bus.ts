@@ -238,3 +238,52 @@ export type ExtensionMessage =
     | { modal: 'deleteRemoteBranch'; remote: string; name: string }
     | { modal: 'addWorktree'; defaultPath: string; startPoint?: string }
   };
+
+/* SNIPCODE-HOOK start: message effect classification (audit P1-7)
+   Exhaustive by construction: adding a WebviewMessage type without
+   classifying it here is a COMPILE error, so no new mutating message can
+   silently skip MainPanel's transaction gate. 'mutation' = the handler
+   mutates the repository (worktree, index, refs, stash, remotes, worktrees,
+   LFS locks) and runs as one MainPanel-level transaction — repo switches
+   defer until it completes. 'read' = everything else (reads and pure UI);
+   those stay ungated so a switch never waits on a slow log/compare. */
+export type MessageEffect = 'mutation' | 'read';
+
+export const MESSAGE_EFFECTS: Record<WebviewMessage['type'], MessageEffect> = {
+  abortMerge: 'mutation', abortOperation: 'mutation', abortRebase: 'mutation',
+  addRemote: 'mutation', amendCommit: 'mutation', bisectBad: 'mutation',
+  bisectGood: 'mutation', bisectReset: 'mutation', bisectSkip: 'mutation',
+  bisectStart: 'mutation', checkout: 'mutation', cherryPick: 'mutation',
+  commitFixup: 'mutation', commitSquash: 'mutation', continueOperation: 'mutation',
+  continueRebase: 'mutation', createBranch: 'mutation', createTag: 'mutation',
+  deleteBranch: 'mutation', deleteRemoteBranch: 'mutation', deleteRemoteTag: 'mutation',
+  deleteTag: 'mutation', dragMerge: 'mutation', dragRebase: 'mutation',
+  fastForward: 'mutation', fetch: 'mutation', flowAction: 'mutation',
+  flowInit: 'mutation', interactiveRebase: 'mutation', lfsLock: 'mutation',
+  lfsUnlock: 'mutation', merge: 'mutation', pruneWorktrees: 'mutation',
+  pull: 'mutation', push: 'mutation', pushAllTags: 'mutation',
+  pushTag: 'mutation', rebase: 'mutation', removeRemote: 'mutation',
+  renameBranch: 'mutation', reset: 'mutation', restoreStashFiles: 'mutation',
+  reverseCommitChanges: 'mutation', revert: 'mutation', rewordCommit: 'mutation',
+  setUpstream: 'mutation', skipRebase: 'mutation', stageFile: 'mutation',
+  stashApply: 'mutation', stashDrop: 'mutation', stashRename: 'mutation',
+  stashSave: 'mutation', submoduleUpdate: 'mutation', worktreeAdd: 'mutation',
+  worktreeRemove: 'mutation',
+  checkDirty: 'read', checkFlowStatus: 'read', compareCommits: 'read',
+  compareToWorking: 'read', copyToClipboard: 'read', getActivityLog: 'read',
+  getAvatar: 'read', getBranches: 'read', getCommitData: 'read',
+  getCommitDiff: 'read', getCommitFilesForCopy: 'read', getCommitsBetween: 'read',
+  getCommitSignature: 'read', getFileDiff: 'read', getFlowBranches: 'read',
+  getImageAtRef: 'read', getLfsFiles: 'read', getLog: 'read',
+  getMultiCommitSections: 'read', getRebaseCommits: 'read', getReflog: 'read',
+  getRepoList: 'read', getStats: 'read', getSubmodules: 'read',
+  getUncommittedDiff: 'read', getUncommittedFileDiff: 'read', getWorktrees: 'read',
+  lsTree: 'read', openConflictFile: 'read', openDiff: 'read',
+  openExtensionSettings: 'read', openExternalUrl: 'read', openFile: 'read',
+  openScmView: 'read', openWorktreeInNewWindow: 'read', predictConflicts: 'read',
+  refreshConflicts: 'read', saveCommitPatch: 'read', searchByFile: 'read',
+  searchByHash: 'read', searchCommits: 'read', showNotification: 'read',
+  showTagDetails: 'read', snipcodeCopyFullSource: 'read', switchRepo: 'read',
+  worktreeAddModalRequest: 'read',
+};
+/* SNIPCODE-HOOK end */

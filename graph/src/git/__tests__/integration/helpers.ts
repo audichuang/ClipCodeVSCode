@@ -28,8 +28,18 @@ const NOISY_ENV_OVERRIDES = {
   LC_ALL: 'C',
 };
 
+/* SNIPCODE-HOOK start: shared shellQuote (also used by git-shim.ts) */
+/** POSIX single-quote escaping for embedding a value in a shell command. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+/* SNIPCODE-HOOK end */
+
 export function runGit(cwd: string, args: string[], input?: string): string {
-  return execSync(`git ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`, {
+  /* SNIPCODE-HOOK start: use shared shellQuote */
+  const cmd = `git ${args.map(shellQuote).join(' ')}`;
+  /* SNIPCODE-HOOK end */
+  return execSync(cmd, {
     cwd,
     encoding: 'utf-8',
     input,

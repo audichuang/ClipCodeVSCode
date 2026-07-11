@@ -15,51 +15,7 @@ const H = vi.hoisted(() => ({
   panel: null as null | { webview: { postMessage: ReturnType<typeof vi.fn> } },
 }));
 
-vi.mock('vscode', () => {
-  const makePanel = () => {
-    const panel = {
-      webview: {
-        html: '',
-        cspSource: 'vscode-webview:',
-        asWebviewUri: (u: unknown) => u,
-        postMessage: vi.fn(),
-        onDidReceiveMessage: (cb: (m: unknown) => unknown) => { H.messageHandler = cb; return { dispose() {} }; },
-      },
-      onDidDispose: () => ({ dispose() {} }),
-      reveal: vi.fn(),
-      dispose: vi.fn(),
-      iconPath: undefined as unknown,
-      viewColumn: 1,
-    };
-    H.panel = panel;
-    return panel;
-  };
-  return {
-    window: {
-      createWebviewPanel: vi.fn(makePanel),
-      activeTextEditor: undefined,
-      showInformationMessage: vi.fn(),
-      showWarningMessage: vi.fn(),
-      showErrorMessage: vi.fn(async () => undefined),
-    },
-    workspace: {
-      getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
-      getWorkspaceFolder: () => undefined,
-      workspaceFolders: [],
-      onDidChangeConfiguration: () => ({ dispose() {} }),
-      fs: { writeFile: vi.fn(async () => {}) },
-    },
-    commands: { executeCommand: vi.fn() },
-    l10n: { t: (k: string) => k },
-    env: { language: 'en', clipboard: { writeText: vi.fn() } },
-    Uri: {
-      joinPath: () => ({}),
-      file: (p: string) => ({ fsPath: p }),
-      parse: () => ({ with: () => ({}) }),
-    },
-    ViewColumn: { One: 1 },
-  };
-});
+vi.mock('vscode', async () => (await import('./vscode-mock')).makeVscodeModule(H));
 
 vi.mock('../../services/file-watcher', () => ({
   FileWatcher: class { enabled = true; suppress() {} dispose() {} },
@@ -175,9 +131,9 @@ d('cross-repo mutation transaction (P1-7 ground truth)', () => {
 
     // Drain the queued follow-up refresh so no git spawn outlives the shim's
     // temp dir (cleanup would otherwise race it into a noisy ENOENT).
-    const internals = panel as unknown as { refreshing: boolean; refreshQueued: boolean };
+    const internals = panel as unknown as { refreshing: boolean; queuedRefreshDone: Promise<void> | null };
     const deadline = Date.now() + 5_000;
-    while ((internals.refreshing || internals.refreshQueued) && Date.now() < deadline) {
+    while ((internals.refreshing || internals.queuedRefreshDone) && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 25));
     }
   });
