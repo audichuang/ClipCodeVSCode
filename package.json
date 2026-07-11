@@ -213,15 +213,6 @@
         "title": "Snipcode: Reveal Blamed Commit in Graph"
       }
     ],
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "snipcode-commit-workbench",
-          "title": "Snipcode Git",
-          "icon": "images/icon.svg"
-        }
-      ]
-    },
     "views": {
       "scm": [
         {
@@ -254,13 +245,6 @@
           "id": "gitGraphPlus.worktrees",
           "name": "Worktrees",
           "icon": "$(worktree)"
-        }
-      ],
-      "snipcode-commit-workbench": [
-        {
-          "id": "snipcode.commitWorkbench",
-          "name": "Commit Workbench",
-          "type": "webview"
         }
       ]
     },
