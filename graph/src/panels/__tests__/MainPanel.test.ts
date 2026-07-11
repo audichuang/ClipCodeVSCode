@@ -40,53 +40,11 @@ const H = vi.hoisted(() => {
   };
 });
 
-vi.mock('vscode', () => {
-  const makePanel = () => {
-    const webview = {
-      html: '',
-      cspSource: 'vscode-webview:',
-      asWebviewUri: (u: unknown) => u,
-      postMessage: vi.fn(),
-      onDidReceiveMessage: (cb: (m: unknown) => unknown) => { H.messageHandler = cb; return { dispose() {} }; },
-    };
-    const panel = {
-      webview,
-      onDidDispose: () => ({ dispose() {} }),
-      reveal: vi.fn(),
-      dispose: vi.fn(),
-      iconPath: undefined as unknown,
-      viewColumn: 1,
-    };
-    H.panel = panel;
-    return panel;
-  };
-  return {
-    window: {
-      createWebviewPanel: vi.fn(makePanel),
-      activeTextEditor: undefined,
-      showInformationMessage: vi.fn(),
-      showWarningMessage: vi.fn(),
-      showErrorMessage: vi.fn(async () => undefined),
-      showSaveDialog: vi.fn(async () => undefined),
-    },
-    workspace: {
-      getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
-      getWorkspaceFolder: () => ({ uri: { fsPath: '/repo' } }),
-      workspaceFolders: [{ uri: { fsPath: '/repo' } }],
-      onDidChangeConfiguration: () => ({ dispose() {} }),
-      fs: { writeFile: vi.fn(async () => {}) },
-    },
-    commands: { executeCommand: vi.fn() },
-    l10n: { t: (k: string) => k },
-    env: { language: 'en', clipboard: { writeText: vi.fn() } },
-    Uri: {
-      joinPath: () => ({}),
-      file: (p: string) => ({ fsPath: p, with(o: object) { return { ...this, ...o }; } }),
-      parse: () => ({ with: () => ({}) }),
-    },
-    ViewColumn: { One: 1 },
-  };
-});
+/* SNIPCODE-HOOK start: shared vscode mock (see vscode-mock.ts) */
+vi.mock('vscode', async () => (await import('./vscode-mock')).makeVscodeModule(H, {
+  workspaceFolders: [{ uri: { fsPath: '/repo' } }],
+}));
+/* SNIPCODE-HOOK end */
 
 vi.mock('../../git/git-service', async (orig) => {
   const actual = await orig<typeof import('../../git/git-service')>();

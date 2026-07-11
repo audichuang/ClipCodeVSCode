@@ -6,6 +6,8 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+import { shellQuote } from './helpers';
+
 /**
  * Test-only git binary shim (POSIX): intercepts ONE invocation of a given
  * subcommand (optionally restricted to a spawn cwd), blocks it until
@@ -101,8 +103,4 @@ exec "$REAL" "$@"
       try { rmSync(ctrlDir, { recursive: true, force: true }); } catch { /* best effort */ }
     },
   };
-}
-
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
