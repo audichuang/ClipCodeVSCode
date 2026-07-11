@@ -191,6 +191,7 @@ export function activate(context: vscode.ExtensionContext) {
   const workbench = new ChangesWorkbench();
   const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true });
   workbench.setView(changesView);
+  changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));
   context.subscriptions.push(
     workbench,
     changesView,

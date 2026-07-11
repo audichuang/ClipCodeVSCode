@@ -21,7 +21,11 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
 
   private groups: GroupNode[] = [];
 
-  constructor(private readonly loadStatus: LoadStatus) {}
+  constructor(
+    private readonly loadStatus: LoadStatus,
+    /** Whether a staged repo is checked to be included in the next commit. */
+    private readonly isCheckedForCommit: (repoPath: string) => boolean = () => true,
+  ) {}
 
   /** Re-read status and repaint the tree. */
   async refresh(): Promise<void> {
@@ -51,6 +55,12 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       item.iconPath = new vscode.ThemeIcon('repo');
       // Distinguish the same repo appearing under both groups.
       item.id = `${node.group}:${node.repoPath}`;
+      // Staged repos get a checkbox: only checked repos are included in Commit.
+      if (node.group === 'staged') {
+        item.checkboxState = this.isCheckedForCommit(node.repoPath)
+          ? vscode.TreeItemCheckboxState.Checked
+          : vscode.TreeItemCheckboxState.Unchecked;
+      }
       return item;
     }
     // file
