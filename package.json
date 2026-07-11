@@ -22,7 +22,8 @@
     "onCommand:clipcode.copyGitChanges",
     "onCommand:clipcode.pasteAndRestoreFiles",
     "onView:clipcode.history",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:clipcode.blame.toggle"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -201,6 +202,15 @@
         "command": "gitGraphPlus.pruneWorktrees",
         "title": "Git Graph+: Prune Worktrees",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "clipcode.blame.toggle",
+        "title": "Snipcode: Toggle Inline Blame",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "clipcode.blame.revealCommit",
+        "title": "Snipcode: Reveal Blamed Commit in Graph"
       }
     ],
     "views": {
@@ -249,6 +259,11 @@
         {
           "command": "gitGraphPlus.open",
           "group": "navigation"
+        },
+        {
+          "command": "clipcode.blame.toggle",
+          "group": "navigation",
+          "when": "editorIsOpen"
         }
       ],
       "scm/title": [
