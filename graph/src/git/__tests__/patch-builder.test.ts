@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildReversePatch } from '../patch-builder';
+import { buildForwardPatch } from '../patch-builder';
 import { parseDiff } from '../git-parser';
 
 // A replace hunk (delete + two adds) plus surrounding context, the shape the
@@ -391,5 +392,94 @@ index 1234567..0000000 100644
     const hunk = parseDiff(SAMPLE)[0].hunks[0];
     const ctxIdx = hunk.lines.findIndex((l) => l.type === 'context');
     expect(() => buildReversePatch(SAMPLE, 0, [ctxIdx])).toThrow(/No changed lines/);
+  });
+});
+
+// Two well-separated hunks (line 2 and line 14) — the shape a HEAD→working
+// diff hands to the forward builder for per-hunk staging.
+const TWO_HUNK = [
+  'diff --git a/f.txt b/f.txt',
+  'index 1111111..2222222 100644',
+  '--- a/f.txt',
+  '+++ b/f.txt',
+  '@@ -1,3 +1,3 @@',
+  ' alpha',
+  '-beta',
+  '+beta2',
+  ' gamma',
+  '@@ -13,3 +13,3 @@',
+  ' nu',
+  '-xi',
+  '+xi2',
+  ' omicron',
+  '',
+].join('\n');
+
+// A whole-new-file diff: `--- /dev/null` side, one pure-addition hunk.
+const NEW_FILE = [
+  'diff --git a/new.txt b/new.txt',
+  'new file mode 100644',
+  'index 0000000..abc1234',
+  '--- /dev/null',
+  '+++ b/new.txt',
+  '@@ -0,0 +1,2 @@',
+  '+hello',
+  '+world',
+  '',
+].join('\n');
+
+describe('buildForwardPatch', () => {
+  it('emits only the selected hunk, dropping the others', () => {
+    const patch = buildForwardPatch(TWO_HUNK, [0]);
+    expect(patch).toBe([
+      'diff --git a/f.txt b/f.txt',
+      'index 1111111..2222222 100644',
+      '--- a/f.txt',
+      '+++ b/f.txt',
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '-beta',
+      '+beta2',
+      ' gamma',
+      '',
+    ].join('\n'));
+  });
+
+  it('emits multiple selected hunks in ascending file order', () => {
+    // Pass them out of order to prove the builder sorts to file order for apply.
+    const patch = buildForwardPatch(TWO_HUNK, [1, 0]);
+    expect(patch).toBe([
+      'diff --git a/f.txt b/f.txt',
+      'index 1111111..2222222 100644',
+      '--- a/f.txt',
+      '+++ b/f.txt',
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '-beta',
+      '+beta2',
+      ' gamma',
+      '@@ -13,3 +13,3 @@',
+      ' nu',
+      '-xi',
+      '+xi2',
+      ' omicron',
+      '',
+    ].join('\n'));
+  });
+
+  it('reconstructs the whole diff verbatim when every hunk is selected', () => {
+    expect(buildForwardPatch(TWO_HUNK, [0, 1])).toBe(TWO_HUNK);
+  });
+
+  it('stages a whole new file (keeps the /dev/null side) when its only hunk is selected', () => {
+    expect(buildForwardPatch(NEW_FILE, [0])).toBe(NEW_FILE);
+  });
+
+  it('throws when the selection is empty', () => {
+    expect(() => buildForwardPatch(TWO_HUNK, [])).toThrow('No hunks selected');
+  });
+
+  it('throws when a selected hunk index is out of range', () => {
+    expect(() => buildForwardPatch(TWO_HUNK, [5])).toThrow('Hunk 5 not found');
   });
 });

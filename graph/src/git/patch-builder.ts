@@ -313,3 +313,50 @@ export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIn
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
   return [...finalHeader, headerLine, ...body].join('\n') + '\n';
 }
+
+/**
+ * Build a patch that stages ONLY the selected hunks of a HEAD→working-tree
+ * file diff, for `git apply --cached`. Each hunk of a HEAD→working diff is an
+ * independent region, so staging a subset just means emitting those hunks
+ * verbatim (original header line + entries + no-newline markers) and dropping
+ * the rest — no line-count rewriting is needed because whole hunks keep their
+ * own already-correct `@@` counts.
+ *
+ * Hunk-level only (v1). Per-line selection (lineIndices) is intentionally left
+ * to v2. `selectedHunkIndices` index into the parsed hunk list exactly as
+ * `parseFileDiff`/`parseDiff` produce it; they are de-duplicated and applied in
+ * ascending file order (git apply wants hunks in file order).
+ *
+ * `normalizeWholeFileHeader` runs for parity with the reverse builder and to
+ * cover the whole-file `/dev/null` cases (new/deleted file selected in full);
+ * for ordinary modification diffs and verbatim hunk selection it is a no-op.
+ *
+ * @throws if nothing is selected or a selected index is out of range.
+ */
+export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: number[]): string {
+  if (selectedHunkIndices.length === 0) {
+    throw new Error('No hunks selected to stage');
+  }
+  const { header, hunks } = parseFileDiff(rawFileDiff);
+  const ordered = [...new Set(selectedHunkIndices)].sort((a, b) => a - b);
+
+  let oldCount = 0;
+  let newCount = 0;
+  const body: string[] = [];
+  for (const idx of ordered) {
+    const hunk = hunks[idx];
+    if (!hunk) {
+      throw new Error(`Hunk ${idx} not found in diff`);
+    }
+    body.push(hunk.headerLine);
+    for (const entry of hunk.entries) {
+      body.push(entry.text, ...entry.markers);
+      if (entry.kind === 'context') { oldCount++; newCount++; }
+      else if (entry.kind === 'delete') { oldCount++; }
+      else { newCount++; }
+    }
+  }
+
+  const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
+  return [...finalHeader, ...body].join('\n') + '\n';
+}
