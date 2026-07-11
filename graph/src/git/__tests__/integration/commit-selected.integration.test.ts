@@ -41,6 +41,45 @@ describe('GitService integration — commitSelected', () => {
     expect(() => runGit(repo.path, ['diff', '--cached', '--quiet'])).not.toThrow();
   });
 
+  it('commits only the second (later) hunk, leaving the first hunk in the working tree', async () => {
+    const before = head(repo.path);
+    const newHash = await svc.commitSelected('只提交第二個 hunk', [{ path: 'f.txt', hunkIndices: [1] }]);
+
+    expect(newHash).not.toBe(before);
+    expect(newHash).toBe(head(repo.path));
+
+    // The commit contains hunk 1 (xi→xi2) but NOT hunk 0 (beta→beta2).
+    const committed = runGit(repo.path, ['show', 'HEAD:f.txt']);
+    expect(committed).toContain('\nxi2\n');
+    expect(committed).not.toContain('\nbeta2\n');
+
+    // Hunk 0 is still an unstaged working-tree change.
+    expect(runGit(repo.path, ['status', '--porcelain', 'f.txt']).trim()).toBe('M f.txt');
+
+    // Index is clean (== HEAD): `git diff --cached --quiet` exits 0.
+    expect(() => runGit(repo.path, ['diff', '--cached', '--quiet'])).not.toThrow();
+  });
+
+  it('stages and commits a whole new (untracked) file via its single whole-file hunk', async () => {
+    writeFile(repo.path, 'new.txt', 'hello\nworld\n');
+
+    const before = head(repo.path);
+    const newHash = await svc.commitSelected('新增檔案', [{ path: 'new.txt', hunkIndices: [0] }]);
+
+    expect(newHash).not.toBe(before);
+    expect(newHash).toBe(head(repo.path));
+
+    // The new file is committed with its full content.
+    expect(runGit(repo.path, ['show', 'HEAD:new.txt'])).toBe('hello\nworld\n');
+
+    // Working tree is clean for new.txt (it's fully committed); f.txt's
+    // untouched hunk is still an unstaged change from beforeEach.
+    expect(runGit(repo.path, ['status', '--porcelain', 'new.txt']).trim()).toBe('');
+
+    // Index is clean (== HEAD): `git diff --cached --quiet` exits 0.
+    expect(() => runGit(repo.path, ['diff', '--cached', '--quiet'])).not.toThrow();
+  });
+
   it('D1: refuses to commit when the index already has staged changes', async () => {
     // Dirty the index with an unrelated staged file.
     writeFile(repo.path, 'other.txt', 'staged\n');
