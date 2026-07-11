@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.36
+
+- **Fixed a cross-repository mutation race:** switching the active repository
+  while a multi-step git operation (e.g. pull / fast-forward with auto-stash)
+  was running could redirect its remaining steps — including the final stash
+  pop — to the newly selected repository, popping that repo's own stash. All
+  mutating operations now run as one transaction: a repository switch waits
+  for the running operation to finish (the latest selection wins) instead of
+  interleaving with it.
+- **The graph webview now completes a boot handshake:** opening the graph
+  resolves only after the webview's bundled script actually starts and talks
+  to the extension host, so a broken asset, CSP block, or boot crash surfaces
+  as an error instead of a silently blank panel.
+
 ## 0.3.35
 
 - **Copy notifications now auto-dismiss** after ~5s instead of lingering, and
