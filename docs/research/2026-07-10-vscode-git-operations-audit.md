@@ -128,6 +128,7 @@ fast-forward 與 pull 的 auto-stash 流程先呼叫 `stashSave()`，完成後�
 - dirty tree + 已有 stash：只 restore 本次建立的 stash。
 - 主要 operation 失敗：仍嘗試 restore，並同時保留原始錯誤與 restore 錯誤。
 - mutation queue 中有第二個操作：不得介入 stash transaction。
+- 注意：現有 [`MainPanel.test.ts`](../../graph/src/panels/__tests__/MainPanel.test.ts#L337) 固定期待 pull 後無條件 pop（未確認 stash 是否真的建立）——**該測試鎖住的是現況錯誤行為，實作本票時必須同步反轉**，否則會擋下修正。
 
 ### P1-3. PR compare 未固定 base/head snapshot，可能混合不同時間點的資料
 
@@ -161,6 +162,7 @@ headRef -> headOid
 - compare 進行中移動 head ref，整份 response 仍對應原 head OID。
 - response 完成後再次移動 ref，open/copy 仍讀取 response 中的 OID。
 - base/head 無法 resolve 時，回傳明確錯誤，不做半套 compare。
+- 注意：現有 [`PrView.test.ts`](../../graph/webview-ui/src/components/pr/__tests__/PrView.test.ts#L125) 與同檔 L204 固定期待 open/copy 送出 symbolic ref（`ref2: 'feat'`、`hash: 'feat'`）——**這些測試鎖住的是現況錯誤行為，與本票的 invariant 相反，實作時必須同步反轉**。
 
 ### P1-4. repository 切換後，舊 refresh 可能回寫新 repository UI
 
@@ -595,6 +597,8 @@ sequenceDiagram
 13. Activity log redaction and hook-fence CI check。
 
 每張票先加入能重現現況的失敗測試，再做最小修正；root 與 graph 的改動分開 review，避免 vendor diff 與 host behavior 混在同一個大型提交。
+
+通用注意：部分既有測試把現況的**錯誤行為**鎖成預期值（已知兩處：P1-2 的 `MainPanel.test.ts#L337`、P1-3 的 `PrView.test.ts#L125`／`L204`）。實作各票時，先確認既有綠燈測試斷言的是「正確行為」還是「現況行為」，屬後者的要與修正同票反轉，不可為了保綠燈而遷就。
 
 ## 12. 驗證基線與文件狀態
 
