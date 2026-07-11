@@ -213,37 +213,52 @@
         "title": "Snipcode: Reveal Blamed Commit in Graph"
       },
       {
-        "command": "snipcode.scm.stage",
-        "title": "Snipcode Git: Stage Changes",
+        "command": "snipcode.git.stage",
+        "title": "Snipcode Git: Stage",
         "icon": "$(add)"
       },
       {
-        "command": "snipcode.scm.unstage",
-        "title": "Snipcode Git: Unstage Changes",
+        "command": "snipcode.git.unstage",
+        "title": "Snipcode Git: Unstage",
         "icon": "$(remove)"
       },
       {
-        "command": "snipcode.scm.stageAll",
-        "title": "Snipcode Git: Stage All Changes",
+        "command": "snipcode.git.stageAll",
+        "title": "Snipcode Git: Stage All",
         "icon": "$(add)"
       },
       {
-        "command": "snipcode.scm.unstageAll",
-        "title": "Snipcode Git: Unstage All Changes",
+        "command": "snipcode.git.unstageAll",
+        "title": "Snipcode Git: Unstage All",
         "icon": "$(remove)"
       },
       {
-        "command": "snipcode.scm.commit",
-        "title": "Snipcode Git: Commit",
-        "icon": "$(check)"
-      },
-      {
-        "command": "snipcode.scm.refresh",
+        "command": "snipcode.git.refresh",
         "title": "Snipcode Git: Refresh",
         "icon": "$(refresh)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "snipcode-git",
+          "title": "Snipcode Git",
+          "icon": "images/icon.svg"
+        }
+      ]
+    },
     "views": {
+      "snipcode-git": [
+        {
+          "id": "snipcode.commitBox",
+          "name": "Commit",
+          "type": "webview"
+        },
+        {
+          "id": "snipcode.changes",
+          "name": "Changes"
+        }
+      ],
       "scm": [
         {
           "id": "clipcode.history",
@@ -301,16 +316,6 @@
           "command": "gitGraphPlus.open",
           "group": "navigation",
           "when": "scmProvider == git"
-        },
-        {
-          "command": "snipcode.scm.commit",
-          "when": "scmProvider == snipcodeGit",
-          "group": "navigation@1"
-        },
-        {
-          "command": "snipcode.scm.refresh",
-          "when": "scmProvider == snipcodeGit",
-          "group": "navigation@2"
         }
       ],
       "explorer/context": [
@@ -334,16 +339,6 @@
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
-        },
-        {
-          "command": "snipcode.scm.stage",
-          "when": "scmProvider == snipcodeGit && scmResourceGroup == changes",
-          "group": "inline"
-        },
-        {
-          "command": "snipcode.scm.unstage",
-          "when": "scmProvider == snipcodeGit && scmResourceGroup == staged",
-          "group": "inline"
         }
       ],
       "scm/resourceGroup/context": [
@@ -351,19 +346,24 @@
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
-        },
-        {
-          "command": "snipcode.scm.stageAll",
-          "when": "scmProvider == snipcodeGit && scmResourceGroup == changes",
-          "group": "inline"
-        },
-        {
-          "command": "snipcode.scm.unstageAll",
-          "when": "scmProvider == snipcodeGit && scmResourceGroup == staged",
-          "group": "inline"
         }
       ],
       "view/title": [
+        {
+          "command": "snipcode.git.stageAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "snipcode.git.unstageAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "snipcode.git.refresh",
+          "when": "view == snipcode.changes",
+          "group": "navigation@3"
+        },
         {
           "command": "clipcode.history.switchRepository",
           "when": "view == clipcode.history",
@@ -436,6 +436,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "snipcode.git.stage",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.unstage",
+          "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "inline"
+        },
         {
           "command": "clipcode.history.copyFullSource",
           "when": "view == clipcode.history && viewItem =~ /^(commit|folder|file)$/",

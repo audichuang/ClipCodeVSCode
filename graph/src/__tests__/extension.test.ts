@@ -45,6 +45,10 @@ vi.mock('vscode', () => ({
   l10n: { t: (s: string) => s },
   Uri: { joinPath: () => ({}), file: (p: string) => ({ fsPath: p }), parse: () => ({}) },
   ViewColumn: { One: 1 },
+  EventEmitter: class { event = () => ({ dispose() {} }); fire() {} dispose() {} },
+  TreeItem: class { constructor(public label: unknown, public collapsibleState?: unknown) {} },
+  TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+  ThemeIcon: class { constructor(public id: string) {} },
 }));
 
 vi.mock('fs', () => ({ existsSync: vi.fn(() => true) }));
@@ -127,7 +131,7 @@ describe('activate', () => {
     expect(ctx.subscriptions.length).toBeGreaterThan(0);
   });
 
-  it('with a workspace folder, registers the full command set and all five tree views', () => {
+  it('with a workspace folder, registers the full command set and all tree views', () => {
     H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
     const ctx = makeContext();
     expect(() => activate(ctx)).not.toThrow();
@@ -142,6 +146,7 @@ describe('activate', () => {
       'gitGraphPlus.tags',
       'gitGraphPlus.stashes',
       'gitGraphPlus.worktrees',
+      'snipcode.changes',
     ]);
   });
 

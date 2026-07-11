@@ -2172,15 +2172,19 @@ export class GitService {
    * message when the index is empty (git would fail anyway). Returns the new
    * HEAD hash.
    */
-  async commitIndex(message: string): Promise<string> {
-    const indexEmpty = await this.exec(['diff', '--cached', '--quiet'], { silent: true })
-      .then(() => true)
-      .catch(err => {
-        if (err instanceof GitError && err.exitCode === 1) return false;
-        throw err;
-      });
-    if (indexEmpty) throw new Error('nothing staged to commit');
-    await this.exec(['commit', '-m', message]);
+  async commitIndex(message: string, opts?: { amend?: boolean }): Promise<string> {
+    // amend rewrites the previous commit, so an empty index is fine (reword);
+    // a normal commit requires something staged.
+    if (!opts?.amend) {
+      const indexEmpty = await this.exec(['diff', '--cached', '--quiet'], { silent: true })
+        .then(() => true)
+        .catch(err => {
+          if (err instanceof GitError && err.exitCode === 1) return false;
+          throw err;
+        });
+      if (indexEmpty) throw new Error('nothing staged to commit');
+    }
+    await this.exec(opts?.amend ? ['commit', '--amend', '-m', message] : ['commit', '-m', message]);
     return (await this.exec(['rev-parse', 'HEAD'])).trim();
   }
 

@@ -12,7 +12,8 @@ import { StashesViewProvider } from './views/stashes-view';
 import { WorktreesViewProvider } from './views/worktrees-view';
 import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
-import { SnipcodeScmManager } from './scm/snipcode-scm';
+import { ChangesWorkbench } from './tree/changes-workbench';
+import { CommitBoxViewProvider } from './tree/commit-box-view';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
 import { readTimeoutMs } from './utils/config';
@@ -184,17 +185,26 @@ export function activate(context: vscode.ExtensionContext) {
     worktreesView,
   );
 
-  // --- Snipcode Git (native SCM commit workbench, B-2) ---
-  const scmManager = new SnipcodeScmManager();
-  context.subscriptions.push(scmManager);
-  scmManager.registerCommands(context); // Task 3 adds this method.
-  void scmManager.init();
-  // One FileWatcher per discovered repo, funnelled through the manager's 300ms
-  // debounce. Dynamic repo add/remove re-wiring is B-2b.
+  // --- Snipcode Git commit workbench (TreeView + commit-box webview, B-2) ---
+  // TreeView paints Staged/Unstaged → repo → file (native file icons via
+  // resourceUri); the webview above it is the shared commit message box.
+  const workbench = new ChangesWorkbench();
+  context.subscriptions.push(
+    workbench,
+    vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true }),
+    vscode.window.registerWebviewViewProvider(
+      CommitBoxViewProvider.viewType,
+      new CommitBoxViewProvider(context.extensionUri, workbench),
+    ),
+  );
+  workbench.registerCommands(context);
+  void workbench.refresh();
+  // One FileWatcher per discovered repo, funnelled through the workbench's 300ms
+  // debounce. Dynamic repo add/remove re-wiring is a follow-up.
   const scmFolders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
   RepoDiscoveryService.discoverRepos(scmFolders).then(repos => {
     for (const r of repos) {
-      const w = new FileWatcher(r.path, () => scmManager.scheduleRefresh());
+      const w = new FileWatcher(r.path, () => workbench.scheduleRefresh());
       w.enabled = true;
       context.subscriptions.push(w);
     }
