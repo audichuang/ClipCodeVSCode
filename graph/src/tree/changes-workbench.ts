@@ -4,7 +4,7 @@ import { GitService } from '../git/git-service';
 import { RepoDiscoveryService } from '../services/repo-discovery';
 import { runExclusive } from '../services/mutation-coordinator';
 import { ChangesTreeProvider, type ChangeTreeNode } from './changes-tree';
-import type { RepoStatus, FileNode } from './build-change-tree';
+import type { RepoStatus, FileNode, RepoNode } from './build-change-tree';
 
 export interface CommitResult { repoName: string; ok: boolean; error?: string }
 
@@ -92,6 +92,26 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
   }
 
+  /** Stage every file of one repo (the repo node under Unstaged). */
+  private async stageRepo(node: RepoNode): Promise<void> {
+    const paths = node.files.map(f => f.path);
+    if (paths.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(paths));
+    await this.refresh();
+  }
+  /** Unstage every file of one repo (the repo node under Staged). */
+  private async unstageRepo(node: RepoNode): Promise<void> {
+    const paths = node.files.map(f => f.path);
+    if (paths.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths(paths));
+    await this.refresh();
+  }
+
+  /** Copy one changed file's content as a ClipCode payload (reuses the root
+   *  extension's copy command). Richer copy-the-diff is B-2b. */
+  private async copyAsClipCode(node: FileNode): Promise<void> {
+    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
+    await vscode.commands.executeCommand('clipcode.copyToClipboard', uri, [uri]);
+  }
+
   /** Stage every currently-unstaged file across all repos (re-reads live status
    *  so a file created since the last paint is not missed). */
   private async stageAll(): Promise<void> {
@@ -175,10 +195,13 @@ export class ChangesWorkbench implements vscode.Disposable {
       context.subscriptions.push(vscode.commands.registerCommand(id, fn));
     reg('snipcode.git.stage', (n) => this.stage(n as FileNode));
     reg('snipcode.git.unstage', (n) => this.unstage(n as FileNode));
+    reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
+    reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
+    reg('snipcode.git.copyAsClipCode', (n) => this.copyAsClipCode(n as FileNode));
     reg('snipcode.git.filterRepos', () => this.filterRepos());
   }
 
