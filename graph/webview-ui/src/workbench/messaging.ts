@@ -35,9 +35,6 @@ export function listenForHostMessages(): void {
   window.addEventListener('message', (e) => {
     const msg = e.data;
     switch (msg?.type) {
-      case 'workbenchStatus':
-        workbenchStore.setStatus(msg.payload);
-        break;
       case 'workbenchCommitResult':
         clearCommitTimer();
         workbenchStore.applyCommitResults(msg.payload.results);
@@ -63,15 +60,6 @@ export function postCommit(amend: boolean): void {
   }, COMMIT_TIMEOUT_MS);
   vscode.postMessage({
     type: 'workbenchCommit',
-    payload: {
-      message: workbenchStore.message,
-      amend,
-      // $state proxies must be snapshotted before postMessage (DataCloneError).
-      repos: JSON.parse(JSON.stringify(workbenchStore.selections())),
-    },
+    payload: { message: workbenchStore.message, amend },
   });
-}
-
-export function requestStatus(): void {
-  vscode.postMessage({ type: 'workbenchGetStatus' });
 }
