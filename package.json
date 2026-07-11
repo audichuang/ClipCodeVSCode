@@ -223,6 +223,21 @@
         "icon": "$(remove)"
       },
       {
+        "command": "snipcode.git.stageRepo",
+        "title": "Snipcode Git: Stage All in Repo",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.git.unstageRepo",
+        "title": "Snipcode Git: Unstage All in Repo",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.git.copyAsClipCode",
+        "title": "Snipcode Git: Copy as ClipCode",
+        "icon": "$(clippy)"
+      },
+      {
         "command": "snipcode.git.stageAll",
         "title": "Snipcode Git: Stage All",
         "icon": "$(add)"
@@ -455,6 +470,21 @@
           "command": "snipcode.git.unstage",
           "when": "view == snipcode.changes && viewItem == file-staged",
           "group": "inline"
+        },
+        {
+          "command": "snipcode.git.stageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.unstageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-staged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.copyAsClipCode",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "navigation@10"
         },
         {
           "command": "clipcode.history.copyFullSource",
