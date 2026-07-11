@@ -211,6 +211,36 @@
       {
         "command": "clipcode.blame.revealCommit",
         "title": "Snipcode: Reveal Blamed Commit in Graph"
+      },
+      {
+        "command": "snipcode.scm.stage",
+        "title": "Snipcode Git: Stage Changes",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.scm.unstage",
+        "title": "Snipcode Git: Unstage Changes",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.scm.stageAll",
+        "title": "Snipcode Git: Stage All Changes",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.scm.unstageAll",
+        "title": "Snipcode Git: Unstage All Changes",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.scm.commit",
+        "title": "Snipcode Git: Commit",
+        "icon": "$(check)"
+      },
+      {
+        "command": "snipcode.scm.refresh",
+        "title": "Snipcode Git: Refresh",
+        "icon": "$(refresh)"
       }
     ],
     "views": {
@@ -271,6 +301,16 @@
           "command": "gitGraphPlus.open",
           "group": "navigation",
           "when": "scmProvider == git"
+        },
+        {
+          "command": "snipcode.scm.commit",
+          "when": "scmProvider == snipcodeGit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "snipcode.scm.refresh",
+          "when": "scmProvider == snipcodeGit",
+          "group": "navigation@2"
         }
       ],
       "explorer/context": [
@@ -294,6 +334,16 @@
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
+        },
+        {
+          "command": "snipcode.scm.stage",
+          "when": "scmProvider == snipcodeGit && scmResourceGroup == changes",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.scm.unstage",
+          "when": "scmProvider == snipcodeGit && scmResourceGroup == staged",
+          "group": "inline"
         }
       ],
       "scm/resourceGroup/context": [
@@ -301,6 +351,16 @@
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
+        },
+        {
+          "command": "snipcode.scm.stageAll",
+          "when": "scmProvider == snipcodeGit && scmResourceGroup == changes",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.scm.unstageAll",
+          "when": "scmProvider == snipcodeGit && scmResourceGroup == staged",
+          "group": "inline"
         }
       ],
       "view/title": [

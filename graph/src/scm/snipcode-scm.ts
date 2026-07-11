@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GitService } from '../git/git-service';
 import { RepoDiscoveryService } from '../services/repo-discovery';
+import { runExclusive } from '../services/mutation-coordinator';
 
 /**
  * A resource state that remembers which repo + repo-relative path it maps to,
@@ -123,9 +124,101 @@ export class SnipcodeScmManager implements vscode.Disposable {
     this.refreshTimer = setTimeout(() => void this.refresh(), 300);
   }
 
-  /** Registered in Task 3. Placeholder keeps Task 2 compiling. */
-  registerCommands(_context: vscode.ExtensionContext): void {
-    // ponytail: filled in Task 3.
+  registerCommands(context: vscode.ExtensionContext): void {
+    const reg = (id: string, fn: (...args: unknown[]) => unknown) =>
+      context.subscriptions.push(vscode.commands.registerCommand(id, fn));
+
+    reg('snipcode.scm.stage', (...args) => this.stage(flattenResources(args)));
+    reg('snipcode.scm.unstage', (...args) => this.unstage(flattenResources(args)));
+    reg('snipcode.scm.stageAll', (arg) => this.stageAll(arg as vscode.SourceControl));
+    reg('snipcode.scm.unstageAll', (arg) => this.unstageAll(arg as vscode.SourceControl));
+    reg('snipcode.scm.commit', (arg) => this.commit(arg));
+    reg('snipcode.scm.refresh', () => this.refresh());
+  }
+
+  private async stage(resources: ScmResource[]): Promise<void> {
+    await this.runByRepo(resources, (repo, relPaths) => repo.svc.stagePaths(relPaths));
+    await this.refresh();
+  }
+
+  private async unstage(resources: ScmResource[]): Promise<void> {
+    await this.runByRepo(resources, (repo, relPaths) => repo.svc.unstagePaths(relPaths));
+    await this.refresh();
+  }
+
+  private async stageAll(sc: vscode.SourceControl): Promise<void> {
+    const found = this.findByControl(sc);
+    if (!found) return;
+    const [repoPath, repo] = found;
+    const relPaths = (repo.changesGroup.resourceStates as ScmResource[]).map(r => r.relPath);
+    if (relPaths.length) await runExclusive(repoPath, () => repo.svc.stagePaths(relPaths));
+    await this.refresh();
+  }
+
+  private async unstageAll(sc: vscode.SourceControl): Promise<void> {
+    const found = this.findByControl(sc);
+    if (!found) return;
+    const [repoPath, repo] = found;
+    const relPaths = (repo.stagedGroup.resourceStates as ScmResource[]).map(r => r.relPath);
+    if (relPaths.length) await runExclusive(repoPath, () => repo.svc.unstagePaths(relPaths));
+    await this.refresh();
+  }
+
+  /**
+   * acceptInputCommand passes a repoPath string; a scm/title commit button would
+   * pass the SourceControl. Accept both.
+   */
+  private async commit(arg: unknown): Promise<void> {
+    let repoPath: string | undefined;
+    if (typeof arg === 'string') {
+      repoPath = arg;
+    } else {
+      repoPath = this.findByControl(arg as vscode.SourceControl)?.[0];
+    }
+    if (!repoPath) return;
+    const repo = this.repos.get(repoPath);
+    if (!repo) return;
+    const message = repo.sc.inputBox.value.trim();
+    if (!message) {
+      void vscode.window.showWarningMessage('請先輸入提交訊息');
+      return;
+    }
+    if (repo.stagedGroup.resourceStates.length === 0) {
+      void vscode.window.showWarningMessage('沒有已暫存的變更可提交');
+      return;
+    }
+    try {
+      await runExclusive(repoPath, () => repo.svc.commitIndex(message));
+      repo.sc.inputBox.value = '';
+    } catch (err) {
+      void vscode.window.showErrorMessage(`提交失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+    await this.refresh();
+  }
+
+  /** Group resources by repo and run fn per repo under that repo's lock. */
+  private async runByRepo(
+    resources: ScmResource[],
+    fn: (repo: RepoScm, relPaths: string[]) => Promise<void>,
+  ): Promise<void> {
+    const byRepo = new Map<string, string[]>();
+    for (const r of resources) {
+      const list = byRepo.get(r.repoPath) ?? [];
+      list.push(r.relPath);
+      byRepo.set(r.repoPath, list);
+    }
+    for (const [repoPath, relPaths] of byRepo) {
+      const repo = this.repos.get(repoPath);
+      if (!repo) continue;
+      await runExclusive(repoPath, () => fn(repo, relPaths));
+    }
+  }
+
+  private findByControl(sc: vscode.SourceControl): [string, RepoScm] | undefined {
+    for (const [repoPath, repo] of this.repos) {
+      if (repo.sc === sc) return [repoPath, repo];
+    }
+    return undefined;
   }
 
   dispose(): void {
@@ -146,4 +239,24 @@ function statusTooltip(status: string): string {
     case 'N': return 'Nested repository';
     default: return status;
   }
+}
+
+/**
+ * SCM resource-state commands receive the selected resources as varargs; a
+ * multi-selection may arrive as a trailing array. Flatten to ScmResource[].
+ */
+function flattenResources(args: unknown[]): ScmResource[] {
+  const out: ScmResource[] = [];
+  for (const a of args) {
+    if (Array.isArray(a)) {
+      for (const x of a) if (isScmResource(x)) out.push(x);
+    } else if (isScmResource(a)) {
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+function isScmResource(x: unknown): x is ScmResource {
+  return !!x && typeof x === 'object' && 'repoPath' in x && 'relPath' in x;
 }
