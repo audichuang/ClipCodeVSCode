@@ -216,7 +216,7 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "snipcode.commitWorkbench-container",
+          "id": "snipcode-commit-workbench",
           "title": "Snipcode Git",
           "icon": "images/icon.svg"
         }
@@ -256,7 +256,7 @@
           "icon": "$(worktree)"
         }
       ],
-      "snipcode.commitWorkbench-container": [
+      "snipcode-commit-workbench": [
         {
           "id": "snipcode.commitWorkbench",
           "name": "Commit Workbench",
