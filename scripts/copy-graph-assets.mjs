@@ -23,13 +23,14 @@ for (const name of await readdir(viteDist)) {
   await cp(path.join(viteDist, name), path.join(outDir, name), { recursive: true });
 }
 
-// The multi-entry vite build must emit BOTH bundles; a rename/split would let
-// the workbench view 404 silently. Fail the build instead.
+// The graph and workbench have SEPARATE vite builds (vite.config.ts +
+// vite.workbench.config.ts); both self-contained bundles must land here or a
+// view boots blank. Fail the build instead of shipping a broken webview.
 for (const required of ['main.js', 'main.css', 'workbench.js', 'workbench.css']) {
   if (!existsSync(path.join(outDir, required))) {
     throw new Error(
       `graph webview asset missing after copy: ${required} ` +
-        `(vite multi-entry output changed? check webview-ui/vite.config.ts entryFileNames/cssCodeSplit)`,
+        `(vite output changed? check webview-ui/vite.config.ts + vite.workbench.config.ts)`,
     );
   }
 }
