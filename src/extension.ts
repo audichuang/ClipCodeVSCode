@@ -15,6 +15,7 @@ import { registerHistoryView } from './historyView.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
+import { registerBlame } from './blame/index.js';
 
 interface GitExtension {
   getAPI(version: 1): GitAPI;
@@ -32,6 +33,7 @@ interface GitRepository {
     workingTreeChanges?: GitChange[];
     untrackedChanges?: GitChange[];
     mergeChanges?: GitChange[];
+    HEAD?: { commit?: string; name?: string };
   };
   show?: (ref: string, path: string) => Promise<string>;
   buffer?: (ref: string, path: string) => Promise<Uint8Array>;
@@ -82,6 +84,15 @@ export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCo
   // Webview assets ship under dist/graph-webview (see esbuild build script).
   const assetRootUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'graph-webview');
   activateGraph(context, { assetRootUri, copyFullSourceAtCommit });
+
+  // Warm the cached vscode.git API so the (synchronous) blame deps below can
+  // use it once it resolves; reuses the existing getGitApi() accessor.
+  void getGitApi().then(api => { cachedGitApi = api; });
+  registerBlame(context, {
+    getGitPath: () => runtimeGitPath(),
+    resolveRepoRoot: (uri) => resolveRepoRootFor(uri)
+  });
+
   // VSCode exports — Task 7 E2E drives copyFullSourceAtCommit through this API.
   return { copyFullSourceAtCommit };
 }
@@ -187,6 +198,23 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
       notifyCopied(message, result.text);
     }
   }
+}
+
+// Cached vscode.git API for the blame controller's synchronous deps (Task 6).
+// Populated once by activate() via the existing getGitApi() accessor below;
+// blame silently no-ops until it resolves (git extension may still be
+// activating), which matches the "fail silently" contract for blame.
+let cachedGitApi: GitAPI | undefined;
+
+function runtimeGitPath(): string {
+  return cachedGitApi?.git?.path ?? 'git';
+}
+
+function resolveRepoRootFor(uri: vscode.Uri): { repoRoot: string; head: string } | undefined {
+  const repo = cachedGitApi?.repositories.find(r => uri.fsPath.startsWith(r.rootUri.fsPath));
+  if (!repo) return undefined;
+  const head = repo.state.HEAD?.commit ?? repo.state.HEAD?.name ?? 'HEAD';
+  return { repoRoot: repo.rootUri.fsPath, head };
 }
 
 export function deactivate(): void {}
