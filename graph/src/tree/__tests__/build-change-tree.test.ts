@@ -1,0 +1,53 @@
+import { describe, it, expect } from 'vitest';
+import { buildChangeTree, type RepoStatus } from '../build-change-tree';
+
+const repo = (over: Partial<RepoStatus>): RepoStatus => ({
+  repoName: 'r', repoPath: '/r', branch: 'main', staged: [], unstaged: [], ...over,
+});
+
+describe('buildChangeTree', () => {
+  it('always returns [Staged, Unstaged] groups, empty when nothing changed', () => {
+    const [staged, unstaged] = buildChangeTree([]);
+    expect(staged.group).toBe('staged');
+    expect(staged.label).toBe('Staged');
+    expect(staged.count).toBe(0);
+    expect(staged.repos).toEqual([]);
+    expect(unstaged.group).toBe('unstaged');
+    expect(unstaged.count).toBe(0);
+  });
+
+  it('groups files under Staged/Unstaged → repo → file across multiple repos', () => {
+    const [staged, unstaged] = buildChangeTree([
+      repo({ repoName: 'app', repoPath: '/app', staged: [{ path: 'a.ts', status: 'M' }], unstaged: [{ path: 'b.ts', status: 'M' }] }),
+      repo({ repoName: 'lib', repoPath: '/lib', unstaged: [{ path: 'c.ts', status: 'A' }] }),
+    ]);
+
+    // Staged: only app (1 file).
+    expect(staged.count).toBe(1);
+    expect(staged.repos.map((r) => r.repoName)).toEqual(['app']);
+    expect(staged.repos[0].files.map((f) => f.path)).toEqual(['a.ts']);
+    expect(staged.repos[0].files[0].group).toBe('staged');
+
+    // Unstaged: app (b) + lib (c) = 2 files across two repos.
+    expect(unstaged.count).toBe(2);
+    expect(unstaged.repos.map((r) => r.repoName)).toEqual(['app', 'lib']);
+    expect(unstaged.repos[1].files[0].path).toBe('c.ts');
+  });
+
+  it('shows a file that is both staged and unstaged (MM) under BOTH groups', () => {
+    const [staged, unstaged] = buildChangeTree([
+      repo({ repoPath: '/r', staged: [{ path: 'x.ts', status: 'M' }], unstaged: [{ path: 'x.ts', status: 'M' }] }),
+    ]);
+    expect(staged.repos[0].files[0].path).toBe('x.ts');
+    expect(unstaged.repos[0].files[0].path).toBe('x.ts');
+  });
+
+  it('carries repo branch and file status through (incl. rename R and untracked U)', () => {
+    const [staged, unstaged] = buildChangeTree([
+      repo({ repoName: 'app', branch: 'feature/x', staged: [{ path: 'new-name.ts', status: 'R' }], unstaged: [{ path: 'fresh.ts', status: 'U' }] }),
+    ]);
+    expect(staged.repos[0].branch).toBe('feature/x');
+    expect(staged.repos[0].files[0].status).toBe('R');
+    expect(unstaged.repos[0].files[0].status).toBe('U');
+  });
+});
