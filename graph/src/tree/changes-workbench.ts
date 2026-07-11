@@ -117,10 +117,24 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
   }
 
-  /** Copy the selected changed files' content as a ClipCode payload (reuses the
-   *  root extension's copy command). Richer copy-the-diff is B-2b. */
-  private async copyAsClipCode(nodes: FileNode[]): Promise<void> {
-    const uris = nodes.map(n => vscode.Uri.file(path.join(n.repoPath, n.path)));
+  /** Flatten any selected node(s) — file, repo, or group — to their file nodes. */
+  private nodeFiles(node: ChangeTreeNode): FileNode[] {
+    if (node.kind === 'file') return [node];
+    if (node.kind === 'repo') return node.files;
+    return node.repos.flatMap(r => r.files); // group → every repo's files
+  }
+
+  /** Copy the selected changes (file / repo / group) as a ClipCode payload,
+   *  de-duplicated. Reuses the root extension's copy command. Copy-the-diff is B-2b. */
+  private async copyAsClipCode(nodes: ChangeTreeNode[]): Promise<void> {
+    const seen = new Set<string>();
+    const uris: vscode.Uri[] = [];
+    for (const n of nodes.flatMap(x => this.nodeFiles(x))) {
+      const fsPath = path.join(n.repoPath, n.path);
+      if (seen.has(fsPath)) continue;
+      seen.add(fsPath);
+      uris.push(vscode.Uri.file(fsPath));
+    }
     if (uris.length) await vscode.commands.executeCommand('clipcode.copyToClipboard', uris[0], uris);
   }
 
@@ -208,17 +222,17 @@ export class ChangesWorkbench implements vscode.Disposable {
     // Tree commands are invoked as (clickedItem, selectedItems[]); with
     // canSelectMany the second arg carries the whole selection (undefined for an
     // inline button, which always acts on its single item).
-    const files = (n: unknown, ns: unknown): FileNode[] =>
-      Array.isArray(ns) && ns.length ? (ns as FileNode[]) : [n as FileNode];
-    reg('snipcode.git.stage', (n, ns) => this.stage(files(n, ns)));
-    reg('snipcode.git.unstage', (n, ns) => this.unstage(files(n, ns)));
+    const sel = <T>(n: unknown, ns: unknown): T[] =>
+      (Array.isArray(ns) && ns.length ? (ns as T[]) : [n as T]);
+    reg('snipcode.git.stage', (n, ns) => this.stage(sel<FileNode>(n, ns)));
+    reg('snipcode.git.unstage', (n, ns) => this.unstage(sel<FileNode>(n, ns)));
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
-    reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(files(n, ns)));
+    reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(sel<ChangeTreeNode>(n, ns)));
     reg('snipcode.git.filterRepos', () => this.filterRepos());
   }
 
