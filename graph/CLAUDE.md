@@ -86,6 +86,8 @@ All communication is via `postMessage` / `onDidReceiveMessage`. Message types ar
 
 > ⚠️ **Mutating-op refresh order:** handlers post `operationComplete` BEFORE `await refreshAll()`; the graph repaints only on `fullRefresh` (full scope) / `logData` (status scope). Webview state meaning "op done + graph updated" must key off `fullRefresh`/`logData` (+ `error`/`operationPaused`/`conflictData`), never the premature `operationComplete`.
 
+> ⚠️ **Request→response waits can fail or vanish.** On handler error the host posts `{type:'error', payload:{message, source:<request type>}}` — and some read handlers silently drop the response when the active repo switched mid-request. Any webview code that posts a request and waits for a specific reply MUST also handle the matching `error` (check `payload.source`) and bound the wait with a timeout, or its spinner/disabled button hangs forever (the squash-modal stuck-forever bug family). Correlate reused reply types by echoing a key (`base`, `requestId`) — a late reply from a previously open modal must not populate the wrong consumer.
+
 ### Internationalization
 - Extension strings: `l10n/bundle.l10n.json` (English), `l10n/bundle.l10n.ko.json` (Korean), `l10n/bundle.l10n.zh-cn.json` (Chinese Simplified), using VS Code's `vscode.l10n.t()`.
 - Webview strings: `webview-ui/src/lib/i18n/` — `en.ts`, `ko.ts`, `zh.ts`.
@@ -97,6 +99,7 @@ All communication is via `postMessage` / `onDidReceiveMessage`. Message types ar
 - `vscode` is an external dependency (not bundled) — provided by the VS Code runtime.
 - **`git/` modules stay free of any `vscode` import** so GitService and parsers remain unit-testable against the real git CLI. Anything vscode-aware (settings, the built-in git extension API) lives in `extension.ts`/`panels/` or a dedicated bridge (`vscode-git-bridge.ts`) and is injected in (e.g. `setGitBinaryPath`).
 - **Guard rapid async with `utils/sequence-guard.ts`** (`SequenceGuard`): `issue()` a ticket before a request, and only apply the result if the ticket `isCurrent()` after the await — prevents a late-finishing older request (rapid clicks on different commits/files) from overwriting a newer one.
+- **Mutating git commands are serialized** through `GitService.withMutationLock` — `exec()` routes worktree/index mutations through it (network-only `fetch`/`push` stay unlocked so a slow auto-fetch never queues a user action). A raw `spawn` that mutates the repo (e.g. `interactiveRebase`) must join the lock itself and `clearReadCache()` when done — bypassing `exec()` otherwise leaves stale read caches and `.git/index.lock` races. The lock is per-command; multi-command handler sequences can still interleave (known ceiling — upgrade to handler-level transactions if it bites).
 - User-facing settings live under the `gitGraphPlus.*` namespace and are read via `utils/config.ts` (e.g. `timeout` seconds → `GitService.setDefaultTimeout`, initial/load-more commit counts). Add new settings to `package.json` `contributes.configuration` and read them through there.
 - The extension activates on `onStartupFinished`; on activation it discovers repos in the workspace and is a no-op when none exist.
 - Tests use **Vitest**, split into two projects in `vitest.config.mts`:
