@@ -25,6 +25,35 @@ describe('commitAcrossRepos', () => {
     expect(commitSelected).toHaveBeenCalledWith('/b', '修正手續費計算', [{ path: 'y.ts', hunkIndices: [0] }], undefined);
   });
 
+  it('refuses amend spanning multiple repos before any commit runs (host-side D-guard)', async () => {
+    const commitSelected = vi.fn(async (repo: string) => `head-${repo}`);
+    await expect(
+      commitAcrossRepos(
+        { runExclusive: passthroughExclusive, commitSelected },
+        'reword',
+        [
+          { repoPath: '/a', files: [{ path: 'x.ts', hunkCount: 1 }] },
+          { repoPath: '/b', files: [{ path: 'y.ts', hunkCount: 1 }] },
+        ],
+        { amend: true },
+      ),
+    ).rejects.toThrow('amend can only target a single repo');
+    // No repo's HEAD was rewritten.
+    expect(commitSelected).not.toHaveBeenCalled();
+  });
+
+  it('allows amend for a single repo', async () => {
+    const commitSelected = vi.fn(async (repo: string) => `head-${repo}`);
+    const results = await commitAcrossRepos(
+      { runExclusive: passthroughExclusive, commitSelected },
+      'reword',
+      [{ repoPath: '/a', files: [{ path: 'x.ts', hunkCount: 1 }] }],
+      { amend: true },
+    );
+    expect(results).toEqual([{ repoPath: '/a', ok: true, newHead: 'head-/a' }]);
+    expect(commitSelected).toHaveBeenCalledWith('/a', 'reword', [{ path: 'x.ts', hunkIndices: [0] }], { amend: true });
+  });
+
   it('reports a per-repo failure without failing or re-committing the others', async () => {
     const commitSelected = vi.fn(async (repo: string) => {
       if (repo === '/b') throw new Error('pre-commit hook failed');
