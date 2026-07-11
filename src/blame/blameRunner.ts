@@ -46,6 +46,7 @@ export function defaultSpawnBlame(
       if (code === 0) resolve(out);
       else reject(new Error(`git blame exited ${code}`));
     });
+    child.stdin.on('error', () => {}); // ignore EPIPE if git exits before reading stdin
     child.stdin.end(stdin);
   });
 }

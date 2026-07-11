@@ -1,10 +1,14 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import { runBlame, defaultSpawnBlame } from './blameRunner.js';
 import { BlameCache, blameCacheKey } from './blameCache.js';
 import { formatRelativeTime, ageBucket, AGE_BUCKETS } from './blameFormat.js';
 import type { BlameLine } from './blameParser.js';
 
 const MAX_LINES = 20_000;
+// Coalesce the burst of onDidChangeTextDocument events fired per keystroke
+// into a single render, instead of spawning `git blame` on every character.
+const DOC_CHANGE_DEBOUNCE_MS = 300;
 
 export interface BlameDeps {
   getGitPath: () => string;
@@ -15,6 +19,7 @@ export class BlameController {
   private readonly enabled = new Set<string>(); // document URI strings
   private readonly cache = new BlameCache();
   private readonly types: vscode.TextEditorDecorationType[] = [];
+  private readonly docChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly deps: BlameDeps) {
     for (let i = 0; i < AGE_BUCKETS; i++) {
@@ -30,7 +35,12 @@ export class BlameController {
     }
   }
 
-  dispose(): void { for (const t of this.types) t.dispose(); }
+  dispose(): void {
+    for (const t of this.types) t.dispose();
+    for (const timer of this.docChangeTimers.values()) clearTimeout(timer);
+    this.docChangeTimers.clear();
+    this.cache.clear();
+  }
 
   async toggle(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
@@ -55,7 +65,19 @@ export class BlameController {
     }
   }
 
+  // Debounced: fires on every keystroke via onDidChangeTextDocument, so we
+  // coalesce bursts into one render ~DOC_CHANGE_DEBOUNCE_MS after the last one.
   async onDocChange(doc: vscode.TextDocument): Promise<void> {
+    const key = doc.uri.toString();
+    const existing = this.docChangeTimers.get(key);
+    if (existing) clearTimeout(existing);
+    this.docChangeTimers.set(key, setTimeout(() => {
+      this.docChangeTimers.delete(key);
+      void this.renderIfEnabled(doc);
+    }, DOC_CHANGE_DEBOUNCE_MS));
+  }
+
+  private async renderIfEnabled(doc: vscode.TextDocument): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document === doc && this.enabled.has(doc.uri.toString())) {
       await this.render(editor);
@@ -77,11 +99,14 @@ export class BlameController {
         lines = await runBlame({
           gitPath: this.deps.getGitPath(),
           repoRoot: info.repoRoot,
-          relPath: vscode.workspace.asRelativePath(doc.uri, false),
+          // Relative to the same repoRoot passed as `git -C`, not the
+          // workspace folder — they differ whenever the repo root is a
+          // subfolder of (or sibling to) the workspace folder.
+          relPath: path.relative(info.repoRoot, doc.uri.fsPath),
           contents: doc.getText(),
           spawnBlame: defaultSpawnBlame
         });
-        this.cache.set(cacheKey, lines);
+        this.cache.setForDoc(doc.uri.toString(), cacheKey, lines);
       } catch {
         this.clearDecorations(editor); // silent on failure
         return;
