@@ -23,6 +23,17 @@ for (const name of await readdir(viteDist)) {
   await cp(path.join(viteDist, name), path.join(outDir, name), { recursive: true });
 }
 
+// The multi-entry vite build must emit BOTH bundles; a rename/split would let
+// the workbench view 404 silently. Fail the build instead.
+for (const required of ['main.js', 'main.css', 'workbench.js', 'workbench.css']) {
+  if (!existsSync(path.join(outDir, required))) {
+    throw new Error(
+      `graph webview asset missing after copy: ${required} ` +
+        `(vite multi-entry output changed? check webview-ui/vite.config.ts entryFileNames/cssCodeSplit)`,
+    );
+  }
+}
+
 // 2. Codicons css + woff font. MainPanel links <assetRoot>/codicon.css, so both
 //    files must sit at the asset-dir root (the css references ./codicon.ttf).
 if (!existsSync(codiconsDist)) {
