@@ -35,6 +35,7 @@ vi.mock('vscode', () => ({
     showQuickPick: vi.fn(async () => undefined),
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     activeTextEditor: undefined,
+    registerWebviewViewProvider: () => ({ dispose() {} }),
   },
   commands: {
     registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => { H.registeredCommands.push(id); H.commandHandlers[id] = cb; return { dispose() {} }; },

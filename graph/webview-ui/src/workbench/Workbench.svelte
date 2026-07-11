@@ -67,6 +67,9 @@
   {/if}
 
   <div class="commit-box">
+    {#if store.commitError}
+      <p class="banner error">{store.commitError}</p>
+    {/if}
     <textarea
       bind:value={store.message}
       placeholder="commit message（共用一個，繁中）"

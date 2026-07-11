@@ -16,6 +16,20 @@ declare function acquireVsCodeApi(): VsCodeApi;
 // vscode-api.ts drags in uiStore, so we acquire locally in ~3 lines).
 const vscode = acquireVsCodeApi();
 
+// Guards the commit round-trip: cleared as soon as a terminal reply (result or
+// error) arrives; if the view gets disposed/reloaded mid-commit and neither
+// ever arrives, this fires so Commit/Amend don't stay disabled forever (the
+// squash-modal stuck-forever bug family — AGENTS.md).
+const COMMIT_TIMEOUT_MS = 30_000;
+let commitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearCommitTimer(): void {
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+  }
+}
+
 /** Wire the extension -> webview message handler. Call once at boot. */
 export function listenForHostMessages(): void {
   window.addEventListener('message', (e) => {
@@ -25,10 +39,14 @@ export function listenForHostMessages(): void {
         workbenchStore.setStatus(msg.payload);
         break;
       case 'workbenchCommitResult':
+        clearCommitTimer();
         workbenchStore.applyCommitResults(msg.payload.results);
         break;
       case 'error':
-        if (msg.payload?.source === 'workbenchCommit') workbenchStore.committing = false;
+        if (msg.payload?.source === 'workbenchCommit') {
+          clearCommitTimer();
+          workbenchStore.committing = false;
+        }
         break;
     }
   });
@@ -36,6 +54,13 @@ export function listenForHostMessages(): void {
 
 export function postCommit(amend: boolean): void {
   workbenchStore.committing = true;
+  workbenchStore.commitError = null;
+  clearCommitTimer();
+  commitTimer = setTimeout(() => {
+    commitTimer = null;
+    workbenchStore.committing = false;
+    workbenchStore.commitError = '提交逾時，未收到結果，請重新整理後確認狀態。';
+  }, COMMIT_TIMEOUT_MS);
   vscode.postMessage({
     type: 'workbenchCommit',
     payload: {
