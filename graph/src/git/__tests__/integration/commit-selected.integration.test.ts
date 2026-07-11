@@ -109,4 +109,23 @@ describe('GitService integration — commitSelected', () => {
       svc.commitSelected('should not run', [{ path: 'f.txt', hunkIndices: [0] }]),
     ).rejects.toThrow('in-progress merge');
   });
+
+  it('amends HEAD with the selected hunk instead of creating a new commit', async () => {
+    const before = head(repo.path);
+    const beforeCount = runGit(repo.path, ['rev-list', '--count', 'HEAD']).trim();
+
+    const newHash = await svc.commitSelected('修訂：併入第一個 hunk', [{ path: 'f.txt', hunkIndices: [0] }], { amend: true });
+
+    // Amend replaces HEAD → new SHA, but commit COUNT is unchanged (no new commit).
+    expect(newHash).not.toBe(before);
+    expect(newHash).toBe(head(repo.path));
+    expect(runGit(repo.path, ['rev-list', '--count', 'HEAD']).trim()).toBe(beforeCount);
+
+    // The amended tree carries hunk 0 (beta2), hunk 1 (xi) still uncommitted.
+    const committed = runGit(repo.path, ['show', 'HEAD:f.txt']);
+    expect(committed).toContain('\nbeta2\n');
+    expect(committed).toContain('\nxi\n');
+    expect(runGit(repo.path, ['status', '--porcelain', 'f.txt']).trim()).toBe('M f.txt');
+    expect(() => runGit(repo.path, ['diff', '--cached', '--quiet'])).not.toThrow();
+  });
 });
