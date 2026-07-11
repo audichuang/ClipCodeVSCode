@@ -189,7 +189,7 @@ export function activate(context: vscode.ExtensionContext) {
   // TreeView paints Staged/Unstaged → repo → file (native file icons via
   // resourceUri); the webview above it is the shared commit message box.
   const workbench = new ChangesWorkbench();
-  const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true });
+  const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true, canSelectMany: true });
   workbench.setView(changesView);
   changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));
   context.subscriptions.push(

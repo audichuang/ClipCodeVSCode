@@ -83,13 +83,25 @@ export class ChangesWorkbench implements vscode.Disposable {
     this.refreshTimer = setTimeout(() => void this.refresh(), 300);
   }
 
-  private async stage(node: FileNode): Promise<void> {
-    await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths([node.path]));
+  /** Group the selected file nodes by repo and run `fn` per repo under its lock. */
+  private async byRepo(nodes: FileNode[], fn: (svc: GitService, paths: string[]) => Promise<void>): Promise<void> {
+    const byRepo = new Map<string, string[]>();
+    for (const n of nodes) {
+      const list = byRepo.get(n.repoPath) ?? [];
+      list.push(n.path);
+      byRepo.set(n.repoPath, list);
+    }
+    for (const [repoPath, paths] of byRepo) {
+      await runExclusive(repoPath, () => fn(this.svcFor(repoPath), paths));
+    }
     await this.refresh();
   }
-  private async unstage(node: FileNode): Promise<void> {
-    await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths([node.path]));
-    await this.refresh();
+
+  private stage(nodes: FileNode[]): Promise<void> {
+    return this.byRepo(nodes, (svc, paths) => svc.stagePaths(paths));
+  }
+  private unstage(nodes: FileNode[]): Promise<void> {
+    return this.byRepo(nodes, (svc, paths) => svc.unstagePaths(paths));
   }
 
   /** Stage every file of one repo (the repo node under Unstaged). */
@@ -105,11 +117,11 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
   }
 
-  /** Copy one changed file's content as a ClipCode payload (reuses the root
-   *  extension's copy command). Richer copy-the-diff is B-2b. */
-  private async copyAsClipCode(node: FileNode): Promise<void> {
-    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
-    await vscode.commands.executeCommand('clipcode.copyToClipboard', uri, [uri]);
+  /** Copy the selected changed files' content as a ClipCode payload (reuses the
+   *  root extension's copy command). Richer copy-the-diff is B-2b. */
+  private async copyAsClipCode(nodes: FileNode[]): Promise<void> {
+    const uris = nodes.map(n => vscode.Uri.file(path.join(n.repoPath, n.path)));
+    if (uris.length) await vscode.commands.executeCommand('clipcode.copyToClipboard', uris[0], uris);
   }
 
   /** Stage every currently-unstaged file across all repos (re-reads live status
@@ -193,15 +205,20 @@ export class ChangesWorkbench implements vscode.Disposable {
   registerCommands(context: vscode.ExtensionContext): void {
     const reg = (id: string, fn: (...a: unknown[]) => unknown) =>
       context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-    reg('snipcode.git.stage', (n) => this.stage(n as FileNode));
-    reg('snipcode.git.unstage', (n) => this.unstage(n as FileNode));
+    // Tree commands are invoked as (clickedItem, selectedItems[]); with
+    // canSelectMany the second arg carries the whole selection (undefined for an
+    // inline button, which always acts on its single item).
+    const files = (n: unknown, ns: unknown): FileNode[] =>
+      Array.isArray(ns) && ns.length ? (ns as FileNode[]) : [n as FileNode];
+    reg('snipcode.git.stage', (n, ns) => this.stage(files(n, ns)));
+    reg('snipcode.git.unstage', (n, ns) => this.unstage(files(n, ns)));
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
-    reg('snipcode.git.copyAsClipCode', (n) => this.copyAsClipCode(n as FileNode));
+    reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(files(n, ns)));
     reg('snipcode.git.filterRepos', () => this.filterRepos());
   }
 
