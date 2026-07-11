@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.37
+
+- **Internal hardening of the repository-switch transaction** shipped in
+  0.3.36: the mutation/read classification of every webview message is now
+  enforced at compile time (an unclassified new message type fails the build
+  instead of silently skipping the transaction gate), the webview boot
+  handshake was simplified, and redundant guards were consolidated. No
+  user-facing behavior changes.
+
 ## 0.3.36
 
 - **Fixed a cross-repository mutation race:** switching the active repository
