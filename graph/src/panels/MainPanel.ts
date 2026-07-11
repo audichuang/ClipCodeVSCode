@@ -365,6 +365,23 @@ export class MainPanel {
       })
     );
 
+    /* SNIPCODE-HOOK start: webview boot handshake (e2e strategy #20)
+       The listener must be registered BEFORE webview.html is set — the old
+       order (html first, listener after) left a window where a fast-booting
+       webview's first message could be dropped. The first message received
+       also resolves whenWebviewReady(), which the open command returns so
+       e2e can detect a webview that never booted (asset 404 / CSP / bundle
+       syntax error / Svelte boot crash). */
+    this.panel.webview.onDidReceiveMessage(
+      (message: WebviewMessage) => {
+        this.markWebviewReady();
+        return this.handleMessage(message);
+      },
+      null,
+      this.disposables
+    );
+    /* SNIPCODE-HOOK end */
+
     this.panel.webview.html = this.getHtmlForWebview(this.panel.webview);
 
     // Send locale to webview
@@ -377,12 +394,6 @@ export class MainPanel {
     this.post({ type: 'setGraphColors', payload: { colors: this.readGraphColors() } });
     this.post({ type: 'setLoadMoreCount', payload: { count: readLoadMoreCommitCount() } });
     void this.postCommitLinkRules();
-
-    this.panel.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => this.handleMessage(message),
-      null,
-      this.disposables
-    );
 
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
 
@@ -457,6 +468,74 @@ export class MainPanel {
     await this.refreshAll();
   }
 
+  /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+     A multi-step mutation (e.g. stash → pull/ff → pop, checkout with
+     stash/clean/pullAfter, branch create+publish) must act on the repository
+     it started on. handleMessage() opens a gate for the whole dispatch of
+     every message type below; repo switches await ALL open gates (and
+     re-check disposal) before swapping this.gitService. Gates are a Set —
+     concurrent transactions must compose, or a short second transaction
+     finishing would release a switch while the first is still running. */
+  /* Every message type whose handler mutates the repository (worktree, index,
+     refs, stash, remotes, worktrees, LFS locks). Reads and pure-UI messages
+     stay ungated so a repo switch never has to wait on a slow log/compare —
+     their handlers are protected by isCurrentRepoSnapshot instead. Adding a
+     new mutating message type? Add it here. */
+  private static readonly MUTATION_TRANSACTION_TYPES = new Set<string>([
+    'abortMerge', 'abortOperation', 'abortRebase', 'addRemote', 'amendCommit',
+    'bisectBad', 'bisectGood', 'bisectReset', 'bisectSkip', 'bisectStart',
+    'checkout', 'cherryPick', 'commitFixup', 'commitSquash',
+    'continueOperation', 'continueRebase', 'createBranch', 'createTag',
+    'deleteBranch', 'deleteRemoteBranch', 'deleteRemoteTag', 'deleteTag',
+    'dragMerge', 'dragRebase', 'fastForward', 'fetch', 'flowAction',
+    'flowInit', 'interactiveRebase', 'lfsLock', 'lfsUnlock', 'merge',
+    'pruneWorktrees', 'pull', 'push', 'pushAllTags', 'pushTag', 'rebase',
+    'removeRemote', 'renameBranch', 'reset', 'restoreStashFiles',
+    'reverseCommitChanges', 'revert', 'rewordCommit', 'setUpstream',
+    'skipRebase', 'stageFile', 'stashApply', 'stashDrop', 'stashRename',
+    'stashSave', 'submoduleUpdate', 'worktreeAdd', 'worktreeRemove',
+  ]);
+
+  private readonly activeMutationTransactions = new Set<Promise<void>>();
+
+  private async awaitMutationTransactionIdle(): Promise<void> {
+    while (this.activeMutationTransactions.size > 0) {
+      await Promise.all([...this.activeMutationTransactions]);
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: webview boot handshake (e2e strategy #20) */
+  private webviewReady = false;
+  private webviewReadyWaiters: Array<{
+    resolve: () => void;
+    reject: (e: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+
+  private markWebviewReady(): void {
+    if (this.webviewReady) { return; }
+    this.webviewReady = true;
+    for (const w of this.webviewReadyWaiters) { clearTimeout(w.timer); w.resolve(); }
+    this.webviewReadyWaiters = [];
+  }
+
+  /**
+   * Resolves once the webview has sent its first message — proof the bundled
+   * JS booted under the real CSP. Rejects after timeoutMs, or on dispose.
+   */
+  public whenWebviewReady(timeoutMs = 15000): Promise<void> {
+    if (this.webviewReady) { return Promise.resolve(); }
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.webviewReadyWaiters = this.webviewReadyWaiters.filter(w => w.timer !== timer);
+        reject(new Error(`Git Graph webview sent no message within ${timeoutMs}ms (boot handshake failed)`));
+      }, timeoutMs);
+      this.webviewReadyWaiters.push({ resolve, reject, timer });
+    });
+  }
+  /* SNIPCODE-HOOK end */
+
   /**
    * Point the panel at a different repo: rebuild the GitService, reset
    * repo-specific state, swap the file watcher, and notify the sidebar. Callers
@@ -497,8 +576,42 @@ export class MainPanel {
     this.disposables.push(this.fileWatcher);
   }
 
+  /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7) —
+     monotonic ticket so the LATEST switch request wins over older queued
+     ones (a re-selection of the current repo also claims the ticket, which
+     cancels a stale queued switch to a different repo). */
+  private repoSwitchSeq = 0;
+  /* SNIPCODE-HOOK end */
+
   public async switchRepo(newPath: string): Promise<void> {
-    if (samePath(newPath, this.repoPath)) { return; }
+    /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+       Claim the latest-switch ticket BEFORE the same-path early return.
+       After the wait, drop the swap if the panel was disposed while queued
+       (swapping then would recreate a FileWatcher into the already-drained
+       disposables and leak it), if a newer switch request superseded this
+       one, or if we are already on the target. */
+    const seq = ++this.repoSwitchSeq;
+    if (samePath(newPath, this.repoPath)) {
+      // Re-selecting the current repo supersedes any queued switch (the seq
+      // claim above drops it) — but the extension host may have already moved
+      // its shared service/sidebar to that queued target eagerly (its
+      // switchToRepo runs before the panel's deferred swap). Resync AFTER the
+      // in-flight transaction settles (rebinding the service mid-transaction
+      // would change the lock domain under a running handler), then rebind to
+      // the shared instance so panel + sidebar keep coordinating their
+      // mutation locks and read caches. Both steps are no-ops when already
+      // aligned; the mutual samePath guards terminate the callback loop.
+      await this.awaitMutationTransactionIdle();
+      if (this.disposed || seq !== this.repoSwitchSeq) { return; }
+      MainPanel.onRepoChange?.(newPath);
+      if (samePath(newPath, this.repoPath)) {
+        this.gitService = this.createGitService(newPath);
+      }
+      return;
+    }
+    await this.awaitMutationTransactionIdle();
+    if (this.disposed || seq !== this.repoSwitchSeq || samePath(newPath, this.repoPath)) { return; }
+    /* SNIPCODE-HOOK end */
     this.swapRepo(newPath);
 
     this.post({
@@ -534,6 +647,25 @@ export class MainPanel {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+       Mutation handlers run as ONE transaction: the gate spans the ENTIRE
+       dispatch — terminal refresh and error/conflict handling included (the
+       catch in dispatchMessage reads conflict/operation state from
+       this.gitService) — so a queued repo switch cannot interleave with any
+       of it. Aborting midway is not an option either: it would strand the
+       origin repo in a stashed-but-not-restored state. */
+    if (MainPanel.MUTATION_TRANSACTION_TYPES.has(message.type)) {
+      const run = this.dispatchMessage(message);
+      const gate: Promise<void> = run.then(() => undefined, () => undefined);
+      this.activeMutationTransactions.add(gate);
+      void gate.then(() => { this.activeMutationTransactions.delete(gate); });
+      return run;
+    }
+    return this.dispatchMessage(message);
+  }
+  /* SNIPCODE-HOOK end */
+
+  private async dispatchMessage(message: WebviewMessage): Promise<void> {
     const repoAtMessageStart = this.repoPath;
     try {
       switch (message.type) {
@@ -803,28 +935,33 @@ export class MainPanel {
           break;
         }
         case 'fastForward': {
+          /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+             Pin the service for the whole stash→checkout→merge→pop sequence;
+             the transaction gate lives in handleMessage(). */
+          const svc = this.gitService;
+          /* SNIPCODE-HOOK end */
           if (message.payload.noCheckout) {
             // Update the (non-current) branch in place without switching to it.
             // Pure ref fast-forward — the working tree and current branch are
             // untouched, so no stash/clean dance is needed.
-            await this.gitService.fastForwardRef(message.payload.local, message.payload.remote);
+            await svc.fastForwardRef(message.payload.local, message.payload.remote);
           } else {
             // Fast-forward is a sync (like pull, and git's `merge --autostash`):
             // stash so the working tree is clean for the ff-merge, then pop to
             // restore the changes — unlike a plain checkout, which sets them aside.
             if (message.payload.stash) {
-              await this.gitService.stashSave('Auto-stash before fast-forward', message.payload.stashUntracked);
+              await svc.stashSave('Auto-stash before fast-forward', message.payload.stashUntracked);
             }
             if (message.payload.clean) {
-              await this.gitService.clean();
+              await svc.clean();
             }
             try {
-              await this.gitService.checkout(message.payload.local, {});
-              await this.gitService.merge(message.payload.remote, { ffOnly: true });
+              await svc.checkout(message.payload.local, {});
+              await svc.merge(message.payload.remote, { ffOnly: true });
             } finally {
               if (message.payload.stash) {
                 try {
-                  await this.gitService.stashPop(0);
+                  await svc.stashPop(0);
                 } catch {
                   this.post({ type: 'error', payload: { message: vscode.l10n.t('stashPopAfterFastForwardFailed') } });
                 }
@@ -977,15 +1114,20 @@ export class MainPanel {
           break;
         }
         case 'pull': {
+          /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+             Pin the service for the whole stash→pull→pop sequence; the
+             transaction gate lives in handleMessage(). */
+          const svc = this.gitService;
+          /* SNIPCODE-HOOK end */
           if (message.payload.stash) {
-            await this.gitService.stashSave('Auto-stash before pull');
+            await svc.stashSave('Auto-stash before pull');
           }
           try {
-            await this.gitService.pull(message.payload.remote, message.payload.branch, { rebase: message.payload.rebase });
+            await svc.pull(message.payload.remote, message.payload.branch, { rebase: message.payload.rebase });
           } finally {
             if (message.payload.stash) {
               try {
-                await this.gitService.stashPop(0);
+                await svc.stashPop(0);
               } catch {
                 this.post({ type: 'error', payload: { message: vscode.l10n.t('stashPopAfterPullFailed') } });
               }
@@ -1676,17 +1818,14 @@ export class MainPanel {
           if (!allowed) {
             throw new Error(`Repo not in discovered list: ${newPath}`);
           }
-          this.swapRepo(newPath);
-
-          // Update repo list in webview with cached repos but new active path.
-          // Send this BEFORE refreshAll so the dropdown updates instantly.
-          this.post({
-            type: 'repoList',
-            payload: { repos: this.cachedRepos, active: this.repoPath },
-          });
-
-          await this.refreshAll();
+          /* SNIPCODE-HOOK start: cross-repo mutation transaction (audit P1-7)
+             Delegate to switchRepo(): it owns the transaction wait, the
+             latest-request sequencing, and the disposal re-check, and its
+             body (swapRepo → repoList post → refreshAll) is identical to
+             what this case used to inline. */
+          await this.switchRepo(newPath);
           break;
+          /* SNIPCODE-HOOK end */
         }
         case 'stageFile': {
           await this.gitService.stageFile(message.payload.file);
@@ -1946,11 +2085,25 @@ export class MainPanel {
    *   (for the uncommitted summary row) — skipping four git spawns and the
    *   sidebar refresh — and sends a logData message that leaves branchData as-is.
    */
+  /* SNIPCODE-HOOK start: coalesced refresh completion (audit P1-7 review)
+     When refreshAll() coalesces into an already-running refresh it used to
+     return immediately — a mutation handler's terminal `await refreshAll()`
+     then resolved (releasing the transaction gate) before the repaint ran.
+     Callers now get a promise that settles when the QUEUED refresh completes. */
+  private queuedRefreshDone: Promise<void> | null = null;
+  private queuedRefreshResolve: (() => void) | null = null;
+  /* SNIPCODE-HOOK end */
+
   private async refreshAll(scope: 'full' | 'status' = 'full'): Promise<void> {
     if (this.refreshing) {
       this.refreshQueued = true;
       if (scope === 'full') this.queuedScope = 'full';
-      return;
+      /* SNIPCODE-HOOK start: coalesced refresh completion (audit P1-7 review) */
+      if (!this.queuedRefreshDone) {
+        this.queuedRefreshDone = new Promise<void>(r => { this.queuedRefreshResolve = r; });
+      }
+      return this.queuedRefreshDone;
+      /* SNIPCODE-HOOK end */
     }
     this.refreshing = true;
     this.refreshQueued = false;
@@ -2049,7 +2202,16 @@ export class MainPanel {
         this.refreshQueued = false;
         const next = this.queuedScope;
         this.queuedScope = 'status';
-        this.refreshAll(next);
+        /* SNIPCODE-HOOK start: coalesced refresh completion (audit P1-7 review)
+           Settle the coalesced callers' promise when their queued refresh
+           actually finishes (clear the slots first — the queued run may
+           coalesce new callers onto a fresh promise). */
+        const resolveQueued = this.queuedRefreshResolve;
+        this.queuedRefreshDone = null;
+        this.queuedRefreshResolve = null;
+        const queuedRun = this.refreshAll(next);
+        if (resolveQueued) { void queuedRun.finally(resolveQueued); }
+        /* SNIPCODE-HOOK end */
       }
     }
   }
@@ -2229,6 +2391,13 @@ export class MainPanel {
 
   private dispose(): void {
     this.disposed = true;
+    /* SNIPCODE-HOOK start: webview boot handshake (e2e strategy #20) */
+    for (const w of this.webviewReadyWaiters) {
+      clearTimeout(w.timer);
+      w.reject(new Error('Git Graph panel disposed before the webview became ready'));
+    }
+    this.webviewReadyWaiters = [];
+    /* SNIPCODE-HOOK end */
     MainPanel.savedRemoteFilter = this.currentRemoteFilter;
     MainPanel.savedBranchFilter = this.currentBranchFilter;
     // Drop any modal request that was queued for this panel but never delivered

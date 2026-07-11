@@ -26,6 +26,7 @@ const H = vi.hoisted(() => {
     checkout: vi.fn(async () => {}),
     pull: vi.fn(async () => {}),
     clean: vi.fn(async () => {}),
+    reset: vi.fn(async () => {}),
     setWarningHandler: vi.fn(),
     setAuthRetryHandler: vi.fn(),
     setExtraEnv: vi.fn(),
@@ -288,7 +289,36 @@ describe('MainPanel error handling', () => {
     expect(err.payload!.message).toContain('refresh blew up');
   });
 
-  it('does not probe the new repo for conflicts when the op fails after a repo switch', async () => {
+  // Reads are NOT in MUTATION_TRANSACTION_TYPES, so a repo switch can still
+  // land while one is in flight — the catch's isCurrentRepoSnapshot guard is
+  // what protects that path from probing the new repo's conflict state.
+  it('does not probe the new repo for conflicts when an ungated read fails after a repo switch', async () => {
+    H.repos = [
+      { path: '/repo', name: 'repo', type: 'root' },
+      { path: '/repo-b', name: 'repo-b', type: 'nested' },
+    ];
+    await dispatch({ type: 'getRepoList' });
+
+    let rejectLog!: (e: unknown) => void;
+    H.git.log.mockImplementationOnce(() => new Promise((_, rej) => { rejectLog = rej; }));
+    H.git.getConflictFiles.mockClear();
+
+    const logRequest = dispatch({ type: 'getLog', payload: {} });
+    await dispatch({ type: 'switchRepo', payload: { path: '/repo-b' } });
+    rejectLog(new GitError('CONFLICT', 1, ['log']));
+    await logRequest;
+
+    // The conflict probe would run against repo-b's service — it must be
+    // skipped, and no conflictData for the wrong repo may reach the webview.
+    expect(postedOfType('conflictData')).toHaveLength(0);
+    expect(H.git.getConflictFiles).not.toHaveBeenCalled();
+    const err = postedOfType('error').at(-1)!;
+    expect(err.payload!.message).toBeTruthy();
+  });
+
+  // Transaction-gated ops (audit P1-7): the switch must DEFER instead — the
+  // whole handler, conflict probing included, runs against the original repo.
+  it('defers a repo switch until a failing gated op finishes conflict handling', async () => {
     H.repos = [
       { path: '/repo', name: 'repo', type: 'root' },
       { path: '/repo-b', name: 'repo-b', type: 'nested' },
@@ -297,19 +327,27 @@ describe('MainPanel error handling', () => {
 
     let rejectMerge!: (e: unknown) => void;
     H.git.merge.mockImplementationOnce(() => new Promise((_, rej) => { rejectMerge = rej; }));
-    H.git.getConflictFiles.mockClear();
+    H.git.getConflictFiles.mockResolvedValue(['a.ts']);
+    H.git.getOperationState.mockResolvedValue({ type: 'merge' });
 
     const mergeRequest = dispatch({ type: 'merge', payload: { branch: 'feature' } });
-    await dispatch({ type: 'switchRepo', payload: { path: '/repo-b' } });
+    const switchRequest = dispatch({ type: 'switchRepo', payload: { path: '/repo-b' } });
+    await new Promise(r => setTimeout(r, 0));
+    // Gate held: the switch has not landed while the merge is in flight.
+    expect(postedOfType('repoList').some(m => m.payload!.active === '/repo-b')).toBe(false);
+
     rejectMerge(new GitError('CONFLICT', 1, ['merge']));
     await mergeRequest;
+    await switchRequest;
 
-    // The conflict probe would run against repo-b's service — it must be
-    // skipped, and no conflictData for the wrong repo may reach the webview.
-    expect(postedOfType('conflictData')).toHaveLength(0);
-    expect(H.git.getConflictFiles).not.toHaveBeenCalled();
-    const err = postedOfType('error').at(-1)!;
-    expect(err.payload!.message).toBeTruthy();
+    // Conflict handling ran (against the original repo — the switch was
+    // deferred), and the switch landed only after the handler finished.
+    expect(H.git.getConflictFiles).toHaveBeenCalled();
+    const posts = posted();
+    const conflictIdx = posts.findIndex(m => m.type === 'conflictData');
+    const switchIdx = posts.findIndex(m => m.type === 'repoList' && m.payload?.active === '/repo-b');
+    expect(conflictIdx).toBeGreaterThanOrEqual(0);
+    expect(switchIdx).toBeGreaterThan(conflictIdx);
   });
 });
 
