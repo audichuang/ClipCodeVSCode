@@ -143,6 +143,7 @@ export class GitService {
       case 'reset':
       case 'revert':
       case 'restore':
+      case 'rm':
       case 'switch':
       case 'am':
         return true;
@@ -2135,6 +2136,52 @@ export class GitService {
   async stageFile(filePath: string): Promise<void> {
     this.assertSafePath(filePath, 'add');
     await this.exec(['add', '--', filePath]);
+  }
+
+  /**
+   * Stage the given repo-relative paths into the index (`git add`). No-op on an
+   * empty list. Routes through exec() → withMutationLock (add is a mutation).
+   */
+  async stagePaths(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    for (const p of paths) this.assertSafePath(p, 'add');
+    await this.exec(['add', '--', ...paths]);
+  }
+
+  /**
+   * Remove the given repo-relative paths from the index, keeping working-tree
+   * changes. With a HEAD this is `git reset -q HEAD -- <paths>`; under an unborn
+   * HEAD (no commits yet) there is no tree to reset against, so unstage by
+   * dropping the index entries with `git rm --cached`.
+   */
+  async unstagePaths(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    for (const p of paths) this.assertSafePath(p, 'reset');
+    const hasHead = await this.exec(['rev-parse', '--verify', 'HEAD'], { silent: true })
+      .then(() => true)
+      .catch(() => false);
+    if (hasHead) {
+      await this.exec(['reset', '--quiet', 'HEAD', '--', ...paths]);
+    } else {
+      await this.exec(['rm', '--cached', '--quiet', '--', ...paths]);
+    }
+  }
+
+  /**
+   * Commit whatever is currently staged (`git commit -m`). Throws with a clear
+   * message when the index is empty (git would fail anyway). Returns the new
+   * HEAD hash.
+   */
+  async commitIndex(message: string): Promise<string> {
+    const indexEmpty = await this.exec(['diff', '--cached', '--quiet'], { silent: true })
+      .then(() => true)
+      .catch(err => {
+        if (err instanceof GitError && err.exitCode === 1) return false;
+        throw err;
+      });
+    if (indexEmpty) throw new Error('nothing staged to commit');
+    await this.exec(['commit', '-m', message]);
+    return (await this.exec(['rev-parse', 'HEAD'])).trim();
   }
 
   async getConflictFiles(): Promise<string[]> {
