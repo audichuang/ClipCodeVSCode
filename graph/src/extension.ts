@@ -12,6 +12,7 @@ import { StashesViewProvider } from './views/stashes-view';
 import { WorktreesViewProvider } from './views/worktrees-view';
 import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
+import { CommitWorkbenchViewProvider } from './workbench/CommitWorkbenchViewProvider';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
 import { readTimeoutMs } from './utils/config';
@@ -182,6 +183,26 @@ export function activate(context: vscode.ExtensionContext) {
     stashesView,
     worktreesView,
   );
+
+  // --- Commit Workbench (Activity Bar side panel, Slice B) ---
+  const workbenchProvider = new CommitWorkbenchViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      CommitWorkbenchViewProvider.viewType,
+      workbenchProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+  // ponytail: one FileWatcher per discovered repo, all funnelled through the
+  // provider's 300ms debounce. Dynamic repo add/remove re-wiring is B-2b.
+  const workbenchFolders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+  RepoDiscoveryService.discoverRepos(workbenchFolders).then(repos => {
+    for (const r of repos) {
+      const w = new FileWatcher(r.path, () => workbenchProvider.scheduleRefresh());
+      w.enabled = true;
+      context.subscriptions.push(w);
+    }
+  }).catch(() => {});
 
   // Prefetch all tree view data in parallel so first expand is instant
   Promise.all([
