@@ -2226,7 +2226,11 @@ export class GitService {
    * execUnlocked directly (exec would re-enter the lock and deadlock). Read-only
    * commands use exec, which does not take the lock for reads.
    */
-  async commitSelected(message: string, files: Array<{ path: string; hunkIndices: number[] }>): Promise<string> {
+  async commitSelected(
+    message: string,
+    files: Array<{ path: string; hunkIndices: number[] }>,
+    opts?: { amend?: boolean },
+  ): Promise<string> {
     return this.withMutationLock(async () => {
       // D4: no in-progress operation.
       const opState = await this.getRepoOperationState();
@@ -2262,7 +2266,12 @@ export class GitService {
           // (same as reverseCommitChanges); --cached stages into the index only.
           await this.execUnlocked(['apply', '--cached'], { stdin: patch });
         }
-        await this.execUnlocked(['commit', '-m', message]);
+        // Amend folds the freshly-staged hunks into HEAD (no new commit); a plain
+        // commit creates one. Both use -m with the shared workbench message.
+        const commitArgs = opts?.amend
+          ? ['commit', '--amend', '-m', message]
+          : ['commit', '-m', message];
+        await this.execUnlocked(commitArgs);
       } catch (err) {
         // Undo any partial staging so a failed commit leaves a clean index; the
         // working tree was never touched, so a mixed reset restores the
