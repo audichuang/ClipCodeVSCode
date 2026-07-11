@@ -54,7 +54,7 @@ with a SHA guard so the copies can't drift. To change the format: edit both impl
 - **root `src/`** — the Snipcode extension host, the part you usually edit:
   copy/restore, git-aware copy, path filtering, the git history view.
 - **`graph/`** — a *vendored* copy of git-graph-plus (its own Svelte webview and
-  build). It has its own context — see `graph/CLAUDE.md`. The host bundles its
+  build). It has its own context — see `graph/AGENTS.md`. The host bundles its
   webview assets via `scripts/copy-graph-assets.mjs`; its **extension-host** code
   (`graph/src/*.ts`) ships because root `src/extension.ts` does
   `require('../graph/src/extension')`, so `build:host` (esbuild) pulls it into
