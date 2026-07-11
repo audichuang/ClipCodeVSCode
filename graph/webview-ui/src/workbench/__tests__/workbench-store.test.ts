@@ -66,6 +66,19 @@ describe('workbenchStore selection', () => {
     expect(workbenchStore.repoTriState('/a')).toBe('some');
   });
 
+  it('setStatus drops a selection for a repo that just became commit-disabled', () => {
+    workbenchStore.toggleFile('/a', 'x.ts');
+    expect(workbenchStore.repoTriState('/a')).toBe('some');
+    workbenchStore.setStatus({
+      repos: [
+        { ...status.repos[0], commitDisabledReason: '此 repo 有進行中的 merge，請先完成或中止' },
+        status.repos[1],
+      ],
+    });
+    expect(workbenchStore.repoTriState('/a')).toBe('none');
+    expect(workbenchStore.selections()).toEqual([]);
+  });
+
   it('applyCommitResults clears selection for succeeded repos, keeps failed', () => {
     workbenchStore.toggleFile('/a', 'x.ts');
     workbenchStore.applyCommitResults([{ repoPath: '/a', ok: false, error: 'hook' }]);

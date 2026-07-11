@@ -30,6 +30,8 @@ class WorkbenchStore {
   collapsed = $state<Record<string, boolean>>({});
   message = $state('');
   committing = $state(false);
+  /** Soft error surfaced when a commit round-trip times out (view disposed/reloaded mid-commit). */
+  commitError = $state<string | null>(null);
 
   reset(): void {
     this.repos = [];
@@ -37,15 +39,18 @@ class WorkbenchStore {
     this.collapsed = {};
     this.message = '';
     this.committing = false;
+    this.commitError = null;
   }
 
   setStatus(status: WbStatus): void {
     this.repos = status.repos;
-    // Drop checks for files/repos that no longer exist; keep the rest.
+    // Drop checks for files/repos that no longer exist, or that just became
+    // commit-disabled (e.g. a merge started between refreshes) — otherwise the
+    // UI shows a checked-yet-uncheckable repo that canCommit still counts.
     const next: Record<string, Set<string>> = {};
     for (const repo of status.repos) {
       const prev = this.checked[repo.repoPath];
-      if (!prev) continue;
+      if (!prev || repo.commitDisabledReason != null) continue;
       const paths = new Set(repo.files.map((f) => f.path));
       const kept = new Set([...prev].filter((p) => paths.has(p)));
       if (kept.size) next[repo.repoPath] = kept;
