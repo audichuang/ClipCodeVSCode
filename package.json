@@ -236,6 +236,11 @@
         "command": "snipcode.git.refresh",
         "title": "Snipcode Git: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "snipcode.git.filterRepos",
+        "title": "Snipcode Git: Filter Repos",
+        "icon": "$(filter)"
       }
     ],
     "viewsContainers": {
@@ -250,13 +255,13 @@
     "views": {
       "snipcode-git": [
         {
+          "id": "snipcode.changes",
+          "name": "Changes"
+        },
+        {
           "id": "snipcode.commitBox",
           "name": "Commit",
           "type": "webview"
-        },
-        {
-          "id": "snipcode.changes",
-          "name": "Changes"
         }
       ],
       "scm": [
@@ -349,6 +354,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "snipcode.git.filterRepos",
+          "when": "view == snipcode.changes",
+          "group": "navigation@0"
+        },
         {
           "command": "snipcode.git.stageAll",
           "when": "view == snipcode.changes",

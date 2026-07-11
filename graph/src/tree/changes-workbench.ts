@@ -20,9 +20,17 @@ export class ChangesWorkbench implements vscode.Disposable {
   private readonly svcs = new Map<string, GitService>();
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** null = show every repo; a Set restricts the tree (and stage/commit-all) to
+   *  the chosen repo paths. Set via the "Filter Repos" command. */
+  private repoFilter: Set<string> | null = null;
+  private view: vscode.TreeView<unknown> | undefined;
+
   constructor() {
     this.tree = new ChangesTreeProvider(() => this.loadStatus());
   }
+
+  /** Lets the workbench show the active filter in the tree's message bar. */
+  setView(view: vscode.TreeView<unknown>): void { this.view = view; }
 
   private svcFor(repoPath: string): GitService {
     let svc = this.svcs.get(repoPath);
@@ -30,10 +38,15 @@ export class ChangesWorkbench implements vscode.Disposable {
     return svc;
   }
 
-  /** Discover repos and read each one's staged/unstaged status + branch. */
-  private async loadStatus(): Promise<RepoStatus[]> {
+  private async discover(): Promise<{ path: string }[]> {
     const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
     const found = await RepoDiscoveryService.discoverRepos(folders).catch(() => []);
+    return this.repoFilter ? found.filter(r => this.repoFilter!.has(r.path)) : found;
+  }
+
+  /** Discover repos (respecting the filter) and read each one's status + branch. */
+  private async loadStatus(): Promise<RepoStatus[]> {
+    const found = await this.discover();
     const out: RepoStatus[] = [];
     for (const r of found) {
       const svc = this.svcFor(r.path);
@@ -107,6 +120,39 @@ export class ChangesWorkbench implements vscode.Disposable {
     }
   }
 
+  /** Multi-select which repos the Changes tree shows. Picking all (or none)
+   *  clears the filter back to "show every repo". */
+  private async filterRepos(): Promise<void> {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+    const all = await RepoDiscoveryService.discoverRepos(folders).catch(() => []);
+    if (all.length === 0) {
+      void vscode.window.showInformationMessage('沒有偵測到 git repo');
+      return;
+    }
+    const items = all.map(r => ({
+      label: path.basename(r.path),
+      description: r.path,
+      repoPath: r.path,
+      picked: this.repoFilter ? this.repoFilter.has(r.path) : true,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      canPickMany: true,
+      title: 'Snipcode Git：顯示哪些 repo',
+      placeHolder: '勾選要顯示的 repo（全選＝顯示全部）',
+    });
+    if (picked === undefined) return; // cancelled — keep current filter
+    // All (or nothing) selected → no filter; otherwise restrict to the picks.
+    this.repoFilter = picked.length === 0 || picked.length === all.length
+      ? null
+      : new Set(picked.map(p => p.repoPath));
+    if (this.view) {
+      this.view.message = this.repoFilter
+        ? `已篩選 ${this.repoFilter.size} / ${all.length} 個 repo`
+        : undefined;
+    }
+    await this.refresh();
+  }
+
   registerCommands(context: vscode.ExtensionContext): void {
     const reg = (id: string, fn: (...a: unknown[]) => unknown) =>
       context.subscriptions.push(vscode.commands.registerCommand(id, fn));
@@ -116,6 +162,7 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
+    reg('snipcode.git.filterRepos', () => this.filterRepos());
   }
 
   dispose(): void {
