@@ -489,16 +489,15 @@
                             disabled={stageBusy}
                             aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
                             title={staged ? t('file.unstageLines') : t('file.stageLines')}>
-                      <i class="codicon {staged ? 'codicon-remove' : 'codicon-add'}"></i>
-                      <span>{staged ? t('file.unstageLines') : t('file.stageLines')} ({selectedChangedIndices.length})</span>
+                      <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                      <span>{selectedChangedIndices.length}</span>
                     </button>
                   {/if}
                   <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
                           disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
                           title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
-                    <i class="codicon {staged ? 'codicon-remove' : 'codicon-add'}"></i>
-                    <span>{staged ? t('file.unstageHunk') : t('file.stageHunk')}</span>
+                    <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
                   </button>
                 {/if}
                 <!-- SNIPCODE-HOOK end -->
@@ -548,7 +547,7 @@
                           disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
                           title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
-                    {staged ? t('file.unstageHunk') : t('file.stageHunk')}
+                    <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
                   </button>
                 {/if}
                 <!-- SNIPCODE-HOOK end -->
@@ -771,14 +770,19 @@
     right: 8px;
     z-index: 2;
     opacity: 0;
-    padding: 1px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
     border: 1px solid var(--vscode-focusBorder, #4a9eff);
-    border-radius: 3px;
+    border-radius: 4px;
     background: var(--vscode-button-background, #0e639c);
     color: var(--vscode-button-foreground, #fff);
     cursor: pointer;
-    font-size: 0.85em;
-    white-space: nowrap;
+    font-size: 1.05em;
+    line-height: 1;
   }
   .sbs-hunk.hunk-hover .sbs-stage-btn,
   .sbs-stage-btn:focus {

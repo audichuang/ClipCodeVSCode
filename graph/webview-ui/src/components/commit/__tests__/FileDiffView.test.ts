@@ -551,7 +551,8 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     const { container } = render(FileDiffView, { diff: sampleDiff(), staged: false, onStageHunk });
     const btn = container.querySelector('.hunk-stage-btn');
     expect(btn).not.toBeNull();
-    expect(btn!.textContent).toContain('Stage Hunk');
+    // Arrow-icon button (B): the label lives on aria-label/title, not text.
+    expect(btn!.getAttribute('aria-label')).toBe('Stage Hunk');
     await fireEvent.click(btn!);
     expect(onStageHunk).toHaveBeenCalledTimes(1);
     expect(onStageHunk.mock.calls[0][0]).toEqual({ file: 'src/foo.ts', hunkIndex: 0 });
@@ -559,7 +560,7 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
 
   it('labels the button "Unstage Hunk" on a staged diff', () => {
     const { container } = render(FileDiffView, { diff: sampleDiff(), staged: true, onStageHunk: vi.fn() });
-    expect(container.querySelector('.hunk-stage-btn')!.textContent).toContain('Unstage Hunk');
+    expect(container.querySelector('.hunk-stage-btn')!.getAttribute('aria-label')).toBe('Unstage Hunk');
   });
 
   it('renders no stage button when onStageHunk is not provided', () => {
@@ -578,7 +579,7 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     });
     const btn = container.querySelector('.sbs-stage-btn');
     expect(btn).not.toBeNull();
-    expect(btn!.textContent).toContain('Stage Hunk');
+    expect(btn!.getAttribute('aria-label')).toBe('Stage Hunk');
   });
 
   it('offers Stage Selected Lines and posts the changed indices (unstaged view)', async () => {
@@ -596,11 +597,10 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     const gutters = container.querySelectorAll('.line-gutter');
     await fireEvent.mouseDown(gutters[1], { button: 0 });
 
-    // The "Stage Selected Lines (1)" button now appears; click it.
-    const btn = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent?.includes('Stage Selected Lines'),
-    );
+    // The arrow "Stage Selected Lines" button now appears; click it.
+    const btn = container.querySelector('.hunk-stage-lines-btn');
     expect(btn).toBeTruthy();
+    expect(btn!.getAttribute('aria-label')).toBe('Stage Selected Lines');
     await fireEvent.click(btn!);
 
     expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });
