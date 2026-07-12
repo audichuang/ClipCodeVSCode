@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
+import { readFile } from 'fs/promises';
 import { MainPanel } from './MainPanel';
 import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
@@ -18,6 +19,13 @@ import type { ChangesWorkbench } from '../tree/changes-workbench';
  *  (stale click racing a navigation, or a forged payload) — unlocks the webview's
  *  busy gate instead of leaving it to the timeout. */
 const STALE_TARGET = 'Stale stage request — the shown file changed';
+
+/** Same map MainPanel's getImageAtRef uses for its commit-view ImageDiff. */
+const MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
+  '.webp': 'image/webp', '.ico': 'image/x-icon',
+};
 
 export class DiffPanel {
   static readonly viewType = 'snipcode.diffPanel';
@@ -100,6 +108,14 @@ export class DiffPanel {
         if (this.current) { void this.push(this.current, this.seq.issue()); }
         return;
       }
+      // ImageDiff (inside FileDiffView) fetches both sides' bytes itself; without
+      // this case an image file's sections would sit blank forever (MainPanel has
+      // the equivalent handler for the graph's commit view).
+      if (msg?.type === 'getImageAtRef') {
+        const { ref, path: filePath } = msg.payload ?? {};
+        await this.sendImage(panel, String(ref), String(filePath));
+        return;
+      }
       /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage. */
       if (msg?.type === 'diffStageLines') {
         const { repoPath, file, side, hunkIndex, lineIndices } = msg.payload ?? {};
@@ -118,8 +134,12 @@ export class DiffPanel {
           // stageLines/unstageLines call refreshIfCurrent → re-push the new diff.
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message } });
+          // Notify first: posting to a webview the user closed mid-op throws and
+          // would otherwise swallow the notification too.
           void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
+          if (this.panel === panel) {
+            panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message } });
+          }
         }
         return;
       }
@@ -139,8 +159,10 @@ export class DiffPanel {
         // stageHunks/unstageHunks call refreshIfCurrent → re-push the new diff.
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message } });
         void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
+        if (this.panel === panel) {
+          panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message } });
+        }
       }
     });
 
@@ -167,6 +189,32 @@ export class DiffPanel {
     ]);
     if (!this.seq.isCurrent(ticket) || !this.panel) { return; } // superseded / disposed
     this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, stagedDiff, unstagedDiff } });
+  }
+
+  /** Serve one side of an ImageDiff. Mirrors MainPanel's getImageAtRef: 'working'
+   *  reads the working tree (guarded against escaping the repo), anything else is
+   *  a git ref; failure posts base64:'' so the webview shows its empty state. */
+  private async sendImage(panel: vscode.WebviewPanel, ref: string, filePath: string): Promise<void> {
+    if (!this.current) { return; }
+    const { repoPath } = this.current;
+    const ext = '.' + (filePath.split('.').pop()?.toLowerCase() ?? '');
+    const mimeType = MIME_BY_EXT[ext] ?? 'image/png';
+    let base64 = '';
+    try {
+      if (ref === 'working') {
+        const fullPath = path.join(repoPath, filePath);
+        const relative = path.relative(repoPath, fullPath);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+          throw new Error('Invalid file path');
+        }
+        base64 = (await readFile(fullPath)).toString('base64');
+      } else {
+        base64 = await this.workbench.imageBase64(repoPath, ref, filePath);
+      }
+    } catch { /* empty base64 → ImageDiff renders its missing-side state */ }
+    if (this.panel === panel) {
+      panel.webview.postMessage({ type: 'imageData', payload: { ref, path: filePath, base64, mimeType } });
+    }
   }
 
   private postLocale(panel: vscode.WebviewPanel): void {
