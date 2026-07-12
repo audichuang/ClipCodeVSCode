@@ -3,27 +3,23 @@ import { diffStore } from '../diff-store.svelte';
 import { listenForHostMessages, postStageHunk, postStageLines } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
 
-// NOTE: getVsCodeApi() calls acquireVsCodeApi() once, memoized at module-eval
-// time (imports are hoisted above this file's own statements), so it always
-// binds to the webview-project setup file's recording stub
-// (webview-ui/src/__tests__/setup.ts), never a locally-reassigned one — the
-// same reason every other webview test that asserts posted messages
-// (ImageDiff.test.ts, PrView.test.ts, ...) reads `globalThis.__postedMessages`
-// instead of installing its own acquireVsCodeApi spy.
+const emptyDiff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
+
 beforeEach(() => {
   diffStore.reset();
   globalThis.__postedMessages = [];
 });
 
 describe('diff messaging', () => {
-  it('diffShow populates the store', () => {
+  it('diffShow populates both sides of the store', () => {
     listenForHostMessages();
-    const diff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', diff } },
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: emptyDiff, unstagedDiff: null } },
     }));
     expect(diffStore.file).toBe('src/a.ts');
-    expect(diffStore.side).toBe('unstaged');
+    expect(diffStore.stagedDiff).not.toBeNull();
+    expect(diffStore.unstagedDiff).toBeNull();
+    expect(diffStore.loaded).toBe(true);
   });
 
   it('setLocale switches the i18n locale', () => {
@@ -34,15 +30,26 @@ describe('diff messaging', () => {
     expect(i18n.locale).toBe('zh');
   });
 
-  it('postStageHunk posts diffStageHunk with the current file + side', () => {
-    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
-    postStageHunk(2);
+  it('postStageHunk posts diffStageHunk with the given side', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 2);
     expect(globalThis.__postedMessages).toContainEqual({
-      data: {
-        type: 'diffStageHunk',
-        payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 2 },
-      },
+      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 2 } },
     });
+  });
+
+  it('postStageHunk on the staged side posts side:staged', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', emptyDiff, null);
+    postStageHunk('staged', 0);
+    expect(globalThis.__postedMessages).toContainEqual({
+      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'staged', hunkIndex: 0 } },
+    });
+  });
+
+  it('postStageHunk is dropped when the requested side has no diff', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff); // staged is null
+    postStageHunk('staged', 0);
+    expect(globalThis.__postedMessages).toHaveLength(0);
   });
 
   it('an error message for diffStageHunk sets store.error', () => {
@@ -54,35 +61,28 @@ describe('diff messaging', () => {
   });
 
   it('postStageHunk sets busy and ignores a second call until unlocked', () => {
-    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
-    postStageHunk(0);
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
-    postStageHunk(1); // dropped: a hunk op is already in flight
+    postStageHunk('unstaged', 1); // dropped: an op is already in flight
     expect(globalThis.__postedMessages).toHaveLength(1);
-    expect(globalThis.__postedMessages).toContainEqual({
-      data: {
-        type: 'diffStageHunk',
-        payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0 },
-      },
-    });
   });
 
   it('diffShow clears busy so the next stage click is allowed again', () => {
     listenForHostMessages();
-    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
-    postStageHunk(0);
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
-    const diff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', diff } },
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
     }));
     expect(diffStore.busy).toBe(false);
   });
 
   it('an error reply also clears busy', () => {
     listenForHostMessages();
-    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
-    postStageHunk(0);
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
     window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'error', payload: { source: 'diffStageHunk', message: 'nope' } },
@@ -90,14 +90,11 @@ describe('diff messaging', () => {
     expect(diffStore.busy).toBe(false);
   });
 
-  it('postStageLines posts diffStageLines with the current file + side + indices', () => {
-    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
-    postStageLines(0, [1, 2]);
+  it('postStageLines posts diffStageLines with side + indices', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageLines('unstaged', 0, [1, 2]);
     expect(globalThis.__postedMessages).toContainEqual({
-      data: {
-        type: 'diffStageLines',
-        payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] },
-      },
+      data: { type: 'diffStageLines', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] } },
     });
   });
 });

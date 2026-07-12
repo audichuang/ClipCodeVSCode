@@ -2,7 +2,7 @@
 // memoized getVsCodeApi() (NOT a second raw acquireVsCodeApi) because
 // FileDiffView -> ImageDiff also calls getVsCodeApi(), and acquireVsCodeApi()
 // may be called only once per webview.
-import { diffStore } from './diff-store.svelte';
+import { diffStore, type DiffSide } from './diff-store.svelte';
 import { getVsCodeApi } from '../lib/vscode-api';
 import { i18n } from '../lib/i18n/index.svelte';
 
@@ -14,7 +14,7 @@ export function listenForHostMessages(): void {
     const msg = (e as MessageEvent).data;
     switch (msg?.type) {
       case 'diffShow':
-        diffStore.setDiff(msg.payload.repoPath, msg.payload.file, msg.payload.side, msg.payload.diff);
+        diffStore.setDiffs(msg.payload.repoPath, msg.payload.file, msg.payload.stagedDiff, msg.payload.unstagedDiff);
         diffStore.busy = false;
         break;
       case 'setLocale':
@@ -30,42 +30,34 @@ export function listenForHostMessages(): void {
   });
 }
 
-/** Post a single hunk to the host; side decides stage vs unstage. Ignored while
- *  a prior hunk op is still in flight — staging a hunk re-parses the diff and
- *  shifts every later hunk's index, so a second click before the fresh
- *  `diffShow` lands would target the wrong hunk. */
-export function postStageHunk(hunkIndex: number): void {
+function diffFor(side: DiffSide) {
+  return side === 'staged' ? diffStore.stagedDiff : diffStore.unstagedDiff;
+}
+
+/** Post a single hunk to the host; `side` decides stage vs unstage. Ignored while
+ *  a prior op is still in flight (busy) — applying re-parses the diff and shifts
+ *  every later hunk index, so a second click before the fresh `diffShow` lands
+ *  would target the wrong hunk. Also ignored if that side currently has no diff. */
+export function postStageHunk(side: DiffSide, hunkIndex: number): void {
   if (diffStore.busy) { return; }
-  if (!diffStore.diff) { return; }
+  if (!diffFor(side)) { return; }
   diffStore.error = null;
   diffStore.busy = true;
   vscode.postMessage({
     type: 'diffStageHunk',
-    payload: {
-      repoPath: diffStore.repoPath,
-      file: diffStore.file,
-      side: diffStore.side,
-      hunkIndex,
-    },
+    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex },
   });
 }
 
-/** Post the gutter-selected changed lines of one hunk to the host; side decides
- *  stage vs unstage. Gated on `busy` for the same index-shift reason as
- *  postStageHunk (applying re-parses the diff and renumbers later hunks/lines). */
-export function postStageLines(hunkIndex: number, lineIndices: number[]): void {
+/** Post the gutter-selected changed lines of one hunk to the host; `side` decides
+ *  stage vs unstage. Gated on `busy` for the same index-shift reason. */
+export function postStageLines(side: DiffSide, hunkIndex: number, lineIndices: number[]): void {
   if (diffStore.busy) { return; }
-  if (!diffStore.diff) { return; }
+  if (!diffFor(side)) { return; }
   diffStore.error = null;
   diffStore.busy = true;
   vscode.postMessage({
     type: 'diffStageLines',
-    payload: {
-      repoPath: diffStore.repoPath,
-      file: diffStore.file,
-      side: diffStore.side,
-      hunkIndex,
-      lineIndices,
-    },
+    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex, lineIndices },
   });
 }
