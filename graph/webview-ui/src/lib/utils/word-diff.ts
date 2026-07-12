@@ -19,8 +19,14 @@ const MAX_LEN = 400;
 // Split a line into tokens: runs of word chars, runs of whitespace, and single
 // other chars. Keeping delimiters as their own tokens means the joined tokens
 // reproduce the line exactly, so accumulated token lengths give exact offsets.
+// The `u` flag makes `[^\w\s]` match a whole Unicode code point per token
+// instead of a lone UTF-16 surrogate half, so an emoji (astral code point,
+// stored as a surrogate pair) is one token the LCS compares as a unit — without
+// it, an emoji got split into two independently-diffed halves and a changed
+// range could land mid-surrogate-pair. Token lengths (and thus range offsets)
+// stay UTF-16-unit-based either way, matching Shiki's own indexing.
 function tokenize(line: string): string[] {
-  return line.match(/\w+|\s+|[^\w\s]/g) ?? [];
+  return line.match(/\w+|\s+|[^\w\s]/gu) ?? [];
 }
 
 // Convert per-token changed flags into merged char ranges over the joined line.

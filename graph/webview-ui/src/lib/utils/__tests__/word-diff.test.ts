@@ -24,6 +24,17 @@ describe('computeWordDiff', () => {
     expect(addRanges).toEqual([{ start: 2, end: 3 }, { start: 4, end: 5 }]);
   });
 
+  it('treats a replaced emoji as one changed token, not a split surrogate half', () => {
+    // 😀 (U+1F600) and 😅 (U+1F605) are each a UTF-16 surrogate pair. Without
+    // Unicode-aware tokenizing, the LCS could match the shared high surrogate
+    // and only flag the low surrogate half as changed — a range boundary
+    // landing mid-pair. Both ranges here must bracket the FULL emoji (2 UTF-16
+    // units), matching Shiki's UTF-16 offsets exactly.
+    const { delRanges, addRanges } = computeWordDiff('go 😀 now', 'go 😅 now');
+    expect(delRanges).toEqual([{ start: 3, end: 5 }]); // "😀"
+    expect(addRanges).toEqual([{ start: 3, end: 5 }]); // "😅"
+  });
+
   it('falls back to whole-line ranges for very long lines', () => {
     const long = 'x'.repeat(500);
     const { delRanges, addRanges } = computeWordDiff(long, long + 'y');
