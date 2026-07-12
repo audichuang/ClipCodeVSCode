@@ -30,6 +30,7 @@
       staged={store.side === 'staged'}
       diffMode={mode}
       hideModeToggle
+      stageBusy={store.busy}
       onStageHunk={({ hunkIndex }) => postStageHunk(hunkIndex)}
     />
   {/if}

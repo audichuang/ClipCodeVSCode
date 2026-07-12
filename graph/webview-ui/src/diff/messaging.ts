@@ -15,6 +15,7 @@ export function listenForHostMessages(): void {
     switch (msg?.type) {
       case 'diffShow':
         diffStore.setDiff(msg.payload.repoPath, msg.payload.file, msg.payload.side, msg.payload.diff);
+        diffStore.busy = false;
         break;
       case 'setLocale':
         if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }
@@ -23,15 +24,21 @@ export function listenForHostMessages(): void {
         if (msg.payload?.source === 'diffStageHunk') {
           diffStore.error = String(msg.payload.message ?? '操作失敗');
         }
+        diffStore.busy = false;
         break;
     }
   });
 }
 
-/** Post a single hunk to the host; side decides stage vs unstage. */
+/** Post a single hunk to the host; side decides stage vs unstage. Ignored while
+ *  a prior hunk op is still in flight — staging a hunk re-parses the diff and
+ *  shifts every later hunk's index, so a second click before the fresh
+ *  `diffShow` lands would target the wrong hunk. */
 export function postStageHunk(hunkIndex: number): void {
+  if (diffStore.busy) { return; }
   if (!diffStore.diff) { return; }
   diffStore.error = null;
+  diffStore.busy = true;
   vscode.postMessage({
     type: 'diffStageHunk',
     payload: {

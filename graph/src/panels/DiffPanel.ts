@@ -21,6 +21,11 @@ export class DiffPanel {
   private panel: vscode.WebviewPanel | undefined;
   /** The file currently shown; drives retitle + refreshIfCurrent. */
   private current: { repoPath: string; file: string; side: ChangeGroup } | undefined;
+  /** Set once the webview's listener has confirmed it's installed (`diffReady`).
+   *  Guards against posting `diffShow`/`setLocale` before the listener exists,
+   *  which would silently drop the message (see the `diffReady` handler below,
+   *  which re-sends locale + current diff on the handshake). */
+  private ready = false;
   /** Drops a late fileDiffData reply for a file the user already navigated away
    *  from (rapid clicks / post-apply refresh racing a navigation). */
   private readonly seq = new SequenceGuard();
@@ -43,12 +48,15 @@ export class DiffPanel {
     this.panel!.title = `Diff: ${path.basename(file)}`;
     // Reveal without stealing the editor group focus away from the tree click.
     this.panel!.reveal(vscode.ViewColumn.Active, false);
-    void this.push(this.current, ticket);
+    // Before the handshake lands, the webview's listener isn't installed yet and
+    // this postMessage would be silently dropped; the `diffReady` handler below
+    // re-pushes `this.current` once it does.
+    if (this.ready) { void this.push(this.current, ticket); }
   }
 
   /** Re-render ONLY if it is still the file the user is viewing (post-apply). */
   refreshIfCurrent(repoPath: string, file: string, side: ChangeGroup): void {
-    if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
+    if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file && this.current?.side === side) {
       this.show(repoPath, file, side);
     }
   }
@@ -67,9 +75,18 @@ export class DiffPanel {
       },
     );
     panel.webview.html = this.getHtml(panel.webview, assetRoot);
-    this.postLocale(panel);
+    // Don't postLocale yet — the webview's message listener isn't installed
+    // until it posts back `diffReady` (handled below), and an earlier post
+    // would be silently dropped.
+    this.ready = false;
 
     panel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type === 'diffReady') {
+        this.ready = true;
+        this.postLocale(panel);
+        if (this.current) { void this.push(this.current, this.seq.issue()); }
+        return;
+      }
       if (msg?.type !== 'diffStageHunk') { return; }
       const { repoPath, file, side, hunkIndex } = msg.payload ?? {};
       try {
@@ -89,6 +106,7 @@ export class DiffPanel {
     panel.onDidDispose(() => {
       this.panel = undefined;
       this.current = undefined;
+      this.ready = false;
     });
     this.panel = panel;
   }
@@ -134,6 +152,7 @@ export class DiffPanel {
     this.panel?.dispose();
     this.panel = undefined;
     this.current = undefined;
+    this.ready = false;
   }
 }
 
