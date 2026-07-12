@@ -573,25 +573,18 @@
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
                 {#each hunk.lines as line, lineIndex}
-                  <!-- SNIPCODE-HOOK start: per-change-block stage arrow, anchored
-                       on the block's first line (works even when that line is an
-                       empty placeholder for a pure-addition block). -->
+                  <!-- SNIPCODE-HOOK start: per-change-block stage arrow. Anchored
+                       on the block's first line (works even for a pure-addition
+                       block, whose left-pane row is an empty placeholder). The
+                       arrow is `position: sticky; right` + margin-left:auto so it
+                       stays pinned to the visible right edge of the left pane (≈
+                       the center gutter, IntelliJ-style) instead of scrolling off
+                       with the long `pre` line content. -->
                   {@const blockLines = canStage && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
                   {#if line.type === 'context' || line.type === 'delete'}
-                    <div class="diff-line diff-{line.type}" class:has-block-arrow={blockLines}>
-                      {#if blockLines}
-                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
-                                disabled={stageBusy}
-                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
-                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
-                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                        </button>
-                      {/if}
+                    <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
-                    </div>
-                  {:else}
-                    <div class="diff-line diff-empty-line" class:has-block-arrow={blockLines}>
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
@@ -600,8 +593,19 @@
                           <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
                         </button>
                       {/if}
+                    </div>
+                  {:else}
+                    <div class="diff-line diff-empty-line">
                       <span class="line-num"></span>
                       <span class="line-content"></span>
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
+                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                        </button>
+                      {/if}
                     </div>
                   {/if}
                   <!-- SNIPCODE-HOOK end -->
@@ -806,18 +810,18 @@
   .hunk-stage-btn:focus {
     opacity: 1;
   }
-  /* Per-change-block gutter arrow: anchored on the block's first line (the line
-     div is position:relative only when it carries an arrow), sits at the right
-     edge of the left pane ≈ the center gutter. Always visible (IntelliJ-style),
-     brightened on hover of its block. */
-  .diff-line.has-block-arrow {
-    position: relative;
-  }
+  /* Per-change-block gutter arrow. Anchored on the block's first line (last child
+     of that line's flex row); `margin-left:auto` pushes it to the line's right end
+     and `position: sticky; right` pins it to the visible right edge of the left
+     pane (≈ the center gutter) so it never scrolls off with the long `pre` line —
+     works because every .diff-line is stretched to the pane's max-content width.
+     Always visible (IntelliJ-style), brightened on hover of its line/hunk. */
   .sbs-block-stage-btn {
-    position: absolute;
-    top: 50%;
+    position: sticky;
     right: 3px;
-    transform: translateY(-50%);
+    margin-left: auto;
+    align-self: center;
+    flex-shrink: 0;
     z-index: 2;
     opacity: 0.55;
     display: inline-flex;
@@ -836,7 +840,7 @@
     transition: opacity 0.1s;
   }
   .sbs-hunk.hunk-hover .sbs-block-stage-btn,
-  .diff-line.has-block-arrow:hover .sbs-block-stage-btn,
+  .diff-line:hover .sbs-block-stage-btn,
   .sbs-block-stage-btn:hover,
   .sbs-block-stage-btn:focus {
     opacity: 1;
