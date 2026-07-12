@@ -1,55 +1,36 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { diffStore, type DiffHunkView } from '../diff-store.svelte';
+import { diffStore } from '../diff-store.svelte';
+import type { DiffData } from '../../lib/types';
 
-const HUNKS: DiffHunkView[] = [
-  { header: '@@ -1,2 +1,2 @@', lines: [{ type: 'delete', content: 'a' }, { type: 'add', content: 'a2' }] },
-  { header: '@@ -9,2 +9,2 @@', lines: [{ type: 'delete', content: 'b' }, { type: 'add', content: 'b2' }] },
-];
+function sample(): DiffData {
+  return { file: 'src/a.ts', isBinary: false, isImage: false,
+    hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
+      lines: [{ type: 'add', content: 'x', newLineNumber: 1 }] }] };
+}
 
 beforeEach(() => diffStore.reset());
 
-describe('DiffStore', () => {
-  it('setDiff selects every hunk by default', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'unstaged', HUNKS);
-    expect(diffStore.file).toBe('f.txt');
+describe('diffStore', () => {
+  it('setDiff stores the DiffData, file, repo and side', () => {
+    diffStore.setDiff('/repo', 'src/a.ts', 'unstaged', sample());
+    expect(diffStore.repoPath).toBe('/repo');
+    expect(diffStore.file).toBe('src/a.ts');
     expect(diffStore.side).toBe('unstaged');
-    expect(diffStore.selectedIndices).toEqual([0, 1]);
-    expect(diffStore.canApply).toBe(true);
+    expect(diffStore.diff?.hunks.length).toBe(1);
+    expect(diffStore.error).toBeNull();
   });
 
-  it('toggle flips a single hunk', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'unstaged', HUNKS);
-    diffStore.toggle(0);
-    expect(diffStore.selectedIndices).toEqual([1]);
-    diffStore.toggle(0);
-    expect(diffStore.selectedIndices).toEqual([0, 1]);
+  it('setDiff clears any prior error', () => {
+    diffStore.error = 'boom';
+    diffStore.setDiff('/repo', 'src/a.ts', 'staged', sample());
+    expect(diffStore.error).toBeNull();
+    expect(diffStore.side).toBe('staged');
   });
 
-  it('clear empties the selection and blocks apply; selectAll restores it', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'staged', HUNKS);
-    diffStore.clear();
-    expect(diffStore.selectedIndices).toEqual([]);
-    expect(diffStore.canApply).toBe(false);
-    diffStore.selectAll();
-    expect(diffStore.selectedIndices).toEqual([0, 1]);
-    expect(diffStore.canApply).toBe(true);
-  });
-
-  it('actionLabel reflects the side', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'unstaged', HUNKS);
-    expect(diffStore.actionLabel).toBe('Stage 選取');
-    diffStore.setDiff('/repo', 'f.txt', 'staged', HUNKS);
-    expect(diffStore.actionLabel).toBe('Unstage 選取');
-  });
-
-  it('busy blocks apply (guards double-submit)', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'unstaged', HUNKS);
-    diffStore.busy = true;
-    expect(diffStore.canApply).toBe(false);
-  });
-
-  it('an empty diff cannot apply', () => {
-    diffStore.setDiff('/repo', 'f.txt', 'unstaged', []);
-    expect(diffStore.canApply).toBe(false);
+  it('reset clears everything', () => {
+    diffStore.setDiff('/repo', 'src/a.ts', 'unstaged', sample());
+    diffStore.reset();
+    expect(diffStore.diff).toBeNull();
+    expect(diffStore.file).toBe('');
   });
 });
