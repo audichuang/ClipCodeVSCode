@@ -615,4 +615,65 @@ index 1..2 100644
     const ctxIdx = hunk.lines.findIndex((l) => l.type === 'context');
     expect(() => buildForwardPatchLines(SAMPLE, 0, [ctxIdx])).toThrow(/No changed lines/);
   });
+
+  it('pairs the k-th delete with the k-th add in a 2-del/2-add run, keeping the staged add in its delete\'s slot', () => {
+    // Two independent replacements in one run: A→A2 (idx 1,3) and B→B2 (idx 2,4).
+    //  0 ctx line1, 1 del A, 2 del B, 3 add A2, 4 add B2, 5 ctx line3
+    // Stage ONLY the A→A2 pair. Without the reorder fix, the raw-order body
+    // would emit the demoted B context BEFORE the staged A2 add, which flips
+    // the resulting index content to line1/B/A2/line3 (B and A2 swapped).
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,4 +1,4 @@
+ line1
+-A
+-B
++A2
++B2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [1, 3]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,4 @@',
+        ' line1',
+        '-A',
+        '+A2', // kept add sits right after its own delete, not after B's context
+        ' B', // unselected delete demoted to context (stage direction)
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it("direction:'unstage' demotes an unselected add to context and omits an unselected delete", () => {
+    // Staged (HEAD→index) diff: reuse SAMPLE's shape. Unstage only the
+    // line2-changed add (idx 2); the delete (idx 1, HEAD content) is not the
+    // unstage baseline so it must be OMITTED, and the other add (idx 3,
+    // line2b) IS the baseline so an unselected one must be DEMOTED to context
+    // (unlike 'stage' direction, which would omit it).
+    const patch = buildForwardPatchLines(SAMPLE, 0, [2], 'unstage');
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,5 @@',
+        ' line1',
+        // -line2 omitted — unselected delete in 'unstage' direction
+        '+line2-changed',
+        ' line2b', // unselected add demoted to context — index keeps it
+        ' line3',
+        ' line4',
+        '',
+      ].join('\n'),
+    );
+  });
 });
