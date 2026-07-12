@@ -35,10 +35,11 @@ describe('GitService integration — stageLines / unstageLines', () => {
     expect(cached).toContain('+A2');
     expect(cached).not.toContain('+B2');
 
-    // The index blob has A2 (staged) but still old B (unstaged part not applied).
+    // The index blob must keep A2 in A's original slot (line order pinned) —
+    // not just "contains A2 and B somewhere" (that also passes on the
+    // pre-523e96f swapped-order regression: L1/B/A2/L4).
     const indexBlob = runGit(repo.path, ['show', ':f.txt']);
-    expect(indexBlob).toContain('\nA2\n');
-    expect(indexBlob).toContain('\nB\n');
+    expect(indexBlob).toBe('L1\nA2\nB\nL4\n');
 
     // The working tree is untouched — still has both edits.
     expect(runGit(repo.path, ['status', '--porcelain', 'f.txt']).trim().slice(0, 2)).toBe('MM');
@@ -52,6 +53,11 @@ describe('GitService integration — stageLines / unstageLines', () => {
     const cached = runGit(repo.path, ['diff', '--cached', 'f.txt']);
     expect(cached).toContain('+B2');
     expect(cached).not.toContain('+A2');
+
+    // Exact blob, order pinned (same regression this guards as the stage test).
+    const indexBlob = runGit(repo.path, ['show', ':f.txt']);
+    expect(indexBlob).toBe('L1\nA\nB2\nL4\n');
+
     expect(runGit(repo.path, ['status', '--porcelain', 'f.txt']).trim().slice(0, 2)).toBe('MM');
   });
 
