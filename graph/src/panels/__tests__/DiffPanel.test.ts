@@ -13,6 +13,10 @@ vi.mock('vscode', async () => (await import('./vscode-mock')).makeVscodeModule(H
 // Only DiffPanel is under test — MainPanel is imported solely for assetRootUri.
 vi.mock('../MainPanel', () => ({ MainPanel: { assetRootUri: undefined } }));
 
+import * as vscode from 'vscode';
+import { mkdtemp, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { DiffPanel } from '../DiffPanel';
 import type { ChangesWorkbench } from '../../tree/changes-workbench';
 
@@ -29,6 +33,7 @@ function makeWorkbench() {
     unstageHunks: vi.fn(async () => {}),
     stageLines: vi.fn(async () => {}),
     unstageLines: vi.fn(async () => {}),
+    imageBase64: vi.fn(async () => 'QUJD'),
   };
 }
 type Workbench = ReturnType<typeof makeWorkbench>;
@@ -130,6 +135,52 @@ describe('DiffPanel', () => {
     expect(wb.stageLines).not.toHaveBeenCalled();
     const errors = posted().filter((m) => m.type === 'error');
     expect(errors.map((m) => m.payload.source)).toEqual(['diffStageHunk', 'diffStageLines']);
+  });
+
+  it('serves getImageAtRef from git for a real ref, and empty base64 on failure', async () => {
+    const wb = makeWorkbench();
+    await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'HEAD', path: 'a.ts' } });
+    expect(wb.imageBase64).toHaveBeenCalledWith('/r', 'HEAD', 'a.ts');
+    wb.imageBase64.mockRejectedValueOnce(new Error('bad object'));
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: ':0', path: 'a.ts' } });
+    expect(posted().filter((m) => m.type === 'imageData')).toEqual([
+      { type: 'imageData', payload: { ref: 'HEAD', path: 'a.ts', base64: 'QUJD', mimeType: 'image/png' } },
+      { type: 'imageData', payload: { ref: ':0', path: 'a.ts', base64: '', mimeType: 'image/png' } },
+    ]);
+  });
+
+  it('serves getImageAtRef ref:working from the working tree, refusing paths that escape the repo', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'diffpanel-'));
+    await writeFile(join(repo, 'img.png'), 'abc');
+    const wb = makeWorkbench();
+    const dp = DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+    dp.show(repo, 'img.png');
+    await H.messageHandler!({ type: 'diffReady' });
+    await flush();
+    H.panel!.webview.postMessage.mockClear();
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: 'img.png' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: '../escape.png' } });
+    expect(posted().filter((m) => m.type === 'imageData')).toEqual([
+      { type: 'imageData', payload: { ref: 'working', path: 'img.png', base64: 'YWJj', mimeType: 'image/png' } },
+      { type: 'imageData', payload: { ref: 'working', path: '../escape.png', base64: '', mimeType: 'image/png' } },
+    ]);
+  });
+
+  it('a stage failure after the panel is closed still notifies, without posting to the dead webview', async () => {
+    const wb = makeWorkbench();
+    let reject!: (e: Error) => void;
+    wb.stageHunks.mockImplementationOnce(() => new Promise((_, rej) => { reject = rej; }));
+    const dp = await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    H.panel!.webview.postMessage.mockImplementation(() => { throw new Error('Webview is disposed'); });
+    const pending = H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0 } });
+    dp.dispose();
+    reject(new Error('patch does not apply'));
+    await expect(pending).resolves.toBeUndefined(); // no unhandled throw
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Stage/Unstage 失敗：patch does not apply');
+    expect(H.panel!.webview.postMessage).not.toHaveBeenCalled();
   });
 
   it('a failing stage op posts a matching error back to the webview', async () => {

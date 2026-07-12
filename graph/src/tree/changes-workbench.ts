@@ -198,6 +198,12 @@ export class ChangesWorkbench implements vscode.Disposable {
       .catch(() => null);
   }
 
+  /** Image bytes at a ref for the Diff tab's ImageDiff ('working' is handled by
+   *  the panel itself — this only serves real git refs like 'HEAD' / ':0'). */
+  async imageBase64(repoPath: string, ref: string, file: string): Promise<string> {
+    return this.svcFor(repoPath).getImageBase64(ref, file);
+  }
+
   /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
     this.diffPanel?.show(node.repoPath, node.path);
