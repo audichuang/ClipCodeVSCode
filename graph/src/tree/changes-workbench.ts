@@ -5,8 +5,8 @@ import { RepoDiscoveryService } from '../services/repo-discovery';
 import { runExclusive } from '../services/mutation-coordinator';
 import { ChangesTreeProvider, type ChangeTreeNode } from './changes-tree';
 import type { RepoStatus, FileNode, RepoNode, ChangeGroup } from './build-change-tree';
-import type { DiffHunk } from '../git/types';
-import type { SnipcodeDiffViewProvider } from './diff-view';
+import type { DiffData } from '../git/types';
+import type { DiffPanel } from '../panels/DiffPanel';
 
 export interface CommitResult { repoName: string; ok: boolean; error?: string }
 
@@ -28,7 +28,7 @@ export class ChangesWorkbench implements vscode.Disposable {
   private view: vscode.TreeView<unknown> | undefined;
   /** Staged repos the user UNCHECKED (default = every staged repo is committed). */
   private readonly uncheckedForCommit = new Set<string>();
-  private diffView: SnipcodeDiffViewProvider | undefined;
+  private diffPanel: DiffPanel | undefined;
 
   constructor() {
     this.tree = new ChangesTreeProvider(
@@ -40,8 +40,8 @@ export class ChangesWorkbench implements vscode.Disposable {
   /** Lets the workbench show the active filter in the tree's message bar. */
   setView(view: vscode.TreeView<unknown>): void { this.view = view; }
 
-  /** Wire the Diff webview so file clicks and post-stage refreshes can drive it. */
-  setDiffView(view: SnipcodeDiffViewProvider): void { this.diffView = view; }
+  /** Wire the Diff editor-tab panel so file clicks and post-stage refreshes can drive it. */
+  setDiffPanel(panel: DiffPanel): void { this.diffPanel = panel; }
 
   /** Wired to TreeView.onDidChangeCheckboxState in extension.ts. */
   handleCheckboxChange(items: ReadonlyArray<readonly [ChangeTreeNode, vscode.TreeItemCheckboxState]>): void {
@@ -189,19 +189,18 @@ export class ChangesWorkbench implements vscode.Disposable {
     }
   }
 
-  /** Read a file's parsed hunks (staged or unstaged side) for the Diff webview.
+  /** Read a file's parsed DiffData (staged or unstaged side) for the Diff panel.
    *  Reuses getUncommittedFileDiff so the hunk order aligns with the raw
    *  stageHunks/unstageHunks re-fetch (same git diff command per side). */
-  async fileDiff(repoPath: string, file: string, side: ChangeGroup): Promise<DiffHunk[]> {
-    const diff = await this.svcFor(repoPath)
+  async fileDiffData(repoPath: string, file: string, side: ChangeGroup): Promise<DiffData | null> {
+    return this.svcFor(repoPath)
       .getUncommittedFileDiff(file, side === 'staged')
       .catch(() => null);
-    return diff?.hunks ?? [];
   }
 
-  /** Drive the Diff webview from a clicked file node (tree command). */
+  /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
-    this.diffView?.show(node.repoPath, node.path, node.group);
+    this.diffPanel?.show(node.repoPath, node.path, node.group);
   }
 
   /** Stage the selected hunks of one unstaged file, then refresh the tree and
@@ -211,7 +210,7 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
-    this.diffView?.refreshIfCurrent(repoPath, file, 'unstaged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file, 'unstaged');
   }
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
@@ -219,7 +218,7 @@ export class ChangesWorkbench implements vscode.Disposable {
   async unstageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices));
     await this.refresh();
-    this.diffView?.refreshIfCurrent(repoPath, file, 'staged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file, 'staged');
   }
 
   /** Multi-select which repos the Changes tree shows. Picking all (or none)
