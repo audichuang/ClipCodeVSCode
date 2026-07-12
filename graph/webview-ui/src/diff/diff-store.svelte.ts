@@ -19,9 +19,13 @@ class DiffStore {
    *  diff and shifts every later hunk/line index, so a click before the fresh
    *  `diffShow` lands would target the wrong hunk. */
   busy = $state(false);
+
   /** True once a file has been shown (either side may still be null). Distinguishes
-   *  "no file open yet" from "file open but one/both sides empty". */
-  loaded = $state(false);
+   *  "no file open yet" from "file open but one/both sides empty". Derived — the
+   *  host always sends a non-empty file path in `diffShow`. */
+  get loaded(): boolean {
+    return this.file !== '';
+  }
 
   reset(): void {
     this.repoPath = '';
@@ -30,7 +34,6 @@ class DiffStore {
     this.unstagedDiff = null;
     this.error = null;
     this.busy = false;
-    this.loaded = false;
   }
 
   setDiffs(repoPath: string, file: string, stagedDiff: DiffData | null, unstagedDiff: DiffData | null): void {
@@ -40,7 +43,6 @@ class DiffStore {
     this.unstagedDiff = unstagedDiff;
     this.error = null;
     this.busy = false;
-    this.loaded = true;
   }
 }
 

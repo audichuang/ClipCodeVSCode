@@ -61,12 +61,14 @@ describe('Diff.svelte unified view', () => {
     expect(getByText('No changes')).toBeTruthy();
   });
 
-  it('collapsing a section hides its FileDiffView content', async () => {
+  it('collapsing a section hides its FileDiffView content and a second click re-expands it', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, textDiff());
     const { container } = render(Diff);
     expect(container.querySelector('.diff-section .diff-wrapper')).toBeTruthy();
     await fireEvent.click(container.querySelector('.section-header')!);
     expect(container.querySelector('.diff-section .diff-wrapper')).toBeNull();
+    await fireEvent.click(container.querySelector('.section-header')!);
+    expect(container.querySelector('.diff-section .diff-wrapper')).toBeTruthy();
   });
 
   it('staging a block in the staged section posts side:staged', async () => {
@@ -79,7 +81,8 @@ describe('Diff.svelte unified view', () => {
     await fireEvent.click(arrow!);
     const posted = globalThis.__postedMessages.map((m: any) => m.data);
     const stageMsg = posted.find((d: any) => d.type === 'diffStageLines');
-    expect(stageMsg.payload.side).toBe('staged');
+    expect(stageMsg).toBeTruthy();
+    expect(stageMsg.payload).toMatchObject({ repoPath: '/r', file: 'src/a.ts', side: 'staged', hunkIndex: 0, lineIndices: [0] });
   });
 
   it('staging a block in the unstaged section posts side:unstaged', async () => {

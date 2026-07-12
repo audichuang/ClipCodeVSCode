@@ -653,7 +653,10 @@ export const en: Record<string, string> = {
   // File context menu
   'file.open': 'Open File',
   'file.openChanges': 'Open Changes',
+  /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
   'file.noChanges': 'No changes',
+  'file.stageFailed': 'Operation failed',
+  /* SNIPCODE-HOOK end */
   'file.createPatch': 'Create Patch',
   'file.createPatchFromSelected': 'Create Patch from {count} selected files',
   'file.createPatchFromFolder': 'Create Patch from folder',

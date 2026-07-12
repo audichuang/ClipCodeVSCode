@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { diffStore } from '../diff-store.svelte';
 import { listenForHostMessages, postStageHunk, postStageLines } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
@@ -7,8 +7,11 @@ const emptyDiff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: []
 
 beforeEach(() => {
   diffStore.reset();
+  i18n.setLocale('en');
   globalThis.__postedMessages = [];
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe('diff messaging', () => {
   it('diffShow populates both sides of the store', () => {
@@ -96,5 +99,37 @@ describe('diff messaging', () => {
     expect(globalThis.__postedMessages).toContainEqual({
       data: { type: 'diffStageLines', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] } },
     });
+  });
+
+  it('postStageLines is gated by a missing side and by busy, like postStageHunk', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageLines('staged', 0, [1]); // staged side is null → dropped
+    expect(globalThis.__postedMessages).toHaveLength(0);
+    postStageLines('unstaged', 0, [1]);
+    postStageLines('unstaged', 1, [2]); // an op is already in flight → dropped
+    expect(globalThis.__postedMessages).toHaveLength(1);
+  });
+
+  it('a lost reply times out: busy clears and a soft error is shown', () => {
+    vi.useFakeTimers();
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
+    expect(diffStore.busy).toBe(true);
+    vi.advanceTimersByTime(15_000);
+    expect(diffStore.busy).toBe(false);
+    expect(diffStore.error).toBe('Operation failed');
+  });
+
+  it('a diffShow reply disarms the timeout', () => {
+    vi.useFakeTimers();
+    listenForHostMessages();
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+    }));
+    vi.advanceTimersByTime(60_000);
+    expect(diffStore.busy).toBe(false);
+    expect(diffStore.error).toBeNull();
   });
 });

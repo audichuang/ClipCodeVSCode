@@ -654,7 +654,10 @@ export const zh: Record<string, string> = {
   'lfs.locked': '由 {owner} 锁定',
   'file.open': '打开文件',
   'file.openChanges': '打开更改',
+  /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
   'file.noChanges': '无变更',
+  'file.stageFailed': '操作失败',
+  /* SNIPCODE-HOOK end */
   'file.createPatch': '创建 Patch',
   'file.createPatchFromSelected': '从选中的 {count} 个文件创建 Patch',
   'file.createPatchFromFolder': '从文件夹创建 Patch',
