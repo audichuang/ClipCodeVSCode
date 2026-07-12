@@ -43,6 +43,8 @@ vi.mock('../../services/repo-discovery', () => ({
   RepoDiscoveryService: { discoverRepos: vi.fn(async () => H.repos), clearCache: vi.fn() },
 }));
 vi.mock('../../git/git-service', () => ({ GitService: vi.fn((p: string) => H.svcs.get(p)) }));
+vi.mock('../../git/vscode-git-bridge', () => ({ triggerVSCodeGitAuth: vi.fn(async () => false) }));
+vi.mock('../../utils/config', () => ({ readTimeoutMs: () => 30_000 }));
 
 import * as vscode from 'vscode';
 import { ChangesWorkbench } from '../changes-workbench';
@@ -57,6 +59,9 @@ function mkSvc(over: Record<string, unknown> = {}) {
     fetch: vi.fn(async () => ''),
     pull: vi.fn(async () => ''),
     pushCurrentBranch: vi.fn(async () => ({ pushed: true })),
+    setExtraEnv: vi.fn(),
+    setAuthRetryHandler: vi.fn(),
+    setDefaultTimeout: vi.fn(),
     ...over,
   };
 }
@@ -115,6 +120,27 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
   it('says so when the workspace has no repos', async () => {
     await new ChangesWorkbench().fetchAll();
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('No git repositories in workspace');
+  });
+
+  it('ignores the Filter Repos scope — All Repos means all discovered repos', async () => {
+    const a = mkSvc(); const b = mkSvc();
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    (wb as unknown as { repoFilter: Set<string> }).repoFilter = new Set(['/a']); // tree filtered to /a only
+    await wb.fetchAll();
+    expect(a.fetch).toHaveBeenCalled();
+    expect(b.fetch).toHaveBeenCalled(); // filter is a display scope, not a sync scope
+  });
+
+  it('wires auth retry, timeout, and (late-arriving) askpass env onto every GitService', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    await wb.fetchAll(); // creates the service before the env arrives
+    expect(a.setAuthRetryHandler).toHaveBeenCalled();
+    expect(a.setDefaultTimeout).toHaveBeenCalledWith(30_000);
+    wb.setGitEnv({ GIT_ASKPASS: '/x' }); // built-in git env lands on a later microtask
+    expect(a.setExtraEnv).toHaveBeenCalledWith({ GIT_ASKPASS: '/x' });
   });
 });
 

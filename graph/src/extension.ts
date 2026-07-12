@@ -108,6 +108,9 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   let activeRepoPath = workspaceFolder.uri.fsPath;
+  // Set once the ChangesWorkbench exists (below); the built-in git env callback
+  // fires on a later microtask, so it forwards the env through this reference.
+  let workbenchRef: ChangesWorkbench | undefined;
 
   // Resolve the git executable so the extension works when git is not on PATH
   // (e.g. portable/MSYS2 installs configured via `git.path`). The configured
@@ -134,6 +137,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (git?.env) {
           activeGitService.setExtraEnv(git.env);
           MainPanel.setExtraEnv(git.env);
+          workbenchRef?.setGitEnv(git.env);
         }
         // The built-in extension's resolved path already honors `git.path`; adopt
         // it as the fallback for when the user hasn't set a valid `git.path`.
@@ -190,6 +194,7 @@ export function activate(context: vscode.ExtensionContext) {
   // TreeView paints Staged/Unstaged → repo → file (native file icons via
   // resourceUri); the webview above it is the shared commit message box.
   const workbench = new ChangesWorkbench();
+  workbenchRef = workbench;
   const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true, canSelectMany: true });
   workbench.setView(changesView);
   changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));

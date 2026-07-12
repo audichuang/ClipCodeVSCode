@@ -3,6 +3,8 @@ import * as path from 'path';
 import { GitService } from '../git/git-service';
 import { RepoDiscoveryService } from '../services/repo-discovery';
 import { runExclusive } from '../services/mutation-coordinator';
+import { triggerVSCodeGitAuth } from '../git/vscode-git-bridge';
+import { readTimeoutMs } from '../utils/config';
 import { ChangesTreeProvider, type ChangeTreeNode } from './changes-tree';
 import type { RepoStatus, FileNode, RepoNode, ChangeGroup } from './build-change-tree';
 import type { DiffData } from '../git/types';
@@ -52,15 +54,36 @@ export class ChangesWorkbench implements vscode.Disposable {
     }
   }
 
+  /** Built-in vscode.git askpass env (same source MainPanel uses); set from
+   *  extension.ts so toolbar fetch/pull/push hit the normal credential flow. */
+  private gitEnv: Record<string, string> | undefined;
+  setGitEnv(env: Record<string, string>): void {
+    this.gitEnv = env;
+    for (const svc of this.svcs.values()) { svc.setExtraEnv(env); }
+  }
+
   private svcFor(repoPath: string): GitService {
     let svc = this.svcs.get(repoPath);
-    if (!svc) { svc = new GitService(repoPath); this.svcs.set(repoPath, svc); }
+    if (!svc) {
+      svc = new GitService(repoPath);
+      // Same wiring as MainPanel.createGitService: askpass env, auth retry via
+      // the built-in git prompt (GIT_TERMINAL_PROMPT=0 would otherwise turn a
+      // missing credential into a hard failure), and the user's timeout.
+      if (this.gitEnv) { svc.setExtraEnv(this.gitEnv); }
+      svc.setAuthRetryHandler((remote) => triggerVSCodeGitAuth(repoPath, remote));
+      svc.setDefaultTimeout(readTimeoutMs());
+      this.svcs.set(repoPath, svc);
+    }
     return svc;
   }
 
-  private async discover(): Promise<{ path: string }[]> {
+  private async discoverUnfiltered(): Promise<{ path: string }[]> {
     const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
-    const found = await RepoDiscoveryService.discoverRepos(folders).catch(() => []);
+    return RepoDiscoveryService.discoverRepos(folders).catch(() => []);
+  }
+
+  private async discover(): Promise<{ path: string }[]> {
+    const found = await this.discoverUnfiltered();
     return this.repoFilter ? found.filter(r => this.repoFilter!.has(r.path)) : found;
   }
 
@@ -94,7 +117,9 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  ops don't take GitService's mutation lock; runExclusive only keeps them
    *  from interleaving with this extension's own queued operations. */
   private async forAllRepos(verb: string, op: (svc: GitService) => Promise<unknown>): Promise<void> {
-    const repos = await this.discover();
+    // "All Repos" means ALL: the tree's Filter Repos scope is a display scope
+    // (IntelliJ semantics) and must not silently exclude repos from sync.
+    const repos = await this.discoverUnfiltered();
     if (repos.length === 0) {
       void vscode.window.showInformationMessage('No git repositories in workspace');
       return;
