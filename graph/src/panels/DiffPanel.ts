@@ -1,0 +1,145 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { MainPanel } from './MainPanel';
+import { SequenceGuard } from '../utils/sequence-guard';
+import type { ChangeGroup } from '../tree/build-change-tree';
+import type { ChangesWorkbench } from '../tree/changes-workbench';
+
+/**
+ * Full-width Diff shown in an EDITOR TAB (WebviewPanel), replacing the B-2b side
+ * panel. One singleton panel is re-used and retitled per clicked file. It hosts
+ * the self-contained diff.js bundle (FileDiffView: side-by-side + Shiki), and
+ * per-hunk Stage/Unstage routes through ChangesWorkbench → GitService.
+ *
+ * The diff.js bundle is a CLASSIC <script> (nonce CSP), mirroring MainPanel's
+ * CSP/nonce/asset loading.
+ */
+export class DiffPanel {
+  static readonly viewType = 'snipcode.diffPanel';
+  private static instance: DiffPanel | undefined;
+
+  private panel: vscode.WebviewPanel | undefined;
+  /** The file currently shown; drives retitle + refreshIfCurrent. */
+  private current: { repoPath: string; file: string; side: ChangeGroup } | undefined;
+  /** Drops a late fileDiffData reply for a file the user already navigated away
+   *  from (rapid clicks / post-apply refresh racing a navigation). */
+  private readonly seq = new SequenceGuard();
+
+  private constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly workbench: ChangesWorkbench,
+  ) {}
+
+  static register(extensionUri: vscode.Uri, workbench: ChangesWorkbench): DiffPanel {
+    DiffPanel.instance = new DiffPanel(extensionUri, workbench);
+    return DiffPanel.instance;
+  }
+
+  /** Open (or reveal) the panel for a file and push its diff. */
+  show(repoPath: string, file: string, side: ChangeGroup): void {
+    this.current = { repoPath, file, side };
+    const ticket = this.seq.issue();
+    if (!this.panel) { this.createPanel(); }
+    this.panel!.title = `Diff: ${path.basename(file)}`;
+    // Reveal without stealing the editor group focus away from the tree click.
+    this.panel!.reveal(vscode.ViewColumn.Active, false);
+    void this.push(this.current, ticket);
+  }
+
+  /** Re-render ONLY if it is still the file the user is viewing (post-apply). */
+  refreshIfCurrent(repoPath: string, file: string, side: ChangeGroup): void {
+    if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
+      this.show(repoPath, file, side);
+    }
+  }
+
+  private createPanel(): void {
+    const assetRoot = MainPanel.assetRootUri
+      ?? vscode.Uri.joinPath(this.extensionUri, 'webview-ui', 'dist');
+    const panel = vscode.window.createWebviewPanel(
+      DiffPanel.viewType,
+      'Diff',
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [assetRoot],
+      },
+    );
+    panel.webview.html = this.getHtml(panel.webview, assetRoot);
+    this.postLocale(panel);
+
+    panel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type !== 'diffStageHunk') { return; }
+      const { repoPath, file, side, hunkIndex } = msg.payload ?? {};
+      try {
+        if (side === 'unstaged') {
+          await this.workbench.stageHunks(String(repoPath), String(file), [Number(hunkIndex)]);
+        } else {
+          await this.workbench.unstageHunks(String(repoPath), String(file), [Number(hunkIndex)]);
+        }
+        // stageHunks/unstageHunks call refreshIfCurrent → re-push the new diff.
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message } });
+        void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
+      }
+    });
+
+    panel.onDidDispose(() => {
+      this.panel = undefined;
+      this.current = undefined;
+    });
+    this.panel = panel;
+  }
+
+  private async push(
+    target: { repoPath: string; file: string; side: ChangeGroup },
+    ticket: number,
+  ): Promise<void> {
+    if (!this.panel) { return; }
+    const { repoPath, file, side } = target;
+    const diff = await this.workbench.fileDiffData(repoPath, file, side);
+    if (!this.seq.isCurrent(ticket) || !this.panel) { return; } // superseded / disposed
+    this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, side, diff } });
+  }
+
+  private postLocale(panel: vscode.WebviewPanel): void {
+    const setting = vscode.workspace.getConfiguration('gitGraphPlus').get<string>('locale', 'auto');
+    const locale = setting === 'auto' ? (vscode.env.language || 'en') : setting;
+    panel.webview.postMessage({ type: 'setLocale', payload: { locale } });
+  }
+
+  private getHtml(webview: vscode.Webview, assetRoot: vscode.Uri): string {
+    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.js'));
+    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.css'));
+    const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'codicon.css'));
+    const nonce = getNonce();
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
+  <link href="${styleUri}" rel="stylesheet" />
+  <link href="${codiconUri}" rel="stylesheet" />
+</head>
+<body>
+  <div id="diff-app"></div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+  }
+
+  dispose(): void {
+    this.panel?.dispose();
+    this.panel = undefined;
+    this.current = undefined;
+  }
+}
+
+function getNonce(): string {
+  let text = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) { text += chars.charAt(Math.floor(Math.random() * chars.length)); }
+  return text;
+}

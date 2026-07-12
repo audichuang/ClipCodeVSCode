@@ -14,7 +14,7 @@ import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
 import { ChangesWorkbench } from './tree/changes-workbench';
 import { CommitBoxViewProvider } from './tree/commit-box-view';
-import { SnipcodeDiffViewProvider } from './tree/diff-view';
+import { DiffPanel } from './panels/DiffPanel';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
 import { readTimeoutMs } from './utils/config';
@@ -193,18 +193,15 @@ export function activate(context: vscode.ExtensionContext) {
   const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true, canSelectMany: true });
   workbench.setView(changesView);
   changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));
-  const diffView = new SnipcodeDiffViewProvider(context.extensionUri, workbench);
-  workbench.setDiffView(diffView);
+  const diffPanel = DiffPanel.register(context.extensionUri, workbench);
+  workbench.setDiffPanel(diffPanel);
   context.subscriptions.push(
     workbench,
     changesView,
+    diffPanel,
     vscode.window.registerWebviewViewProvider(
       CommitBoxViewProvider.viewType,
       new CommitBoxViewProvider(context.extensionUri, workbench),
-    ),
-    vscode.window.registerWebviewViewProvider(
-      SnipcodeDiffViewProvider.viewType,
-      diffView,
     ),
   );
   workbench.registerCommands(context);

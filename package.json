@@ -286,11 +286,6 @@
           "id": "snipcode.commitBox",
           "name": "Commit",
           "type": "webview"
-        },
-        {
-          "id": "snipcode.diff",
-          "name": "Diff",
-          "type": "webview"
         }
       ],
       "scm": [
