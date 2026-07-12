@@ -662,6 +662,8 @@ export const en: Record<string, string> = {
   'file.reverseFile': 'Reverse File',
   'file.reverseHunk': 'Reverse Hunk',
   'file.reverseLines': 'Reverse Selected Lines',
+  'file.stageHunk': 'Stage Hunk',
+  'file.unstageHunk': 'Unstage Hunk',
   'file.lines': 'Lines',
   'file.copySelection': 'Copy',
   'file.copyLines': 'Copy Lines',
