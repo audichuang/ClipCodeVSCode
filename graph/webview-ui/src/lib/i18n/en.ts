@@ -657,6 +657,7 @@ export const en: Record<string, string> = {
   'file.noChanges': 'No changes',
   'file.stageFailed': 'Operation failed',
   'file.stageTimeout': 'Operation is taking longer than expected — buttons unlock when it completes (reopen this tab if it never does)',
+  'file.openFullDiff': 'Open full file diff in editor',
   /* SNIPCODE-HOOK end */
   'file.createPatch': 'Create Patch',
   'file.createPatchFromSelected': 'Create Patch from {count} selected files',

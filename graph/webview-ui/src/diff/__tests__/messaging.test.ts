@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { diffStore } from '../diff-store.svelte';
-import { listenForHostMessages, postStageHunk, postStageLines } from '../messaging';
+import { listenForHostMessages, postStageHunk, postStageLines, postOpenSide } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
 
 const emptyDiff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
@@ -108,6 +108,16 @@ describe('diff messaging', () => {
     postStageLines('unstaged', 0, [1, 2]);
     expect(globalThis.__postedMessages).toContainEqual({
       data: { type: 'diffStageLines', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] } },
+    });
+  });
+
+  it('postOpenSide posts diffOpenSide for a present side and drops a missing one', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    postOpenSide('staged'); // staged side is null → dropped
+    expect(globalThis.__postedMessages).toHaveLength(0);
+    postOpenSide('unstaged');
+    expect(globalThis.__postedMessages).toContainEqual({
+      data: { type: 'diffOpenSide', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged' } },
     });
   });
 

@@ -73,10 +73,24 @@ describe('Diff.svelte unified view', () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, textDiff());
     const { container } = render(Diff);
     expect(container.querySelector('.diff-section .diff-wrapper')).toBeTruthy();
-    await fireEvent.click(container.querySelector('.section-header')!);
+    await fireEvent.click(container.querySelector('.section-toggle')!);
     expect(container.querySelector('.diff-section .diff-wrapper')).toBeNull();
-    await fireEvent.click(container.querySelector('.section-header')!);
+    await fireEvent.click(container.querySelector('.section-toggle')!);
     expect(container.querySelector('.diff-section .diff-wrapper')).toBeTruthy();
+  });
+
+  it('the header open-diff button posts diffOpenSide for its section without collapsing it', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff());
+    const { container } = render(Diff);
+    const unstagedOpen = container.querySelectorAll('.diff-section')[1].querySelector('.section-open-btn');
+    await fireEvent.click(unstagedOpen!);
+    const posted = globalThis.__postedMessages.map((m: any) => m.data);
+    expect(posted).toContainEqual({
+      type: 'diffOpenSide',
+      payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged' },
+    });
+    // Still expanded: the open action must not double as a collapse toggle.
+    expect(container.querySelectorAll('.diff-section')[1].querySelector('.diff-wrapper')).toBeTruthy();
   });
 
   it('staging a block in the staged section posts side:staged', async () => {

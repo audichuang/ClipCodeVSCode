@@ -1,7 +1,7 @@
 <!-- graph/webview-ui/src/diff/Diff.svelte -->
 <script lang="ts">
   import { diffStore, type DiffSide } from './diff-store.svelte';
-  import { postStageHunk, postStageLines } from './messaging';
+  import { postStageHunk, postStageLines, postOpenSide } from './messaging';
   import { t } from '../lib/i18n/index.svelte';
   import FileDiffView from '../components/commit/FileDiffView.svelte';
 
@@ -56,14 +56,26 @@
     <div class="sections">
       {#each sections as section (section.side)}
         <section class="diff-section">
-          <button
-            class="section-header"
-            aria-expanded={!collapsed[section.side]}
-            onclick={() => { collapsed[section.side] = !collapsed[section.side]; }}
-          >
-            <span class="codicon {collapsed[section.side] ? 'codicon-chevron-right' : 'codicon-chevron-down'}"></span>
-            <span class="side-badge {section.side}">{section.label}</span>
-          </button>
+          <!-- A row, not one button: the open-diff action must not toggle collapse
+               (and a button can't nest inside a button). -->
+          <div class="section-header">
+            <button
+              class="section-toggle"
+              aria-expanded={!collapsed[section.side]}
+              onclick={() => { collapsed[section.side] = !collapsed[section.side]; }}
+            >
+              <span class="codicon {collapsed[section.side] ? 'codicon-chevron-right' : 'codicon-chevron-down'}"></span>
+              <span class="side-badge {section.side}">{section.label}</span>
+            </button>
+            <button
+              class="section-open-btn"
+              title={t('file.openFullDiff')}
+              aria-label={`${section.label}: ${t('file.openFullDiff')}`}
+              onclick={() => postOpenSide(section.side)}
+            >
+              <span class="codicon codicon-diff"></span>
+            </button>
+          </div>
           {#if !collapsed[section.side]}
             <FileDiffView
               diff={section.diff!}
@@ -114,12 +126,22 @@
   .sections { flex: 1; overflow: auto; display: flex; flex-direction: column; }
   .diff-section { display: flex; flex-direction: column; }
   .section-header {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border: none; cursor: pointer; text-align: left;
+    display: flex; align-items: center;
     background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.08));
-    color: var(--vscode-foreground); font-family: var(--vscode-font-family);
     position: sticky; top: 0; z-index: 3;
   }
+  .section-toggle {
+    flex: 1; display: flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border: none; cursor: pointer; text-align: left;
+    background: transparent;
+    color: var(--vscode-foreground); font-family: var(--vscode-font-family);
+  }
+  .section-open-btn {
+    display: flex; align-items: center; padding: 4px 10px;
+    border: none; cursor: pointer; background: transparent;
+    color: var(--vscode-descriptionForeground);
+  }
+  .section-open-btn:hover { color: var(--vscode-foreground); }
   .side-badge {
     font-size: 10px; padding: 1px 6px; border-radius: 8px;
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
