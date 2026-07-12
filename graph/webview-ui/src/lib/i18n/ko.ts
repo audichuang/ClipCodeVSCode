@@ -667,6 +667,8 @@ export const ko: Record<string, string> = {
   'file.unstageHunk': 'Hunk 스테이지 해제',
   'file.stageLines': '선택한 줄 스테이지',
   'file.unstageLines': '선택한 줄 스테이지 해제',
+  'file.stageBlock': '변경 블록 스테이지',
+  'file.unstageBlock': '변경 블록 스테이지 해제',
   'file.lines': '줄',
   'file.copySelection': '복사',
   'file.copyLines': '줄 복사',

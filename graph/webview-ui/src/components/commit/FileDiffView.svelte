@@ -580,7 +580,7 @@
                        stays pinned to the visible right edge of the left pane (≈
                        the center gutter, IntelliJ-style) instead of scrolling off
                        with the long `pre` line content. -->
-                  {@const blockLines = canStage && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
+                  {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
                   {#if line.type === 'context' || line.type === 'delete'}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
@@ -588,8 +588,8 @@
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
-                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
-                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
                           <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
                         </button>
                       {/if}
@@ -601,8 +601,8 @@
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
-                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
-                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
                           <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
                         </button>
                       {/if}

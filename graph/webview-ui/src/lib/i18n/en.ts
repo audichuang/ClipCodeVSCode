@@ -666,6 +666,8 @@ export const en: Record<string, string> = {
   'file.unstageHunk': 'Unstage Hunk',
   'file.stageLines': 'Stage Selected Lines',
   'file.unstageLines': 'Unstage Selected Lines',
+  'file.stageBlock': 'Stage Change Block',
+  'file.unstageBlock': 'Unstage Change Block',
   'file.lines': 'Lines',
   'file.copySelection': 'Copy',
   'file.copyLines': 'Copy Lines',
