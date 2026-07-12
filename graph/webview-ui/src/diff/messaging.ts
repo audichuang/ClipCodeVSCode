@@ -36,6 +36,9 @@ export function listenForHostMessages(): void {
         clearStageTimeout();
         // setDiffs also clears busy/error — the fresh push unlocks the buttons.
         diffStore.setDiffs(msg.payload.repoPath, msg.payload.file, msg.payload.stagedDiff, msg.payload.unstagedDiff);
+        // A failed fetch arrives as null sides + fetchError; showing it stops the
+        // empty state from reading as an affirmative "No changes".
+        if (msg.payload.fetchError) { diffStore.error = String(msg.payload.fetchError); }
         break;
       case 'setLocale':
         if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }

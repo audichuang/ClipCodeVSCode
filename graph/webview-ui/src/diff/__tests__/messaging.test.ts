@@ -25,6 +25,16 @@ describe('diff messaging', () => {
     expect(diffStore.loaded).toBe(true);
   });
 
+  it('diffShow with fetchError surfaces the error after populating the store', () => {
+    listenForHostMessages();
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: null, fetchError: 'index.lock exists' } },
+    }));
+    expect(diffStore.loaded).toBe(true);
+    expect(diffStore.error).toBe('index.lock exists');
+    expect(diffStore.busy).toBe(false);
+  });
+
   it('setLocale switches the i18n locale', () => {
     listenForHostMessages();
     window.dispatchEvent(new MessageEvent('message', {

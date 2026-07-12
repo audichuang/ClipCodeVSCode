@@ -36,12 +36,17 @@
 <div class="diff-app-root">
   {#if !store.loaded}
     <p class="empty">{t('file.openChanges')}</p>
-  {:else if sections.length === 0}
-    <p class="empty">{t('file.noChanges')}</p>
   {:else}
+    <!-- The banner renders in the empty state too: a failed fetch (null sides +
+         error) must not read as an affirmative "No changes". -->
     {#if store.error}
       <p class="banner error"><span class="codicon codicon-error"></span>{store.error}</p>
     {/if}
+    {#if sections.length === 0}
+      {#if !store.error}
+        <p class="empty">{t('file.noChanges')}</p>
+      {/if}
+    {:else}
     <div class="mode-bar">
       <div class="diff-mode-toggle">
         <button class:active={mode === 'inline'} onclick={() => { mode = 'inline'; }}>{t('details.inline')}</button>
@@ -74,6 +79,7 @@
         </section>
       {/each}
     </div>
+    {/if}
   {/if}
 </div>
 

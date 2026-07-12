@@ -64,7 +64,16 @@ describe('DiffPanel', () => {
     expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'staged');
     expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'unstaged');
     expect(diffShows()).toEqual([
-      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff, unstagedDiff } },
+      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff, unstagedDiff, fetchError: null } },
+    ]);
+  });
+
+  it('a failing diff fetch posts fetchError instead of a silent empty view', async () => {
+    const wb = makeWorkbench();
+    wb.fileDiffData.mockRejectedValue(new Error('index.lock exists'));
+    await shownPanel(wb);
+    expect(diffShows()).toEqual([
+      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff: null, unstagedDiff: null, fetchError: 'index.lock exists' } },
     ]);
   });
 

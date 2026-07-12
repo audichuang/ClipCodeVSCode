@@ -61,6 +61,14 @@ describe('Diff.svelte unified view', () => {
     expect(getByText('No changes')).toBeTruthy();
   });
 
+  it('a fetch error shows the error banner, never the "No changes" empty state', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, null);
+    diffStore.error = 'index.lock exists';
+    const { getByText, queryByText } = render(Diff);
+    expect(getByText('index.lock exists')).toBeTruthy();
+    expect(queryByText('No changes')).toBeNull();
+  });
+
   it('collapsing a section hides its FileDiffView content and a second click re-expands it', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, textDiff());
     const { container } = render(Diff);
