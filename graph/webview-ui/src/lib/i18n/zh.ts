@@ -657,6 +657,7 @@ export const zh: Record<string, string> = {
   /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
   'file.noChanges': '无变更',
   'file.stageFailed': '操作失败',
+  'file.stageTimeout': '操作耗时超出预期 — 完成后按钮会解锁（若一直无响应请重开此分页）',
   /* SNIPCODE-HOOK end */
   'file.createPatch': '创建 Patch',
   'file.createPatchFromSelected': '从选中的 {count} 个文件创建 Patch',

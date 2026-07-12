@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { MainPanel } from './MainPanel';
 import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
@@ -195,7 +195,9 @@ export class DiffPanel {
    *  reads the working tree (guarded against escaping the repo), anything else is
    *  a git ref; failure posts base64:'' so the webview shows its empty state. */
   private async sendImage(panel: vscode.WebviewPanel, ref: string, filePath: string): Promise<void> {
-    if (!this.current) { return; }
+    // Same authority rule as the stage handlers: the webview may only ask about
+    // the file this panel is showing.
+    if (!this.current || this.current.file !== filePath) { return; }
     const { repoPath } = this.current;
     const ext = '.' + (filePath.split('.').pop()?.toLowerCase() ?? '');
     const mimeType = MIME_BY_EXT[ext] ?? 'image/png';
@@ -206,6 +208,10 @@ export class DiffPanel {
         const relative = path.relative(repoPath, fullPath);
         if (relative.startsWith('..') || path.isAbsolute(relative)) {
           throw new Error('Invalid file path');
+        }
+        // Same 50MB cap GitService.getImageBase64 applies on the ref path.
+        if ((await stat(fullPath)).size > 50 * 1024 * 1024) {
+          throw new Error('Image too large');
         }
         base64 = (await readFile(fullPath)).toString('base64');
       } else {

@@ -151,7 +151,7 @@ describe('DiffPanel', () => {
     ]);
   });
 
-  it('serves getImageAtRef ref:working from the working tree, refusing paths that escape the repo', async () => {
+  it('serves getImageAtRef ref:working from the working tree, dropping requests for any other file', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'diffpanel-'));
     await writeFile(join(repo, 'img.png'), 'abc');
     const wb = makeWorkbench();
@@ -161,11 +161,13 @@ describe('DiffPanel', () => {
     await flush();
     H.panel!.webview.postMessage.mockClear();
     await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: 'img.png' } });
+    // Not the shown file (traversal or just a different path) → dropped entirely.
     await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: '../escape.png' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'HEAD', path: 'other.png' } });
     expect(posted().filter((m) => m.type === 'imageData')).toEqual([
       { type: 'imageData', payload: { ref: 'working', path: 'img.png', base64: 'YWJj', mimeType: 'image/png' } },
-      { type: 'imageData', payload: { ref: 'working', path: '../escape.png', base64: '', mimeType: 'image/png' } },
     ]);
+    expect(wb.imageBase64).not.toHaveBeenCalled();
   });
 
   it('a stage failure after the panel is closed still notifies, without posting to the dead webview', async () => {
