@@ -1,7 +1,7 @@
 <!-- graph/webview-ui/src/diff/Diff.svelte -->
 <script lang="ts">
   import { diffStore } from './diff-store.svelte';
-  import { postStageHunk } from './messaging';
+  import { postStageHunk, postStageLines } from './messaging';
   import { t } from '../lib/i18n/index.svelte';
   import FileDiffView from '../components/commit/FileDiffView.svelte';
 
@@ -32,6 +32,7 @@
       hideModeToggle
       stageBusy={store.busy}
       onStageHunk={({ hunkIndex }) => postStageHunk(hunkIndex)}
+      onStageLines={({ hunkIndex, lineIndices }) => postStageLines(hunkIndex, lineIndices)}
     />
   {/if}
 </div>
