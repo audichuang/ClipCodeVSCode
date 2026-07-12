@@ -652,6 +652,91 @@ index 1111111..2222222 100644
     );
   });
 
+  it('pairs a NON-ADJACENT (middle) del/add pair in a 3-del/3-add run, keeping the staged add in its own slot', () => {
+    // Three independent replacements in one run: A→A2, B→B2, C→C2 (idx 1-3 del,
+    // 4-6 add). Stage ONLY the MIDDLE pair (B→B2); A and C are unselected on
+    // BOTH sides. Raw git-diff order is ALL deletes then ALL adds, so without
+    // the reorder fix, processing in raw order would emit the demoted A and C
+    // context lines BEFORE B2's add (since A2/C2 are omitted, not demoted, so
+    // nothing after B on the delete side stops B2 from landing after them) —
+    // giving new-side content line1/A/C/B2/line3 (B2 pushed to the end, past
+    // C) instead of B2 staying in its own slot between A and C.
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,5 +1,5 @@
+ line1
+-A
+-B
+-C
++A2
++B2
++C2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [2, 5]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,5 +1,5 @@',
+        ' line1',
+        ' A', // unselected delete demoted to context (stage direction)
+        '-B',
+        '+B2', // kept add sits right after its own delete, not after C's context
+        ' C', // unselected delete demoted to context (stage direction)
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it("direction:'unstage' reorders the same middle pair, demoting unselected adds to context and omitting unselected deletes", () => {
+    // Same 3-replacement run, but as a HEAD→index (staged) diff being partially
+    // unstaged: unstage ONLY B→B2. A and C are unselected on both sides — for
+    // 'unstage' an unselected add (A2/C2, the index baseline) demotes to
+    // context while an unselected delete (A/C, HEAD content) is OMITTED
+    // entirely. The reconstructed OLD side (the result after reverse-apply)
+    // must read line1,A2,B,C2,line3 — B reverted, A2/C2 left staged, in their
+    // ORIGINAL slots — which requires the same reorder fix on the opposite side.
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,5 +1,5 @@
+ line1
+-A
+-B
+-C
++A2
++B2
++C2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [2, 5], 'unstage');
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,5 +1,5 @@',
+        ' line1',
+        // -A omitted — unselected delete in 'unstage' direction
+        ' A2', // unselected add demoted to context — index keeps it staged
+        '-B',
+        '+B2',
+        // -C omitted — unselected delete in 'unstage' direction
+        ' C2', // unselected add demoted to context — index keeps it staged
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
   it("direction:'unstage' demotes an unselected add to context and omits an unselected delete", () => {
     // Staged (HEAD→index) diff: reuse SAMPLE's shape. Unstage only the
     // line2-changed add (idx 2); the delete (idx 1, HEAD content) is not the

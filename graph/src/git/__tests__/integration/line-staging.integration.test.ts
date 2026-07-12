@@ -76,6 +76,35 @@ describe('GitService integration — stageLines / unstageLines', () => {
     expect(indexBlob).toBe('P2\nQ'); // P2 staged, Q unchanged, still no trailing newline
   });
 
+  it('unstages a subset when HEAD lacks a trailing newline but the index has one (mixed EOF)', async () => {
+    // HEAD: 'P\nQ' with NO trailing newline. Both lines are then changed and
+    // staged as 'P2\nQ2\n' WITH a trailing newline. Unstage only P→P2 — the hunk
+    // (HEAD→index) is: 0 del P, 1 del Q (HEAD has no eof → marker on Q),
+    // 2 add P2, 3 add Q2. Q2 must stay staged, untouched, with its OWN (real)
+    // trailing newline — it must not inherit HEAD's no-trailing-newline state.
+    commit(repo.path, 'mixed-eof-base', { 'h.txt': 'P\nQ' }); // no trailing newline
+    writeFile(repo.path, 'h.txt', 'P2\nQ2\n'); // trailing newline
+    runGit(repo.path, ['add', 'h.txt']);
+    await svc.unstageLines('h.txt', 0, [0, 2]);
+    const indexBlob = runGit(repo.path, ['show', ':h.txt']);
+    expect(indexBlob).toBe('P\nQ2\n'); // P reverted to HEAD; Q2 stays staged with its real trailing newline
+  });
+
+  it('unstages only a trailing no-newline add, keeping an earlier unselected add staged (old-side split)', async () => {
+    // HEAD: 'X\n'. Staged: 'X\nA\nB' with NO trailing newline (marker on B).
+    // Unstage ONLY B; A is unselected → stays staged (demoted to context). The
+    // reconstructed old side then ends at A (a shared context line) while a
+    // kept new-only addition (B) still follows it in the patch body — the
+    // no-newline marker must land on that shared A line without truncating the
+    // '+B' that comes after (the old-side mirror of the existing new-side split).
+    commit(repo.path, 'split-base', { 'k.txt': 'X\n' });
+    writeFile(repo.path, 'k.txt', 'X\nA\nB'); // no trailing newline
+    runGit(repo.path, ['add', 'k.txt']);
+    await svc.unstageLines('k.txt', 0, [2]); // hunk: 0 ctx X, 1 add A, 2 add B(marker)
+    const indexBlob = runGit(repo.path, ['show', ':k.txt']);
+    expect(indexBlob).toBe('X\nA'); // B unstaged; A stays, taking on the no-newline tail
+  });
+
   it('throws when the file has no unstaged changes', async () => {
     runGit(repo.path, ['checkout', '--', 'f.txt']);
     await expect(svc.stageLines('f.txt', 0, [1, 2])).rejects.toThrow(/no unstaged changes/);
