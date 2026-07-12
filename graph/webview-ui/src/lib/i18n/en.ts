@@ -656,6 +656,7 @@ export const en: Record<string, string> = {
   /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
   'file.noChanges': 'No changes',
   'file.stageFailed': 'Operation failed',
+  'file.stageTimeout': 'Operation is taking longer than expected — buttons unlock when it completes (reopen this tab if it never does)',
   /* SNIPCODE-HOOK end */
   'file.createPatch': 'Create Patch',
   'file.createPatchFromSelected': 'Create Patch from {count} selected files',

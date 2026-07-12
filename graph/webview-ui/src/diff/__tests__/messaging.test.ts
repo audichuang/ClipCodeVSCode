@@ -110,14 +110,25 @@ describe('diff messaging', () => {
     expect(globalThis.__postedMessages).toHaveLength(1);
   });
 
-  it('a lost reply times out: busy clears and a soft error is shown', () => {
+  it('a slow reply times out into a banner but keeps stage locked until the fresh diffShow', () => {
     vi.useFakeTimers();
+    listenForHostMessages();
     diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
     postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
     vi.advanceTimersByTime(15_000);
+    // Still locked: the op may still be running host-side and the shown hunk
+    // indices are stale — unlocking here could stage the wrong hunk.
+    expect(diffStore.busy).toBe(true);
+    expect(diffStore.error).toContain('longer than expected');
+    postStageHunk('unstaged', 1); // must still be refused
+    expect(globalThis.__postedMessages).toHaveLength(1);
+    // The late diffShow finally unlocks and clears the banner.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+    }));
     expect(diffStore.busy).toBe(false);
-    expect(diffStore.error).toBe('Operation failed');
+    expect(diffStore.error).toBeNull();
   });
 
   it('a diffShow reply disarms the timeout', () => {

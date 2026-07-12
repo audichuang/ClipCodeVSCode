@@ -9,8 +9,12 @@ import { i18n, t } from '../lib/i18n/index.svelte';
 const vscode = getVsCodeApi();
 
 /** Bound the stage round-trip (AGENTS.md: request→response waits MUST carry a
- *  timeout) — a reply lost in a dispose/handshake gap must not leave `busy`
- *  stuck true and both sections' buttons dead forever. */
+ *  timeout) with FEEDBACK, not an unlock: past this deadline a banner tells the
+ *  user what's stuck, but `busy` stays true — the op may still be running
+ *  host-side (a >15s refresh on a huge repo), and unlocking would let a second
+ *  click stage against stale hunk indices, hitting the wrong hunk. The eventual
+ *  `diffShow`/`error` unlocks; if the reply is truly lost, reopening the Diff
+ *  tab re-handshakes and re-pushes. */
 const STAGE_TIMEOUT_MS = 15_000;
 let stageTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -63,8 +67,7 @@ function beginStageOp(side: DiffSide): boolean {
   clearTimeout(stageTimer);
   stageTimer = setTimeout(() => {
     stageTimer = undefined;
-    diffStore.busy = false;
-    diffStore.error = t('file.stageFailed');
+    diffStore.error = t('file.stageTimeout');
   }, STAGE_TIMEOUT_MS);
   return true;
 }
