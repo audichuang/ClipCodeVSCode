@@ -100,6 +100,13 @@
     if (!indices.length || !isHunkComplete(hunkIndex)) return;
     onStageLines({ file: diff.file, hunkIndex, lineIndices: indices });
   }
+
+  /* SNIPCODE-HOOK: IntelliJ-style per-change-block staging. stage/unstage exactly
+     the lines of one contiguous +/- block (the gutter arrow that sits next to it). */
+  function stageBlock(hunkIndex: number, lineIndices: number[]) {
+    if (!onStageLines || !lineIndices.length || !isHunkComplete(hunkIndex)) return;
+    onStageLines({ file: diff.file, hunkIndex, lineIndices });
+  }
   /* SNIPCODE-HOOK end */
 
   // A truncated diff renders only the first N lines of its final hunk (see
@@ -309,6 +316,30 @@
     }
     return out;
   });
+
+  /* SNIPCODE-HOOK start: contiguous change blocks per hunk. Each run of adjacent
+     +/- lines is one block; the SBS gutter arrow anchors on the block's first
+     line so it sits next to the actual change (not the hunk top). Keyed
+     hunkIdx → (firstLineIndex → all line indices in that block) for O(1) lookup
+     in the render loop. */
+  const blockFirstByHunk = $derived.by(() => {
+    const map = new Map<number, Map<number, number[]>>();
+    renderHunks.forEach((hunk, hunkIdx) => {
+      const byFirst = new Map<number, number[]>();
+      let cur: number[] | null = null;
+      hunk.lines.forEach((line, i) => {
+        if (line.type !== 'context') {
+          if (!cur) { cur = []; byFirst.set(i, cur); }
+          cur.push(i);
+        } else {
+          cur = null;
+        }
+      });
+      map.set(hunkIdx, byFirst);
+    });
+    return map;
+  });
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start (B-2d): per-line word-diff ranges, keyed like the
      highlight cache so the effect can overlay them on the Shiki output. */
@@ -541,28 +572,39 @@
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
-                <!-- SNIPCODE-HOOK start (B-2c): SBS overlay Stage/Unstage -->
-                {#if canStage && isHunkComplete(hunkIdx)}
-                  <button class="sbs-stage-btn" onclick={() => stageHunk(hunkIdx)}
-                          disabled={stageBusy}
-                          aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
-                          title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
-                    <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                  </button>
-                {/if}
-                <!-- SNIPCODE-HOOK end -->
                 {#each hunk.lines as line, lineIndex}
+                  <!-- SNIPCODE-HOOK start: per-change-block stage arrow, anchored
+                       on the block's first line (works even when that line is an
+                       empty placeholder for a pure-addition block). -->
+                  {@const blockLines = canStage && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
                   {#if line.type === 'context' || line.type === 'delete'}
-                    <div class="diff-line diff-{line.type}">
+                    <div class="diff-line diff-{line.type}" class:has-block-arrow={blockLines}>
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
+                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                        </button>
+                      {/if}
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
                     </div>
                   {:else}
-                    <div class="diff-line diff-empty-line">
+                    <div class="diff-line diff-empty-line" class:has-block-arrow={blockLines}>
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
+                                title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                        </button>
+                      {/if}
                       <span class="line-num"></span>
                       <span class="line-content"></span>
                     </div>
                   {/if}
+                  <!-- SNIPCODE-HOOK end -->
                 {/each}
               </div>
             {/each}
@@ -764,33 +806,44 @@
   .hunk-stage-btn:focus {
     opacity: 1;
   }
-  .sbs-stage-btn {
+  /* Per-change-block gutter arrow: anchored on the block's first line (the line
+     div is position:relative only when it carries an arrow), sits at the right
+     edge of the left pane ≈ the center gutter. Always visible (IntelliJ-style),
+     brightened on hover of its block. */
+  .diff-line.has-block-arrow {
+    position: relative;
+  }
+  .sbs-block-stage-btn {
     position: absolute;
-    top: 2px;
-    right: 8px;
+    top: 50%;
+    right: 3px;
+    transform: translateY(-50%);
     z-index: 2;
-    opacity: 0;
+    opacity: 0.55;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     padding: 0;
     border: 1px solid var(--vscode-focusBorder, #4a9eff);
     border-radius: 4px;
     background: var(--vscode-button-background, #0e639c);
     color: var(--vscode-button-foreground, #fff);
     cursor: pointer;
-    font-size: 1.05em;
+    font-size: 0.95em;
     line-height: 1;
+    transition: opacity 0.1s;
   }
-  .sbs-hunk.hunk-hover .sbs-stage-btn,
-  .sbs-stage-btn:focus {
+  .sbs-hunk.hunk-hover .sbs-block-stage-btn,
+  .diff-line.has-block-arrow:hover .sbs-block-stage-btn,
+  .sbs-block-stage-btn:hover,
+  .sbs-block-stage-btn:focus {
     opacity: 1;
   }
   /* Busy gate (stageBusy prop): dim + block clicks even while hovered/focused. */
   .hunk-stage-btn:disabled,
-  .sbs-stage-btn:disabled {
+  .sbs-block-stage-btn:disabled {
     opacity: 0.35 !important;
     cursor: not-allowed;
   }
@@ -929,7 +982,8 @@
     background: var(--vscode-button-hoverBackground, #1177bb);
   }
 
-  /* SNIPCODE-HOOK (B-2c): anchor for the .sbs-stage-btn overlay. */
+  /* SNIPCODE-HOOK (B-2c): hunk-level positioning context (block arrows now anchor
+     on their own line via .has-block-arrow). */
   .sbs-hunk { position: relative; }
 
   /* Side-by-side */

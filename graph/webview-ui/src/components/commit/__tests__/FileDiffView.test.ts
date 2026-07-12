@@ -573,13 +573,29 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     expect(container.querySelector('.hunk-stage-btn')).toBeNull();
   });
 
-  it('shows an SBS overlay stage button in side-by-side mode', () => {
+  it('shows one SBS gutter arrow per change block, anchored on the block', async () => {
+    i18n.setLocale('en');
+    const onStageLines = vi.fn();
     const { container } = render(FileDiffView, {
-      diff: sampleDiff(), staged: false, onStageHunk: vi.fn(), diffMode: 'side-by-side', hideModeToggle: true,
+      diff: sampleDiff(), staged: false, onStageHunk: vi.fn(), onStageLines,
+      diffMode: 'side-by-side', hideModeToggle: true,
     });
-    const btn = container.querySelector('.sbs-stage-btn');
-    expect(btn).not.toBeNull();
-    expect(btn!.getAttribute('aria-label')).toBe('Stage Hunk');
+    // sampleDiff hunk 0: 0 ctx, 1 del, 2 add, 3 ctx, 4 add, 5 add, 6 ctx.
+    // Two contiguous +/- blocks: [1,2] and [4,5] → two arrows.
+    const btns = container.querySelectorAll('.sbs-block-stage-btn');
+    expect(btns.length).toBe(2);
+    expect(btns[0].getAttribute('aria-label')).toBe('Stage Selected Lines');
+    // Clicking the first arrow stages just that block's changed lines.
+    await fireEvent.click(btns[0]);
+    expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1, 2] });
+  });
+
+  it('labels SBS gutter arrows "Unstage Selected Lines" on a staged diff', () => {
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(), staged: true, onStageHunk: vi.fn(), onStageLines: vi.fn(),
+      diffMode: 'side-by-side', hideModeToggle: true,
+    });
+    expect(container.querySelector('.sbs-block-stage-btn')!.getAttribute('aria-label')).toBe('Unstage Selected Lines');
   });
 
   it('offers Stage Selected Lines and posts the changed indices (unstaged view)', async () => {
