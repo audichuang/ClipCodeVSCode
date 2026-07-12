@@ -221,6 +221,22 @@ export class ChangesWorkbench implements vscode.Disposable {
     this.diffPanel?.refreshIfCurrent(repoPath, file, 'staged');
   }
 
+  /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
+  /** Stage the selected changed lines of one hunk of an unstaged file. */
+  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices));
+    await this.refresh();
+    this.diffPanel?.refreshIfCurrent(repoPath, file, 'unstaged');
+  }
+
+  /** Unstage the selected changed lines of one hunk of a staged file. */
+  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices));
+    await this.refresh();
+    this.diffPanel?.refreshIfCurrent(repoPath, file, 'staged');
+  }
+  /* SNIPCODE-HOOK end */
+
   /** Multi-select which repos the Changes tree shows. Picking all (or none)
    *  clears the filter back to "show every repo". */
   private async filterRepos(): Promise<void> {
