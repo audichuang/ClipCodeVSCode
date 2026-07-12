@@ -658,6 +658,7 @@ export const ko: Record<string, string> = {
   'file.noChanges': '변경 없음',
   'file.stageFailed': '작업 실패',
   'file.stageTimeout': '작업이 예상보다 오래 걸립니다 — 완료되면 버튼이 다시 활성화됩니다 (계속 멈춰 있으면 이 탭을 다시 여세요)',
+  'file.openFullDiff': '에디터에서 전체 파일 diff 열기',
   /* SNIPCODE-HOOK end */
   'file.createPatch': 'Patch 생성',
   'file.createPatchFromSelected': '선택한 {count}개 파일로 Patch 생성',

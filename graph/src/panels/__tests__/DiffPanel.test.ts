@@ -146,6 +146,23 @@ describe('DiffPanel', () => {
     expect(errors.map((m) => m.payload.source)).toEqual(['diffStageHunk', 'diffStageLines']);
   });
 
+  it('diffOpenSide opens the native diff editor with the git-scheme pair for that side', async () => {
+    const wb = makeWorkbench();
+    await shownPanel(wb);
+    await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/r', file: 'a.ts', side: 'staged' } });
+    await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged' } });
+    await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/evil', file: 'a.ts', side: 'staged' } }); // dropped
+    const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+    expect(calls).toHaveLength(2);
+    const [stagedCall, unstagedCall] = calls as any[];
+    expect(JSON.parse(stagedCall[1].query).ref).toBe('HEAD');
+    expect(JSON.parse(stagedCall[2].query).ref).toBe('');
+    expect(stagedCall[3]).toBe('a.ts (Staged)');
+    expect(JSON.parse(unstagedCall[1].query).ref).toBe('');
+    expect(unstagedCall[2].query).toBeUndefined(); // right side is the plain working-tree file
+    expect(unstagedCall[3]).toBe('a.ts (Working Tree)');
+  });
+
   it('serves getImageAtRef from git for a real ref, and empty base64 on failure', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);

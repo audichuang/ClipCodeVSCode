@@ -75,6 +75,16 @@ function beginStageOp(side: DiffSide): boolean {
   return true;
 }
 
+/** Ask the host to open this side's FULL-FILE diff in a native editor tab
+ *  (staged: HEAD↔index, unstaged: index↔working). Read-only — no busy gate. */
+export function postOpenSide(side: DiffSide): void {
+  if (!diffFor(side)) { return; }
+  vscode.postMessage({
+    type: 'diffOpenSide',
+    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side },
+  });
+}
+
 /** Post a single hunk to the host; `side` decides stage vs unstage. */
 export function postStageHunk(side: DiffSide, hunkIndex: number): void {
   if (!beginStageOp(side)) { return; }

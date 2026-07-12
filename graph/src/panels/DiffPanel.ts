@@ -116,6 +116,24 @@ export class DiffPanel {
         await this.sendImage(panel, String(ref), String(filePath));
         return;
       }
+      // Full-file view for one side in a NATIVE diff editor tab (the panel's
+      // sections show hunks only). Mirrors MainPanel.openDiffInEditor: staged is
+      // HEAD↔index, unstaged is index↔working; ref '' = index (stage 0).
+      if (msg?.type === 'diffOpenSide') {
+        const { repoPath, file, side } = msg.payload ?? {};
+        if (!this.isCurrentTarget(repoPath, file)) { return; }
+        const fileUri = vscode.Uri.file(path.join(String(repoPath), String(file)));
+        const gitUri = (ref: string) => fileUri.with({
+          scheme: 'git',
+          query: JSON.stringify({ path: fileUri.fsPath, ref }),
+        });
+        if (side === 'staged') {
+          await vscode.commands.executeCommand('vscode.diff', gitUri('HEAD'), gitUri(''), `${file} (Staged)`);
+        } else {
+          await vscode.commands.executeCommand('vscode.diff', gitUri(''), fileUri, `${file} (Working Tree)`);
+        }
+        return;
+      }
       /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage. */
       if (msg?.type === 'diffStageLines') {
         const { repoPath, file, side, hunkIndex, lineIndices } = msg.payload ?? {};

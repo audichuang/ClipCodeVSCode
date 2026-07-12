@@ -658,6 +658,7 @@ export const zh: Record<string, string> = {
   'file.noChanges': '无变更',
   'file.stageFailed': '操作失败',
   'file.stageTimeout': '操作耗时超出预期 — 完成后按钮会解锁（若一直无响应请重开此分页）',
+  'file.openFullDiff': '在编辑器中打开完整文件 diff',
   /* SNIPCODE-HOOK end */
   'file.createPatch': '创建 Patch',
   'file.createPatchFromSelected': '从选中的 {count} 个文件创建 Patch',
