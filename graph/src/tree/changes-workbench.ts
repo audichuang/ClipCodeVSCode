@@ -200,7 +200,7 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
-    this.diffPanel?.show(node.repoPath, node.path, node.group);
+    this.diffPanel?.show(node.repoPath, node.path);
   }
 
   /** Stage the selected hunks of one unstaged file, then refresh the tree and
@@ -210,7 +210,7 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
-    this.diffPanel?.refreshIfCurrent(repoPath, file, 'unstaged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file);
   }
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
@@ -218,7 +218,7 @@ export class ChangesWorkbench implements vscode.Disposable {
   async unstageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file, 'staged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file);
   }
 
   /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
@@ -226,14 +226,14 @@ export class ChangesWorkbench implements vscode.Disposable {
   async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file, 'unstaged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file);
   }
 
   /** Unstage the selected changed lines of one hunk of a staged file. */
   async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file, 'staged');
+    this.diffPanel?.refreshIfCurrent(repoPath, file);
   }
   /* SNIPCODE-HOOK end */
 
