@@ -2,7 +2,9 @@
   import type { DiffData } from '../../lib/types';
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n/index.svelte';
-  import { detectLanguage, highlightLineSync, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
+  import { detectLanguage, highlightLineSync, highlightLineWithRanges, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
+  /* SNIPCODE-HOOK (B-2d): intraline word-level diff. */
+  import { pairHunkWordDiffs } from '../../lib/utils/word-diff';
   import ImageDiff from '../common/ImageDiff.svelte';
 
   // Right-click target on a diff line. The parent owns the context menu (it
@@ -308,6 +310,20 @@
     return out;
   });
 
+  /* SNIPCODE-HOOK start (B-2d): per-line word-diff ranges, keyed like the
+     highlight cache so the effect can overlay them on the Shiki output. */
+  const wordDiffByKey = $derived.by(() => {
+    const map = new Map<string, { ranges: import('../../lib/utils/word-diff').Range[]; kind: 'add' | 'delete' }>();
+    for (const hunk of renderHunks) {
+      const paired = pairHunkWordDiffs(hunk.lines);
+      for (const [lineIdx, entry] of paired) {
+        map.set(`${hunk.oldStart}-${lineIdx}`, entry);
+      }
+    }
+    return map;
+  });
+  /* SNIPCODE-HOOK end */
+
   const MAX_HIGHLIGHT_LINES = 5000;
 
   // Tracks the VS Code color theme so highlighting re-runs (with the matching
@@ -370,7 +386,13 @@
           if (cancelled || diff !== target) return;
           const end = Math.min(i + CHUNK_SIZE, flat.length);
           for (let j = i; j < end; j++) {
-            newMap.set(flat[j].key, highlightLineSync(h, flat[j].content, lang, theme));
+            const wd = wordDiffByKey.get(flat[j].key);
+            newMap.set(
+              flat[j].key,
+              wd
+                ? highlightLineWithRanges(h, flat[j].content, lang, wd.ranges, wd.kind, theme)
+                : highlightLineSync(h, flat[j].content, lang, theme),
+            );
           }
           // Defer to next microtask so user interaction (scroll, switch file)
           // can interrupt mid-highlight without paying for the whole pass.
@@ -767,6 +789,19 @@
   .sbs-stage-btn:disabled {
     opacity: 0.35 !important;
     cursor: not-allowed;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start (B-2d): intraline word-diff highlight. Sits on top of
+     the whole-line add/delete background; uses a stronger tint so the changed
+     characters stand out (IntelliJ-style). Inherits the Shiki syntax color. */
+  :global(.word-diff-del) {
+    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
+    border-radius: 2px;
+  }
+  :global(.word-diff-add) {
+    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.30));
+    border-radius: 2px;
   }
   /* SNIPCODE-HOOK end */
 
