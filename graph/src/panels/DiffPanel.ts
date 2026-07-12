@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { randomBytes } from 'crypto';
 import { MainPanel } from './MainPanel';
 import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
@@ -13,6 +14,11 @@ import type { ChangesWorkbench } from '../tree/changes-workbench';
  * The diff.js bundle is a CLASSIC <script> (nonce CSP), mirroring MainPanel's
  * CSP/nonce/asset loading.
  */
+/** Posted back for a stage request whose target no longer matches the shown file
+ *  (stale click racing a navigation, or a forged payload) — unlocks the webview's
+ *  busy gate instead of leaving it to the timeout. */
+const STALE_TARGET = 'Stale stage request — the shown file changed';
+
 export class DiffPanel {
   static readonly viewType = 'snipcode.diffPanel';
   private static instance: DiffPanel | undefined;
@@ -54,6 +60,13 @@ export class DiffPanel {
     if (this.ready) { void this.push(this.current, ticket); }
   }
 
+  /** A stage request may only target the file this panel is itself showing — the
+   *  webview holds no authority of its own, so a stale or forged repoPath/file
+   *  must not reach GitService's index mutations. */
+  private isCurrentTarget(repoPath: unknown, file: unknown): boolean {
+    return !!this.current && this.current.repoPath === repoPath && this.current.file === file;
+  }
+
   /** Re-render ONLY if it is still the file the user is viewing (post-apply). */
   refreshIfCurrent(repoPath: string, file: string): void {
     if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
@@ -90,6 +103,10 @@ export class DiffPanel {
       /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage. */
       if (msg?.type === 'diffStageLines') {
         const { repoPath, file, side, hunkIndex, lineIndices } = msg.payload ?? {};
+        if (!this.isCurrentTarget(repoPath, file)) {
+          panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message: STALE_TARGET } });
+          return;
+        }
         const idx = Number(hunkIndex);
         const lines = Array.isArray(lineIndices) ? lineIndices.map(Number) : [];
         try {
@@ -109,6 +126,10 @@ export class DiffPanel {
       /* SNIPCODE-HOOK end */
       if (msg?.type !== 'diffStageHunk') { return; }
       const { repoPath, file, side, hunkIndex } = msg.payload ?? {};
+      if (!this.isCurrentTarget(repoPath, file)) {
+        panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message: STALE_TARGET } });
+        return;
+      }
       try {
         if (side === 'unstaged') {
           await this.workbench.stageHunks(String(repoPath), String(file), [Number(hunkIndex)]);
@@ -183,8 +204,5 @@ export class DiffPanel {
 }
 
 function getNonce(): string {
-  let text = '';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) { text += chars.charAt(Math.floor(Math.random() * chars.length)); }
-  return text;
+  return randomBytes(24).toString('base64');
 }

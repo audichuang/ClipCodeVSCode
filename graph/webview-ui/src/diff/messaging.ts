@@ -4,25 +4,42 @@
 // may be called only once per webview.
 import { diffStore, type DiffSide } from './diff-store.svelte';
 import { getVsCodeApi } from '../lib/vscode-api';
-import { i18n } from '../lib/i18n/index.svelte';
+import { i18n, t } from '../lib/i18n/index.svelte';
 
 const vscode = getVsCodeApi();
 
-/** Wire the extension -> webview message handler. Call once at boot. */
+/** Bound the stage round-trip (AGENTS.md: request→response waits MUST carry a
+ *  timeout) — a reply lost in a dispose/handshake gap must not leave `busy`
+ *  stuck true and both sections' buttons dead forever. */
+const STAGE_TIMEOUT_MS = 15_000;
+let stageTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearStageTimeout(): void {
+  clearTimeout(stageTimer);
+  stageTimer = undefined;
+}
+
+/** Wire the extension -> webview message handler. Safe to call more than once —
+ *  only the first call registers (repeat calls in tests must not stack handlers). */
+let listening = false;
 export function listenForHostMessages(): void {
+  if (listening) { return; }
+  listening = true;
   window.addEventListener('message', (e) => {
     const msg = (e as MessageEvent).data;
     switch (msg?.type) {
       case 'diffShow':
+        clearStageTimeout();
+        // setDiffs also clears busy/error — the fresh push unlocks the buttons.
         diffStore.setDiffs(msg.payload.repoPath, msg.payload.file, msg.payload.stagedDiff, msg.payload.unstagedDiff);
-        diffStore.busy = false;
         break;
       case 'setLocale':
         if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }
         break;
       case 'error':
+        clearStageTimeout();
         if (msg.payload?.source === 'diffStageHunk' || msg.payload?.source === 'diffStageLines') {
-          diffStore.error = String(msg.payload.message ?? '操作失敗');
+          diffStore.error = String(msg.payload.message ?? t('file.stageFailed'));
         }
         diffStore.busy = false;
         break;
@@ -34,15 +51,27 @@ function diffFor(side: DiffSide) {
   return side === 'staged' ? diffStore.stagedDiff : diffStore.unstagedDiff;
 }
 
-/** Post a single hunk to the host; `side` decides stage vs unstage. Ignored while
- *  a prior op is still in flight (busy) — applying re-parses the diff and shifts
- *  every later hunk index, so a second click before the fresh `diffShow` lands
- *  would target the wrong hunk. Also ignored if that side currently has no diff. */
-export function postStageHunk(side: DiffSide, hunkIndex: number): void {
-  if (diffStore.busy) { return; }
-  if (!diffFor(side)) { return; }
+/** Shared gate for both stage ops. Refuses while a prior op is in flight (busy) —
+ *  applying re-parses the diff and shifts every later hunk/line index, so a second
+ *  click before the fresh `diffShow` lands would target the wrong hunk — and when
+ *  the requested side has no diff. On success flags busy and arms the timeout. */
+function beginStageOp(side: DiffSide): boolean {
+  if (diffStore.busy) { return false; }
+  if (!diffFor(side)) { return false; }
   diffStore.error = null;
   diffStore.busy = true;
+  clearTimeout(stageTimer);
+  stageTimer = setTimeout(() => {
+    stageTimer = undefined;
+    diffStore.busy = false;
+    diffStore.error = t('file.stageFailed');
+  }, STAGE_TIMEOUT_MS);
+  return true;
+}
+
+/** Post a single hunk to the host; `side` decides stage vs unstage. */
+export function postStageHunk(side: DiffSide, hunkIndex: number): void {
+  if (!beginStageOp(side)) { return; }
   vscode.postMessage({
     type: 'diffStageHunk',
     payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex },
@@ -50,12 +79,9 @@ export function postStageHunk(side: DiffSide, hunkIndex: number): void {
 }
 
 /** Post the gutter-selected changed lines of one hunk to the host; `side` decides
- *  stage vs unstage. Gated on `busy` for the same index-shift reason. */
+ *  stage vs unstage. */
 export function postStageLines(side: DiffSide, hunkIndex: number, lineIndices: number[]): void {
-  if (diffStore.busy) { return; }
-  if (!diffFor(side)) { return; }
-  diffStore.error = null;
-  diffStore.busy = true;
+  if (!beginStageOp(side)) { return; }
   vscode.postMessage({
     type: 'diffStageLines',
     payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex, lineIndices },
