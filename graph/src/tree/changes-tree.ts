@@ -71,8 +71,8 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     item.resourceUri = uri; // native file icon + git decoration colour
     item.id = `${node.group}:${node.repoPath}:${node.path}`;
     item.command = {
-      command: 'snipcode.git.openChange',
-      title: 'Open Changes',
+      command: 'snipcode.git.showDiff',
+      title: 'Show Diff',
       arguments: [node],
     };
     return item;
