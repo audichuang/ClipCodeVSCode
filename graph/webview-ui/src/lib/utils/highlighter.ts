@@ -231,17 +231,27 @@ export function highlightLineWithRanges(
     const close = tk.color ? '</span>' : '';
     html += open;
     // Split the token into runs of same in/out-of-range, wrapping only the
-    // changed runs so the surrounding syntax color is preserved.
+    // changed runs so the surrounding syntax color is preserved. Step by whole
+    // code point (not UTF-16 code unit): `ranges` offsets are UTF-16-based to
+    // match Shiki's token indexing, but a surrogate pair (e.g. an emoji) must
+    // never be torn into two spans on a lone half, which is invalid/mojibake
+    // once rendered — classify the pair as a unit using its start offset.
     let run = '';
     let runInRange = tk.text.length > 0 ? inRange(offset) : false;
-    for (let c = 0; c < tk.text.length; c++) {
+    let c = 0;
+    while (c < tk.text.length) {
+      const code = tk.text.charCodeAt(c);
+      const nextCode = c + 1 < tk.text.length ? tk.text.charCodeAt(c + 1) : 0;
+      const isSurrogatePair = code >= 0xd800 && code <= 0xdbff && nextCode >= 0xdc00 && nextCode <= 0xdfff;
+      const chunkLen = isSurrogatePair ? 2 : 1;
       const here = inRange(offset + c);
       if (here !== runInRange) {
         html += runInRange ? `<span class="${cls}">${escapeHtml(run)}</span>` : escapeHtml(run);
         run = '';
         runInRange = here;
       }
-      run += tk.text[c];
+      run += tk.text.slice(c, c + chunkLen);
+      c += chunkLen;
     }
     if (run) { html += runInRange ? `<span class="${cls}">${escapeHtml(run)}</span>` : escapeHtml(run); }
     html += close;
