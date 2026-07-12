@@ -256,6 +256,15 @@
         "command": "snipcode.git.filterRepos",
         "title": "Snipcode Git: Filter Repos",
         "icon": "$(filter)"
+      },
+      {
+        "command": "snipcode.git.showDiff",
+        "title": "Snipcode Git: Show Diff"
+      },
+      {
+        "command": "snipcode.git.openChange",
+        "title": "Snipcode Git: Open in Editor",
+        "icon": "$(go-to-file)"
       }
     ],
     "viewsContainers": {
@@ -276,6 +285,11 @@
         {
           "id": "snipcode.commitBox",
           "name": "Commit",
+          "type": "webview"
+        },
+        {
+          "id": "snipcode.diff",
+          "name": "Diff",
           "type": "webview"
         }
       ],
@@ -470,6 +484,11 @@
           "command": "snipcode.git.unstage",
           "when": "view == snipcode.changes && viewItem == file-staged",
           "group": "inline"
+        },
+        {
+          "command": "snipcode.git.openChange",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "inline@9"
         },
         {
           "command": "snipcode.git.stageRepo",
