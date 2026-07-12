@@ -30,6 +30,20 @@ export class GitError extends Error {
 }
 
 /**
+ * Per-hunk staging emits the file's whole diff header (everything before the
+ * first `@@`) verbatim, so a recorded chmod / rename / copy would be applied
+ * alongside a selected content hunk the user never opted into. Refuse per-hunk
+ * staging for those files — whole-file stage/unstage in the tree still works.
+ * A new/deleted whole file (its `/dev/null` header) is fine: its single hunk IS
+ * the whole file. `old mode`/`new mode` mark an in-place mode change.
+ */
+function assertHunkStageable(rawFileDiff: string, file: string): void {
+  if (/^(old mode |new mode |rename from |rename to |copy from |copy to )/m.test(rawFileDiff)) {
+    throw new Error(`per-hunk staging not supported for ${file} (file mode or rename change); stage the whole file instead`);
+  }
+}
+
+/**
  * Bin an ISO-8601 timestamp (`%aI` from `git log`) by the *author's* local
  * weekday and hour, not the host's. `new Date(iso).getDay()/getHours()` would
  * convert into the machine's timezone — a 10am Seoul commit would land in
@@ -2281,6 +2295,7 @@ export class GitService {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
     if (!raw.trim()) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    assertHunkStageable(raw, file);
     const patch = buildForwardPatch(raw, hunkIndices);
     // exec routes 'apply' through withMutationLock (it is a mutation); stdin
     // feeds the patch (same as reverseCommitChanges). --cached stages only.
@@ -2298,6 +2313,7 @@ export class GitService {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
     if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
+    assertHunkStageable(raw, file);
     const patch = buildForwardPatch(raw, hunkIndices);
     await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
   }

@@ -1,3 +1,5 @@
+import { chmodSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
@@ -61,5 +63,15 @@ describe('GitService integration — stageHunks / unstageHunks', () => {
 
   it('unstageHunks throws when the file has no staged changes', async () => {
     await expect(svc.unstageHunks('f.txt', [0])).rejects.toThrow(/no staged changes/);
+  });
+
+  it('stageHunks refuses a file that also has a mode change (avoids staging an unopted chmod)', async () => {
+    // A working-tree mode change makes `git diff` carry `old mode`/`new mode` in
+    // the header, which per-hunk staging would apply alongside a content hunk.
+    chmodSync(join(repo.path, 'f.txt'), 0o755);
+    const raw = runGit(repo.path, ['diff', 'f.txt']);
+    // Precondition: this repo actually records file mode (core.filemode on).
+    if (!/^new mode /m.test(raw)) { return; }
+    await expect(svc.stageHunks('f.txt', [0])).rejects.toThrow(/mode or rename/);
   });
 });
