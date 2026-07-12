@@ -360,3 +360,157 @@ export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: numb
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
   return [...finalHeader, ...body].join('\n') + '\n';
 }
+
+/**
+ * Build a single-hunk patch that stages ONLY the selected changed lines of one
+ * hunk from an index→working diff, for `git apply --cached`.
+ *
+ * Selection semantics (forward / stage direction; baseline = the current index):
+ *  - omitted lineIndices → stage every changed (+/-) line in the hunk;
+ *  - provided → stage only the listed +/- lines:
+ *     - selected `+` → kept as `+` (added to the index);
+ *     - UNSELECTED `+` → OMITTED entirely (not in the index, not being staged).
+ *       It does NOT demote to context — unlike reverse — because a context line
+ *       must exist in the baseline/index and an unstaged addition does not;
+ *     - selected `-` → kept as `-` (removed from the index);
+ *     - UNSELECTED `-` → demoted to context ` ` (it stays in the index).
+ *
+ * This is the mirror image of {@link buildReversePatch} with the old/new sides
+ * swapped: here the OLD side (the index baseline) always reaches EOF because
+ * deletions are never dropped, while the NEW side (the staged result) can lose a
+ * trailing line when an unselected trailing addition is omitted — so the
+ * no-newline re-anchoring mirrors buildReversePatch with sides swapped.
+ *
+ * @throws if the hunk index is out of range or nothing stageable is selected.
+ */
+export function buildForwardPatchLines(rawFileDiff: string, hunkIndex: number, lineIndices?: number[]): string {
+  const { header, hunks } = parseFileDiff(rawFileDiff);
+  const hunk = hunks[hunkIndex];
+  if (!hunk) {
+    throw new Error(`Hunk ${hunkIndex} not found in diff`);
+  }
+
+  const selected = lineIndices ? new Set(lineIndices) : null;
+  const isStaging = (idx: number, kind: PatchEntry['kind']): boolean =>
+    kind !== 'context' && (selected ? selected.has(idx) : true);
+
+  // Each side's original EOF-newline state, from the ORIGINAL hunk markers
+  // (identical derivation to buildReversePatch).
+  let oldNoNewline = false;
+  let newNoNewline = false;
+  for (const entry of hunk.entries) {
+    if (entry.markers.length === 0) { continue; }
+    if (entry.kind === 'context') { oldNoNewline = true; newNoNewline = true; }
+    else if (entry.kind === 'delete') { oldNoNewline = true; }
+    else { newNoNewline = true; }
+  }
+
+  // Whether the hunk's final NEW-side entry survives onto the new side of our
+  // reconstruction (so the new side still reaches new-EOF). Context always
+  // survives; a trailing add survives only if selected. Deletions aren't on the
+  // new side, so scan past them. (Mirror of buildReversePatch's oldReachesEof.)
+  let newReachesEof = false;
+  for (let i = hunk.entries.length - 1; i >= 0; i--) {
+    const entry = hunk.entries[i];
+    if (entry.kind === 'context') { newReachesEof = true; break; }
+    if (entry.kind === 'add') { newReachesEof = isStaging(i, 'add'); break; }
+    // 'delete' — not on the new side; keep scanning.
+  }
+
+  const bodyLines: BodyLine[] = [];
+  let oldCount = 0;
+  let newCount = 0;
+  let stagedAny = false;
+
+  for (let i = 0; i < hunk.entries.length; i++) {
+    const entry = hunk.entries[i];
+
+    if (entry.kind === 'context') {
+      bodyLines.push({ text: entry.text, onOld: true, onNew: true });
+      oldCount++;
+      newCount++;
+    } else if (entry.kind === 'add') {
+      if (isStaging(i, 'add')) {
+        // Keep as an addition (new side only); apply --cached adds it to the index.
+        bodyLines.push({ text: entry.text, onOld: false, onNew: true });
+        newCount++;
+        stagedAny = true;
+      }
+      // Unselected addition: OMIT it — not in the index and we aren't staging it.
+    } else {
+      if (isStaging(i, 'delete')) {
+        // Keep as a removal (old side only); apply --cached removes it from the index.
+        bodyLines.push({ text: entry.text, onOld: true, onNew: false });
+        oldCount++;
+        stagedAny = true;
+      } else {
+        // Demote to context: the line stays in the index (both sides).
+        bodyLines.push({ text: ' ' + entry.text.slice(1), onOld: true, onNew: true });
+        oldCount++;
+        newCount++;
+      }
+    }
+  }
+
+  if (!stagedAny) {
+    throw new Error('No changed lines selected to stage');
+  }
+
+  // Re-attach no-newline markers from the RECONSTRUCTED body (mirror of reverse,
+  // old/new swapped).
+  let lastOld = -1;
+  let lastNew = -1;
+  for (let i = 0; i < bodyLines.length; i++) {
+    if (bodyLines[i].onOld) { lastOld = i; }
+    if (bodyLines[i].onNew) { lastNew = i; }
+  }
+
+  // Old side always reaches old-EOF (deletions never dropped: selected stay `-`,
+  // unselected demote to context — both remain on the old side). It ends
+  // unterminated iff the old file did.
+  const oldEndsNoNewline = oldNoNewline && lastOld !== -1;
+
+  // New side (the staged result). Mirror of buildReversePatch's oldEndsNoNewline.
+  let newEndsNoNewline = false;
+  if (lastNew !== -1) {
+    if (lastNew === lastOld) {
+      newEndsNoNewline = oldNoNewline || (newNoNewline && newReachesEof);
+    } else if (lastNew > lastOld) {
+      // Kept additions trail the last shared/old line → new side reaches new-EOF.
+      newEndsNoNewline = newNoNewline && newReachesEof;
+    } else {
+      // Kept deletions (old-only) trail the new side's last line. Removing them on
+      // the new side leaves that shared line last, so the result ends iff old did.
+      newEndsNoNewline = oldNoNewline;
+    }
+  }
+
+  const body: string[] = [];
+  for (let i = 0; i < bodyLines.length; i++) {
+    const ln = bodyLines[i];
+    const isOldTerm = oldEndsNoNewline && i === lastOld;
+    const isNewTerm = newEndsNoNewline && i === lastNew;
+
+    if (isOldTerm && isNewTerm) {
+      // Same shared trailing line terminates both sides → one marker.
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else if (isNewTerm && i < lastOld && ln.onOld && ln.onNew) {
+      // Shared line that is the new-side terminator but old-only (kept-delete)
+      // lines follow: split so the marker terminates the new side without
+      // truncating the old. The split contributes one old + one new line — the
+      // same as the context line it replaces — so the running counts are unchanged.
+      const content = ln.text.slice(1);
+      body.push('+' + content, NO_NEWLINE_MARKER, '-' + content);
+    } else if (isNewTerm) {
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else if (isOldTerm) {
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else {
+      body.push(ln.text);
+    }
+  }
+
+  const headerLine = rewriteHunkHeader(hunk.headerLine, oldCount, newCount);
+  const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
+  return [...finalHeader, headerLine, ...body].join('\n') + '\n';
+}
