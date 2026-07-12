@@ -49,9 +49,23 @@ export class DiffPanel {
     private readonly workbench: ChangesWorkbench,
   ) {}
 
+  /** URI scheme for the open-in-editor full-file view; content comes from our
+   *  own GitService so it works without the built-in git extension. */
+  static readonly contentScheme = 'snipcode-diff';
+  private contentProvider: vscode.Disposable | undefined;
+
   static register(extensionUri: vscode.Uri, workbench: ChangesWorkbench): DiffPanel {
-    DiffPanel.instance = new DiffPanel(extensionUri, workbench);
-    return DiffPanel.instance;
+    const panel = new DiffPanel(extensionUri, workbench);
+    panel.contentProvider = vscode.workspace.registerTextDocumentContentProvider(DiffPanel.contentScheme, {
+      async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+        const { repoPath, file, ref } = JSON.parse(uri.query);
+        // Absent at the ref (e.g. a new file at HEAD) → empty side, whole file
+        // reads as added.
+        return workbench.fileAtRef(String(repoPath), String(ref), String(file)).catch(() => '');
+      },
+    });
+    DiffPanel.instance = panel;
+    return panel;
   }
 
   /** Open (or reveal) the panel for a file and push both sides' diffs. */
@@ -117,20 +131,23 @@ export class DiffPanel {
         return;
       }
       // Full-file view for one side in a NATIVE diff editor tab (the panel's
-      // sections show hunks only). Mirrors MainPanel.openDiffInEditor: staged is
-      // HEAD↔index, unstaged is index↔working; ref '' = index (stage 0).
+      // sections show hunks only): staged is HEAD↔index, unstaged is
+      // index↔working. Content is served by OUR provider (see register()) —
+      // `git:`-scheme URIs depend on the built-in git extension having
+      // discovered the repo and fail with "editor could not be opened" when it
+      // hasn't (e.g. an Extension Development Host).
       if (msg?.type === 'diffOpenSide') {
         const { repoPath, file, side } = msg.payload ?? {};
         if (!this.isCurrentTarget(repoPath, file)) { return; }
         const fileUri = vscode.Uri.file(path.join(String(repoPath), String(file)));
-        const gitUri = (ref: string) => fileUri.with({
-          scheme: 'git',
-          query: JSON.stringify({ path: fileUri.fsPath, ref }),
+        const refUri = (ref: string) => fileUri.with({
+          scheme: DiffPanel.contentScheme,
+          query: JSON.stringify({ repoPath, file, ref }),
         });
         if (side === 'staged') {
-          await vscode.commands.executeCommand('vscode.diff', gitUri('HEAD'), gitUri(''), `${file} (Staged)`);
+          await vscode.commands.executeCommand('vscode.diff', refUri('HEAD'), refUri(''), `${file} (Staged)`);
         } else {
-          await vscode.commands.executeCommand('vscode.diff', gitUri(''), fileUri, `${file} (Working Tree)`);
+          await vscode.commands.executeCommand('vscode.diff', refUri(''), fileUri, `${file} (Working Tree)`);
         }
         return;
       }
@@ -277,6 +294,8 @@ export class DiffPanel {
   }
 
   dispose(): void {
+    this.contentProvider?.dispose();
+    this.contentProvider = undefined;
     this.panel?.dispose();
     this.panel = undefined;
     this.current = undefined;

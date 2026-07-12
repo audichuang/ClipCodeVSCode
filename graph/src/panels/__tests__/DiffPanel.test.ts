@@ -34,6 +34,7 @@ function makeWorkbench() {
     stageLines: vi.fn(async () => {}),
     unstageLines: vi.fn(async () => {}),
     imageBase64: vi.fn(async () => 'QUJD'),
+    fileAtRef: vi.fn(async () => ''),
   };
 }
 type Workbench = ReturnType<typeof makeWorkbench>;
@@ -146,7 +147,7 @@ describe('DiffPanel', () => {
     expect(errors.map((m) => m.payload.source)).toEqual(['diffStageHunk', 'diffStageLines']);
   });
 
-  it('diffOpenSide opens the native diff editor with the git-scheme pair for that side', async () => {
+  it('diffOpenSide opens the native diff editor with our snipcode-diff pair for that side', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
     await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/r', file: 'a.ts', side: 'staged' } });
@@ -155,12 +156,27 @@ describe('DiffPanel', () => {
     const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
     expect(calls).toHaveLength(2);
     const [stagedCall, unstagedCall] = calls as any[];
-    expect(JSON.parse(stagedCall[1].query).ref).toBe('HEAD');
+    expect(stagedCall[1].scheme).toBe('snipcode-diff');
+    expect(JSON.parse(stagedCall[1].query)).toEqual({ repoPath: '/r', file: 'a.ts', ref: 'HEAD' });
     expect(JSON.parse(stagedCall[2].query).ref).toBe('');
     expect(stagedCall[3]).toBe('a.ts (Staged)');
     expect(JSON.parse(unstagedCall[1].query).ref).toBe('');
     expect(unstagedCall[2].query).toBeUndefined(); // right side is the plain working-tree file
     expect(unstagedCall[3]).toBe('a.ts (Working Tree)');
+  });
+
+  it('the registered content provider serves file content at a ref, empty when absent', async () => {
+    const wb = makeWorkbench();
+    wb.fileAtRef.mockResolvedValueOnce('index content');
+    DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+    const reg = vi.mocked(vscode.workspace.registerTextDocumentContentProvider);
+    const [scheme, provider] = reg.mock.calls[reg.mock.calls.length - 1] as any[];
+    expect(scheme).toBe('snipcode-diff');
+    const uri = { query: JSON.stringify({ repoPath: '/r', file: 'a.ts', ref: '' }) };
+    await expect(provider.provideTextDocumentContent(uri)).resolves.toBe('index content');
+    expect(wb.fileAtRef).toHaveBeenCalledWith('/r', '', 'a.ts');
+    wb.fileAtRef.mockRejectedValueOnce(new Error('does not exist at HEAD'));
+    await expect(provider.provideTextDocumentContent(uri)).resolves.toBe(''); // new file → empty side
   });
 
   it('serves getImageAtRef from git for a real ref, and empty base64 on failure', async () => {

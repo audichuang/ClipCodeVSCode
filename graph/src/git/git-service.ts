@@ -919,6 +919,17 @@ export class GitService {
     return { staged, unstaged };
   }
 
+  /* SNIPCODE-HOOK start: full file content at a ref for the Diff tab's
+   *  open-in-editor view. ref '' = index (stage 0, `git show :<path>`); anything
+   *  else is `git show <ref>:<path>`. Throws when the file is absent at the ref
+   *  (e.g. a new file at HEAD) — the caller renders that side empty. */
+  async getFileAtRef(ref: string, filePath: string): Promise<string> {
+    if (ref !== '') { this.assertSafeRef(ref, 'show'); }
+    this.assertSafePath(filePath, 'show');
+    return this.exec(['show', `${ref}:${filePath}`]);
+  }
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: uncommitted per-file diff for the workbench/Diff tab.
    *  A git failure THROWS so callers can surface it — swallowing it here made the
    *  Diff tab render the affirmative "No changes" empty state on e.g. index.lock
