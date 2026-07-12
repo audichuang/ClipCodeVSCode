@@ -2258,6 +2258,51 @@ export class GitService {
   }
 
   /**
+   * Raw HEAD→index (staged) unified diff for one file (no color) — the text
+   * buildForwardPatch parses to reverse-stage selected hunks. Mirrors
+   * getUncommittedFileDiff(file, true)'s command so the parsed hunk order lines
+   * up with the diff the webview rendered.
+   */
+  private async stagedFileDiffRaw(file: string): Promise<string> {
+    this.assertSafePath(file, 'diff');
+    return this.exec(['diff', '--no-color', '--cached', '--', file]).catch(() => '');
+  }
+
+  /**
+   * Stage ONLY the selected hunks of a file's unstaged (index→working) diff into
+   * the index, leaving the working tree and every other hunk untouched. Reuses
+   * buildForwardPatch (hunk-level, v1) on the SAME diff the Diff webview rendered
+   * (workingFileDiffRaw == getUncommittedFileDiff(file, false)'s command), then
+   * `git apply --cached`. `hunkIndices` index into that diff's parsed hunk list.
+   * v1 re-fetches the raw here; if the file changed since the webview rendered,
+   * the indices may not line up (accepted limitation — stale fingerprint is v2).
+   */
+  async stageHunks(file: string, hunkIndices: number[]): Promise<void> {
+    this.assertSafePath(file, 'apply');
+    const raw = await this.workingFileDiffRaw(file);
+    if (!raw.trim()) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    const patch = buildForwardPatch(raw, hunkIndices);
+    // exec routes 'apply' through withMutationLock (it is a mutation); stdin
+    // feeds the patch (same as reverseCommitChanges). --cached stages only.
+    await this.exec(['apply', '--cached'], { stdin: patch });
+  }
+
+  /**
+   * Unstage ONLY the selected hunks of a file's staged (HEAD→index) diff back to
+   * the working tree, leaving other staged hunks in the index. Builds a forward
+   * patch of the chosen hunks from the STAGED diff and reverse-applies it to the
+   * index (`git apply --cached --reverse`) — the `git reset -p` direction.
+   * `hunkIndices` index into getUncommittedFileDiff(file, true)'s hunk list.
+   */
+  async unstageHunks(file: string, hunkIndices: number[]): Promise<void> {
+    this.assertSafePath(file, 'apply');
+    const raw = await this.stagedFileDiffRaw(file);
+    if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
+    const patch = buildForwardPatch(raw, hunkIndices);
+    await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
+  }
+
+  /**
    * Stage and commit ONLY the selected hunks of the given files, in one atomic
    * unit under the mutation lock (D1 + D4).
    *
