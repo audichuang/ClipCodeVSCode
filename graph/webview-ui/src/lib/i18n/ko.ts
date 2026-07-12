@@ -654,6 +654,7 @@ export const ko: Record<string, string> = {
   'lfs.locked': '{owner}가 잠금',
   'file.open': '파일 열기',
   'file.openChanges': '변경 내용 열기',
+  'file.noChanges': '변경 없음',
   'file.createPatch': 'Patch 생성',
   'file.createPatchFromSelected': '선택한 {count}개 파일로 Patch 생성',
   'file.createPatchFromFolder': '이 폴더를 Patch로 생성',
