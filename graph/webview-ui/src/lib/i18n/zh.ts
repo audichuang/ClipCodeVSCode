@@ -667,6 +667,8 @@ export const zh: Record<string, string> = {
   'file.unstageHunk': '取消暂存此 Hunk',
   'file.stageLines': '暂存选定行',
   'file.unstageLines': '取消暂存选定行',
+  'file.stageBlock': '暂存此变更块',
+  'file.unstageBlock': '取消暂存此变更块',
   'file.lines': '行',
   'file.copySelection': '复制',
   'file.copyLines': '复制行',
