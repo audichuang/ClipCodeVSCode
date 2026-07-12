@@ -87,6 +87,26 @@ export class DiffPanel {
         if (this.current) { void this.push(this.current, this.seq.issue()); }
         return;
       }
+      /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage. */
+      if (msg?.type === 'diffStageLines') {
+        const { repoPath, file, side, hunkIndex, lineIndices } = msg.payload ?? {};
+        const idx = Number(hunkIndex);
+        const lines = Array.isArray(lineIndices) ? lineIndices.map(Number) : [];
+        try {
+          if (side === 'unstaged') {
+            await this.workbench.stageLines(String(repoPath), String(file), idx, lines);
+          } else {
+            await this.workbench.unstageLines(String(repoPath), String(file), idx, lines);
+          }
+          // stageLines/unstageLines call refreshIfCurrent → re-push the new diff.
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message } });
+          void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
+        }
+        return;
+      }
+      /* SNIPCODE-HOOK end */
       if (msg?.type !== 'diffStageHunk') { return; }
       const { repoPath, file, side, hunkIndex } = msg.payload ?? {};
       try {
