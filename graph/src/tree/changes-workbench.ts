@@ -204,6 +204,11 @@ export class ChangesWorkbench implements vscode.Disposable {
     return this.svcFor(repoPath).getImageBase64(ref, file);
   }
 
+  /** Full text content at a ref ('' = index) for the Diff tab's open-in-editor view. */
+  async fileAtRef(repoPath: string, ref: string, file: string): Promise<string> {
+    return this.svcFor(repoPath).getFileAtRef(ref, file);
+  }
+
   /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
     this.diffPanel?.show(node.repoPath, node.path);

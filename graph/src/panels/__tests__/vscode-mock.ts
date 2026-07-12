@@ -50,6 +50,7 @@ export function makeVscodeModule(
       workspaceFolders,
       onDidChangeConfiguration: () => ({ dispose() {} }),
       fs: { writeFile: vi.fn(async () => {}) },
+      registerTextDocumentContentProvider: vi.fn(() => ({ dispose() {} })),
     },
     commands: { executeCommand: vi.fn() },
     l10n: { t: (k: string) => k },
