@@ -58,36 +58,64 @@ B 要三樹（HEAD/index/working）關聯，並把 block index 從 HEAD↔workin
    - `pushDiff` 抓兩份 diff，post `diffShow` payload = `{repoPath, file, stagedDiff, unstagedDiff}`。
    - stage/unstage 訊息 handler：邏輯不變（仍讀 `side`），只是操作後改呼叫
      不帶 side 的 `refreshIfCurrent(repoPath, file)`。
-2. **`graph/src/utils/message-bus.ts`**
-   - `diffShow` payload 型別：`side, diff` → `stagedDiff, unstagedDiff`。
-   - stage/unstage 訊息型別不變（保留 `side`）。
-3. **`graph/webview-ui/src/diff/diff-store.svelte.ts`**
+   - **不改 `graph/src/utils/message-bus.ts`**（codex 審查修正）：DiffPanel 的 diff bundle
+     protocol **不走** typed `WebviewMessage`/`ExtensionMessage` —— `diffShow` / `diffReady`
+     / `diffStageHunk` / `diffStageLines` 都是 DiffPanel.ts（producer）與 diff bundle
+     messaging.ts（consumer）之間的 **raw / untyped** 訊息。改 message-bus 只是假型別安全、
+     執行時仍會漂移。payload 形狀維持現況做法（raw），只改 producer + consumer 兩端。
+     - `diffShow` payload：`{repoPath, file, side, diff}` → `{repoPath, file, stagedDiff, unstagedDiff}`。
+2. **`graph/webview-ui/src/diff/diff-store.svelte.ts`**
    - state 從 `side` + `diff` → `stagedDiff` + `unstagedDiff`（+ repoPath/file）。
    - `setDiff` 改 `setDiffs(repoPath, file, stagedDiff, unstagedDiff)`；`reset` 對應調整。
-4. **`graph/webview-ui/src/diff/messaging.ts`**
+3. **`graph/webview-ui/src/diff/messaging.ts`**
    - `diffShow` 接收改存兩份；`postStageHunk`/`postStageLines` 帶明確 `side` 參數
      （由 section 傳入）。
-5. **`graph/webview-ui/src/diff/Diff.svelte`**
+4. **`graph/webview-ui/src/diff/Diff.svelte`**
    - 渲染最多兩個 section：每個 = 標題列（`Staged`/`Unstaged` 標籤 + 收合 ▾）
-     + `FileDiffView`（`staged` prop 設對、`onStageHunk`/`onStageLines` post 對應 side）。
-   - `mode`（inline/side-by-side）兩區共用一個 toggle。
+     + `FileDiffView`（`staged` prop 設對、`stacked={true}` 讓外層單一長頁 scroll、
+     `onStageHunk`/`onStageLines` post 對應 side）。
+   - `mode`（inline/side-by-side）兩區共用一個 toggle。收合狀態切換檔案時重置。
    - **`FileDiffView.svelte` 不改**（現有 block 箭頭直接沿用：staged 區 `‹`、unstaged 區 `›`）。
-6. **`graph/src/tree/changes-workbench.ts`**
+5. **`graph/src/tree/changes-workbench.ts`**
    - `showInDiffView(node)` 丟掉 `node.group`，改 `diffPanel.show(node.repoPath, node.path)`。
 
 ## 邊角處理
 
-- **只有一側有變更**：只渲染那一側的 section（仍帶標籤）。判斷依 `diff` 是否為
-  null 或 hunks 為空。
-- **兩側都空**：理論上不會（無變更的檔案不出現在 tree）；防禦性顯示「No changes」。
+- **只有一側有變更**：只渲染那一側的 section（仍帶標籤）。**presence 判斷依
+  `diff !== null`，不是 `hunks.length === 0`**（codex 審查修正）—— binary / pure
+  rename / mode-change 的 `DiffData` 是非 null 但 `hunks: []`，用空 hunks 判斷會把
+  binary-only 一側錯誤顯示成「No changes」。
+- **binary / image**：一側是 binary 時 `diff !== null` 仍渲染該 section，內容是
+  `FileDiffView` 的 binary 殼（既有行為）。**真正的 image before/after 預覽是既有
+  gap**（`ImageDiff` 送 `getImageAtRef`，DiffPanel 從未處理該訊息）——非本次目標，
+  維持顯示殼、不 crash；列入 backlog，設計不宣稱「沿用可運作的 ImageDiff」。
+- **兩側都 null**：理論上不會（無變更的檔案不出現在 tree）；防禦性顯示「No changes」。
 - **收合**：標題列可點收合 section 內容（長檔案兩區都展開會很長）。v1 就做，成本低。
+
+## Race / refresh 一致性（codex 審查）
+
+- **combined fetch 共用一張 SequenceGuard ticket**：`show` 抓兩份 diff 用同一張
+  ticket，`Promise.all` 兩份都完成後檢查一次 `isCurrent()`、只 post 一次 `diffShow`。
+  rapid file navigation 仍是 latest-wins，不會半份舊半份新。
+- **已接受的既有殘留**（非本次擴大）：`runExclusive` 只包 git mutation，tree/panel
+  refresh 在鎖外；任何 `diffShow` 都無條件清 `busy`。因此極快速「stage 後在
+  authoritative refresh 前再點一次」理論上可能帶到舊 diff 的 hunk/line index。**這是
+  單側視圖既有的風險，統一視圖不改變 per-side stage 語意、不擴大它。**
+  <!-- ponytail: 接受既有 race；要收緊就把 diffShow 與 mutation request 用
+       operation id 關聯、mutation 進行中 gate 住 busy。等有實際重現再做。 -->
+- **後續驗證**：補一個 deterministic race test（git-shim 卡住一次 mutation）確認
+  上述殘留的實際可達性，再決定是否加 operation correlation。列 backlog，不擋 v1。
 
 ## 測試
 
 - **webview（vitest happy-dom）** — 新增 `Diff.svelte` 測：
-  - 雙 diff → 兩個 section；只有 unstaged diff → 一個 section。
+  - 雙 diff → 兩個 section；只有 unstaged diff → 一個 section；binary-only 一側
+    （`diff !== null`, `hunks: []`）仍渲染 section（不顯示 No changes）。
   - Staged 區的箭頭觸發時 post `side:'staged'`；Unstaged 區 post `side:'unstaged'`。
   - 收合 toggle 隱藏/顯示該 section 內容。
+- **需 UPDATE 的既有測試**（codex 審查：改 payload/store 會讓它們變紅，列為修改非新增）：
+  - `graph/webview-ui/src/diff/__tests__/messaging.test.ts` — 依賴舊 `diffShow` payload / `postStage*` 簽章。
+  - `graph/webview-ui/src/diff/__tests__/diff-store.test.ts` — 依賴舊 `setDiff`/`side`/`diff` state。
 - **host（vitest 真 git）** — `DiffPanel`：
   - `show(repoPath, file)` 抓兩份 diff、`diffShow` payload 含 `stagedDiff`+`unstagedDiff`。
   - stage 後 `refreshIfCurrent(repoPath, file)` 重推兩份。
@@ -97,7 +125,7 @@ B 要三樹（HEAD/index/working）關聯，並把 block index 從 HEAD↔workin
 
 - 跨區拖曳搬移、move 動畫。
 - per-section 各自的 inline/SBS toggle（共用一個即可）。
-- image/binary 在統一視圖的雙區呈現（沿用既有單一 ImageDiff 行為）。
+- image before/after 預覽（既有 `getImageAtRef` gap，見「邊角處理」）；binary 只顯示殼。
 
 ## Gotchas
 
