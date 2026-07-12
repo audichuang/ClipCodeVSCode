@@ -26,7 +26,7 @@ for (const name of await readdir(viteDist)) {
 // The graph and workbench have SEPARATE vite builds (vite.config.ts +
 // vite.workbench.config.ts); both self-contained bundles must land here or a
 // view boots blank. Fail the build instead of shipping a broken webview.
-for (const required of ['main.js', 'main.css', 'workbench.js', 'workbench.css']) {
+for (const required of ['main.js', 'main.css', 'workbench.js', 'workbench.css', 'diff.js', 'diff.css']) {
   if (!existsSync(path.join(outDir, required))) {
     throw new Error(
       `graph webview asset missing after copy: ${required} ` +
