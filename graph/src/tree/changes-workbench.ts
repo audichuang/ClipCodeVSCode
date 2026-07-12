@@ -209,7 +209,9 @@ export class ChangesWorkbench implements vscode.Disposable {
   async stageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices));
     await this.refresh();
-    this.diffView?.show(repoPath, file, 'unstaged');
+    // Only re-render if the user is still on this file — a slow apply must not
+    // yank the panel back after they navigated elsewhere.
+    this.diffView?.refreshIfCurrent(repoPath, file, 'unstaged');
   }
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
@@ -217,7 +219,7 @@ export class ChangesWorkbench implements vscode.Disposable {
   async unstageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices));
     await this.refresh();
-    this.diffView?.show(repoPath, file, 'staged');
+    this.diffView?.refreshIfCurrent(repoPath, file, 'staged');
   }
 
   /** Multi-select which repos the Changes tree shows. Picking all (or none)

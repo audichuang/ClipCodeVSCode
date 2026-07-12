@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { MainPanel } from '../panels/MainPanel';
+import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangeGroup } from './build-change-tree';
 import type { ChangesWorkbench } from './changes-workbench';
 
@@ -20,6 +21,10 @@ export class SnipcodeDiffViewProvider implements vscode.WebviewViewProvider {
   /** The last-requested diff, buffered until the view has resolved (a collapsed
    *  view has no webview yet) and re-pushed on every show(). */
   private pending: { repoPath: string; file: string; side: ChangeGroup } | undefined;
+  /** Guards against a late fileDiff() reply for a file the user already
+   *  navigated away from clobbering the newer diff (rapid clicks / post-apply
+   *  refresh racing a navigation). */
+  private readonly seq = new SequenceGuard();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -30,19 +35,34 @@ export class SnipcodeDiffViewProvider implements vscode.WebviewViewProvider {
    *  stage/unstage so the panel reflects the file's new state. */
   show(repoPath: string, file: string, side: ChangeGroup): void {
     this.pending = { repoPath, file, side };
+    const ticket = this.seq.issue();
     if (this.view) {
       this.view.show?.(true); // reveal without stealing focus, if collapsed
-      void this.push();
+      void this.push(this.pending, ticket);
     } else {
       // Force the view to resolve; push() runs from resolveWebviewView.
       void vscode.commands.executeCommand('snipcode.diff.focus');
     }
   }
 
-  private async push(): Promise<void> {
-    if (!this.view || !this.pending) { return; }
-    const { repoPath, file, side } = this.pending;
+  /** Re-render a file's diff ONLY if it is still the file the user is viewing.
+   *  Used after a stage/unstage so a slow apply that finishes after the user
+   *  clicked another file does not yank the panel back to the stale file. */
+  refreshIfCurrent(repoPath: string, file: string, side: ChangeGroup): void {
+    if (this.pending?.repoPath === repoPath && this.pending?.file === file) {
+      this.show(repoPath, file, side);
+    }
+  }
+
+  private async push(
+    target: { repoPath: string; file: string; side: ChangeGroup },
+    ticket: number,
+  ): Promise<void> {
+    if (!this.view) { return; }
+    const { repoPath, file, side } = target;
     const hunks = await this.workbench.fileDiff(repoPath, file, side);
+    // A newer show() (a different file / side) supersedes this reply — drop it.
+    if (!this.seq.isCurrent(ticket)) { return; }
     void this.view.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, side, hunks } });
   }
 
@@ -71,7 +91,7 @@ export class SnipcodeDiffViewProvider implements vscode.WebviewViewProvider {
     });
 
     // Flush any diff requested before the view resolved.
-    if (this.pending) { void this.push(); }
+    if (this.pending) { void this.push(this.pending, this.seq.issue()); }
   }
 
   private getHtml(webview: vscode.Webview, assetRoot: vscode.Uri): string {
