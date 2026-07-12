@@ -544,3 +544,40 @@ describe('FileDiffView copy lines (gutter)', () => {
     expect(onReverse.mock.calls[0][0].copyLinesText).toBeUndefined();
   });
 });
+
+describe('FileDiffView stage/unstage (B-2c)', () => {
+  it('renders a "Stage Hunk" button on an unstaged diff and fires onStageHunk', async () => {
+    const onStageHunk = vi.fn();
+    const { container } = render(FileDiffView, { diff: sampleDiff(), staged: false, onStageHunk });
+    const btn = container.querySelector('.hunk-stage-btn');
+    expect(btn).not.toBeNull();
+    expect(btn!.textContent).toContain('Stage Hunk');
+    await fireEvent.click(btn!);
+    expect(onStageHunk).toHaveBeenCalledTimes(1);
+    expect(onStageHunk.mock.calls[0][0]).toEqual({ file: 'src/foo.ts', hunkIndex: 0 });
+  });
+
+  it('labels the button "Unstage Hunk" on a staged diff', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff(), staged: true, onStageHunk: vi.fn() });
+    expect(container.querySelector('.hunk-stage-btn')!.textContent).toContain('Unstage Hunk');
+  });
+
+  it('renders no stage button when onStageHunk is not provided', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.hunk-stage-btn')).toBeNull();
+  });
+
+  it('disables staging on a truncated hunk (never stage unseen lines)', () => {
+    const { container } = render(FileDiffView, { diff: hugeDiff(), onStageHunk: vi.fn() });
+    expect(container.querySelector('.hunk-stage-btn')).toBeNull();
+  });
+
+  it('shows an SBS overlay stage button in side-by-side mode', () => {
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(), staged: false, onStageHunk: vi.fn(), diffMode: 'side-by-side', hideModeToggle: true,
+    });
+    const btn = container.querySelector('.sbs-stage-btn');
+    expect(btn).not.toBeNull();
+    expect(btn!.textContent).toContain('Stage Hunk');
+  });
+});

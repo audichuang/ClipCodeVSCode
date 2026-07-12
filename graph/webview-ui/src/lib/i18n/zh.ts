@@ -663,6 +663,8 @@ export const zh: Record<string, string> = {
   'file.reverseFile': '还原文件更改',
   'file.reverseHunk': '还原 Hunk 更改',
   'file.reverseLines': '还原选定行',
+  'file.stageHunk': '暂存此 Hunk',
+  'file.unstageHunk': '取消暂存此 Hunk',
   'file.lines': '行',
   'file.copySelection': '复制',
   'file.copyLines': '复制行',

@@ -55,10 +55,15 @@
        compatible, see `mode` below. */
     diffMode?: 'inline' | 'side-by-side';
     hideModeToggle?: boolean;
+    /* SNIPCODE-HOOK (B-2c): full-tab stage/unstage. Fires per-hunk with the file
+       + hunk index; the button label follows `staged` (unstaged file → "Stage
+       Hunk", staged file → "Unstage Hunk"). Line-level staging is v2
+       (buildForwardPatch has no lineIndices yet), so there is no onStageLines. */
+    onStageHunk?: (target: { file: string; hunkIndex: number }) => void;
     /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, diffMode: diffModeProp, hideModeToggle = false }: Props = $props();
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, diffMode: diffModeProp, hideModeToggle = false }: Props = $props();
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -66,6 +71,15 @@
   // hunk removes it, and of a deleted file's hunk restores it (the backend's
   // patch-builder rewrites the whole-file header for partial selections).
   const canReverse = $derived(!!onReverse && !!commitHash);
+
+  /* SNIPCODE-HOOK start (B-2c): staging affordance gate + action. */
+  const canStage = $derived(!!onStageHunk);
+
+  function stageHunk(hunkIndex: number) {
+    if (!onStageHunk || !isHunkComplete(hunkIndex)) return;
+    onStageHunk({ file: diff.file, hunkIndex });
+  }
+  /* SNIPCODE-HOOK end */
 
   // A truncated diff renders only the first N lines of its final hunk (see
   // renderHunks). Reversing then would silently undo the unseen tail too, so we
@@ -409,7 +423,7 @@
     {:else if mode === 'inline'}
       <div class="diff-content">
         {#each renderHunks as hunk, hunkIdx}
-          <div class="diff-hunk" class:reversible={canReverse && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
+          <div class="diff-hunk" class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
             <div class="diff-hunk-header">
               <div class="hunk-header-inner">
                 <span class="diff-hunk-range" title={hunkLabel(hunk, hunkIdx)}>{hunkLabel(hunk, hunkIdx)}</span>
@@ -427,6 +441,16 @@
                     <span>{t('file.reverseHunk')}</span>
                   </button>
                 {/if}
+                <!-- SNIPCODE-HOOK start (B-2c): inline per-hunk Stage/Unstage -->
+                {#if canStage && isHunkComplete(hunkIdx)}
+                  <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                          aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
+                          title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
+                    <i class="codicon {staged ? 'codicon-remove' : 'codicon-add'}"></i>
+                    <span>{staged ? t('file.unstageHunk') : t('file.stageHunk')}</span>
+                  </button>
+                {/if}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             </div>
             {#each hunk.lines as line, lineIndex}
@@ -462,11 +486,20 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="sbs-hunk"
-                class:hunk-hover={canReverse && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
+                class:hunk-hover={(canReverse || canStage) && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
                 onmouseenter={() => { hoveredHunkIdx = hunkIdx; }}
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
+                <!-- SNIPCODE-HOOK start (B-2c): SBS overlay Stage/Unstage -->
+                {#if canStage && isHunkComplete(hunkIdx)}
+                  <button class="sbs-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                          aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
+                          title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
+                    {staged ? t('file.unstageHunk') : t('file.stageHunk')}
+                  </button>
+                {/if}
+                <!-- SNIPCODE-HOOK end -->
                 {#each hunk.lines as line, lineIndex}
                   {#if line.type === 'context' || line.type === 'delete'}
                     <div class="diff-line diff-{line.type}">
@@ -491,7 +524,7 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="sbs-hunk"
-                class:hunk-hover={canReverse && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
+                class:hunk-hover={(canReverse || canStage) && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
                 onmouseenter={() => { hoveredHunkIdx = hunkIdx; }}
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
@@ -671,6 +704,36 @@
     opacity: 1;
   }
 
+  /* SNIPCODE-HOOK start (B-2c): stage/unstage buttons (green accent). */
+  .hunk-stage-btn {
+    color: var(--vscode-charts-green, #48bf91);
+    opacity: 0;
+  }
+  .diff-hunk.reversible:hover .hunk-stage-btn,
+  .hunk-stage-btn:focus {
+    opacity: 1;
+  }
+  .sbs-stage-btn {
+    position: absolute;
+    top: 2px;
+    right: 8px;
+    z-index: 2;
+    opacity: 0;
+    padding: 1px 8px;
+    border: 1px solid var(--vscode-focusBorder, #4a9eff);
+    border-radius: 3px;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    cursor: pointer;
+    font-size: 0.85em;
+    white-space: nowrap;
+  }
+  .sbs-hunk.hunk-hover .sbs-stage-btn,
+  .sbs-stage-btn:focus {
+    opacity: 1;
+  }
+  /* SNIPCODE-HOOK end */
+
   .diff-hunk.reversible:hover .hunk-hunk-btn,
   .diff-hunk.has-selection .hunk-hunk-btn,
   .hunk-action-btn:focus {
@@ -790,6 +853,9 @@
   .diff-truncated-banner button:hover {
     background: var(--vscode-button-hoverBackground, #1177bb);
   }
+
+  /* SNIPCODE-HOOK (B-2c): anchor for the .sbs-stage-btn overlay. */
+  .sbs-hunk { position: relative; }
 
   /* Side-by-side */
   .diff-sbs {
