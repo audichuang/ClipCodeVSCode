@@ -11,26 +11,29 @@ function sample(): DiffData {
 beforeEach(() => diffStore.reset());
 
 describe('diffStore', () => {
-  it('setDiff stores the DiffData, file, repo and side', () => {
-    diffStore.setDiff('/repo', 'src/a.ts', 'unstaged', sample());
+  it('setDiffs stores both sides, file, repo and marks loaded', () => {
+    diffStore.setDiffs('/repo', 'src/a.ts', sample(), null);
     expect(diffStore.repoPath).toBe('/repo');
     expect(diffStore.file).toBe('src/a.ts');
-    expect(diffStore.side).toBe('unstaged');
-    expect(diffStore.diff?.hunks.length).toBe(1);
+    expect(diffStore.stagedDiff?.hunks.length).toBe(1);
+    expect(diffStore.unstagedDiff).toBeNull();
+    expect(diffStore.loaded).toBe(true);
     expect(diffStore.error).toBeNull();
   });
 
-  it('setDiff clears any prior error', () => {
+  it('setDiffs clears any prior error', () => {
     diffStore.error = 'boom';
-    diffStore.setDiff('/repo', 'src/a.ts', 'staged', sample());
+    diffStore.setDiffs('/repo', 'src/a.ts', null, sample());
     expect(diffStore.error).toBeNull();
-    expect(diffStore.side).toBe('staged');
+    expect(diffStore.unstagedDiff?.hunks.length).toBe(1);
   });
 
-  it('reset clears everything', () => {
-    diffStore.setDiff('/repo', 'src/a.ts', 'unstaged', sample());
+  it('reset clears everything including loaded', () => {
+    diffStore.setDiffs('/repo', 'src/a.ts', sample(), sample());
     diffStore.reset();
-    expect(diffStore.diff).toBeNull();
+    expect(diffStore.stagedDiff).toBeNull();
+    expect(diffStore.unstagedDiff).toBeNull();
     expect(diffStore.file).toBe('');
+    expect(diffStore.loaded).toBe(false);
   });
 });
