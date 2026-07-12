@@ -191,11 +191,11 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Read a file's parsed DiffData (staged or unstaged side) for the Diff panel.
    *  Reuses getUncommittedFileDiff so the hunk order aligns with the raw
-   *  stageHunks/unstageHunks re-fetch (same git diff command per side). */
+   *  stageHunks/unstageHunks re-fetch (same git diff command per side).
+   *  Throws on git failure — null strictly means "this side has no diff",
+   *  so the panel can tell an error apart from an empty state. */
   async fileDiffData(repoPath: string, file: string, side: ChangeGroup): Promise<DiffData | null> {
-    return this.svcFor(repoPath)
-      .getUncommittedFileDiff(file, side === 'staged')
-      .catch(() => null);
+    return this.svcFor(repoPath).getUncommittedFileDiff(file, side === 'staged');
   }
 
   /** Image bytes at a ref for the Diff tab's ImageDiff ('working' is handled by

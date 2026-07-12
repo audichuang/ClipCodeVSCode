@@ -919,22 +919,27 @@ export class GitService {
     return { staged, unstaged };
   }
 
+  /* SNIPCODE-HOOK start: uncommitted per-file diff for the workbench/Diff tab.
+   *  A git failure THROWS so callers can surface it — swallowing it here made the
+   *  Diff tab render the affirmative "No changes" empty state on e.g. index.lock
+   *  contention or a broken repo. null strictly means "this side has no diff". */
   async getUncommittedFileDiff(file: string, staged: boolean): Promise<DiffData | null> {
     this.assertSafePath(file, 'diff');
     if (staged) {
-      const raw = await this.exec(['diff', '--no-color', '--cached', '--', file]).catch(() => '');
+      const raw = await this.exec(['diff', '--no-color', '--cached', '--', file]);
       return parseDiff(raw, file)[0] ?? null;
     }
     const isTracked = await this.exec(['ls-files', '--error-unmatch', '--', file]).then(() => true).catch(() => false);
     if (!isTracked) {
       // --no-index exits with code 1 when differences found (normal); stdout has the diff
       const raw = await this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file])
-        .catch(err => (err instanceof GitError && err.exitCode === 1) ? err.stdout : '');
+        .catch(err => { if (err instanceof GitError && err.exitCode === 1) { return err.stdout; } throw err; });
       return parseDiff(raw, file)[0] ?? null;
     }
-    const raw = await this.exec(['diff', '--no-color', '--', file]).catch(() => '');
+    const raw = await this.exec(['diff', '--no-color', '--', file]);
     return parseDiff(raw, file)[0] ?? null;
   }
+  /* SNIPCODE-HOOK end */
 
   private parseNameStatus(raw: string): Array<{ path: string; status: string; oldPath?: string }> {
     return raw.trim().split('\n').filter(Boolean).map(line => {

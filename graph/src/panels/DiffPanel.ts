@@ -183,12 +183,21 @@ export class DiffPanel {
     // One ticket for the combined fetch: both sides resolve, then a single
     // isCurrent() check + single post, so rapid file navigation stays latest-wins
     // and the view never shows half-old / half-new.
-    const [stagedDiff, unstagedDiff] = await Promise.all([
-      this.workbench.fileDiffData(repoPath, file, 'staged'),
-      this.workbench.fileDiffData(repoPath, file, 'unstaged'),
-    ]);
+    let stagedDiff = null;
+    let unstagedDiff = null;
+    let fetchError: string | null = null;
+    try {
+      [stagedDiff, unstagedDiff] = await Promise.all([
+        this.workbench.fileDiffData(repoPath, file, 'staged'),
+        this.workbench.fileDiffData(repoPath, file, 'unstaged'),
+      ]);
+    } catch (err) {
+      // Surface it: null sides + fetchError renders as an error banner, never as
+      // the affirmative "No changes" empty state.
+      fetchError = err instanceof Error ? err.message : String(err);
+    }
     if (!this.seq.isCurrent(ticket) || !this.panel) { return; } // superseded / disposed
-    this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, stagedDiff, unstagedDiff } });
+    this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, stagedDiff, unstagedDiff, fetchError } });
   }
 
   /** Serve one side of an ImageDiff. Mirrors MainPanel's getImageAtRef: 'working'
