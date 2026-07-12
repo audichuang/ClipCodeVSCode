@@ -57,9 +57,12 @@
     hideModeToggle?: boolean;
     /* SNIPCODE-HOOK (B-2c): full-tab stage/unstage. Fires per-hunk with the file
        + hunk index; the button label follows `staged` (unstaged file → "Stage
-       Hunk", staged file → "Unstage Hunk"). Line-level staging is v2
-       (buildForwardPatch has no lineIndices yet), so there is no onStageLines. */
+       Hunk", staged file → "Unstage Hunk"). Line-level staging (B-2d) is
+       onStageLines below. */
     onStageHunk?: (target: { file: string; hunkIndex: number }) => void;
+    /* SNIPCODE-HOOK (B-2d): line-level staging. Fires with the file + hunk index
+       + the gutter-selected changed line indices, mirroring onReverseLines. */
+    onStageLines?: (target: { file: string; hunkIndex: number; lineIndices: number[] }) => void;
     /* SNIPCODE-HOOK start (B-2c): full-tab busy gate — Diff.svelte passes
        diffStore.busy so the Stage/Unstage buttons disable while a hunk op is
        in flight (index shifts once the diff re-parses). Omitted by every other
@@ -68,7 +71,7 @@
     /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, diffMode: diffModeProp, hideModeToggle = false, stageBusy }: Props = $props();
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy }: Props = $props();
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -79,10 +82,21 @@
 
   /* SNIPCODE-HOOK start (B-2c): staging affordance gate + action. */
   const canStage = $derived(!!onStageHunk);
+  /* SNIPCODE-HOOK (B-2d): gutter line-selection turns on for the reverse view
+     (canReverse) OR the staging view (canStage). */
+  const canSelectLines = $derived(canReverse || canStage);
 
   function stageHunk(hunkIndex: number) {
     if (!onStageHunk || !isHunkComplete(hunkIndex)) return;
     onStageHunk({ file: diff.file, hunkIndex });
+  }
+
+  /* SNIPCODE-HOOK (B-2d): stage/unstage just the gutter-selected changed lines. */
+  function stageSelectedLines(hunkIndex: number) {
+    if (!onStageLines || !lineSel || lineSel.hunkIdx !== hunkIndex) return;
+    const indices = selectedChangedIndices;
+    if (!indices.length || !isHunkComplete(hunkIndex)) return;
+    onStageLines({ file: diff.file, hunkIndex, lineIndices: indices });
   }
   /* SNIPCODE-HOOK end */
 
@@ -142,7 +156,7 @@
 
   function startLineSelect(e: MouseEvent, hunkIdx: number, lineIndex: number) {
     if (e.button !== 0) return; // right/middle-click must not reset an active selection
-    if (!canReverse || !isHunkComplete(hunkIdx)) return;
+    if (!canSelectLines || !isHunkComplete(hunkIdx)) return;
     e.preventDefault(); // suppress native text-selection beginning in the gutter
     if (e.shiftKey && lineSel && lineSel.hunkIdx === hunkIdx) {
       lineSel = { ...lineSel, indices: rangeSet(lineSel.anchor, lineIndex) };
@@ -446,8 +460,17 @@
                     <span>{t('file.reverseHunk')}</span>
                   </button>
                 {/if}
-                <!-- SNIPCODE-HOOK start (B-2c): inline per-hunk Stage/Unstage -->
+                <!-- SNIPCODE-HOOK start (B-2c/B-2d): inline per-hunk + per-line Stage/Unstage -->
                 {#if canStage && isHunkComplete(hunkIdx)}
+                  {#if onStageLines && lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}
+                    <button class="hunk-action-btn hunk-stage-lines-btn" onclick={() => stageSelectedLines(hunkIdx)}
+                            disabled={stageBusy}
+                            aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
+                            title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                      <i class="codicon {staged ? 'codicon-remove' : 'codicon-add'}"></i>
+                      <span>{staged ? t('file.unstageLines') : t('file.stageLines')} ({selectedChangedIndices.length})</span>
+                    </button>
+                  {/if}
                   <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
                           disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}

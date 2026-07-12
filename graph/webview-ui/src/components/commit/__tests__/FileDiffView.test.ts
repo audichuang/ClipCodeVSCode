@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/svelte';
+import { render, cleanup, fireEvent, screen } from '@testing-library/svelte';
 import FileDiffView from '../FileDiffView.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
 import type { DiffData } from '../../../lib/types';
@@ -579,5 +579,30 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     const btn = container.querySelector('.sbs-stage-btn');
     expect(btn).not.toBeNull();
     expect(btn!.textContent).toContain('Stage Hunk');
+  });
+
+  it('offers Stage Selected Lines and posts the changed indices (unstaged view)', async () => {
+    i18n.setLocale('en');
+    const onStageLines = vi.fn();
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(),
+      staged: false,
+      onStageHunk: vi.fn(),   // turns the staging view on (canStage)
+      onStageLines,
+    });
+
+    // sampleDiff hunk 0 lines: 0 ctx a, 1 del b, 2 add b2, 3 ctx c, 4 add d1, 5 add d2, 6 ctx e.
+    // Select the delete line (index 1) by a left mousedown on its gutter.
+    const gutters = container.querySelectorAll('.line-gutter');
+    await fireEvent.mouseDown(gutters[1], { button: 0 });
+
+    // The "Stage Selected Lines (1)" button now appears; click it.
+    const btn = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent?.includes('Stage Selected Lines'),
+    );
+    expect(btn).toBeTruthy();
+    await fireEvent.click(btn!);
+
+    expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });
   });
 });

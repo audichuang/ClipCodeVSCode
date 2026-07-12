@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { diffStore } from '../diff-store.svelte';
-import { listenForHostMessages, postStageHunk } from '../messaging';
+import { listenForHostMessages, postStageHunk, postStageLines } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
 
 // NOTE: getVsCodeApi() calls acquireVsCodeApi() once, memoized at module-eval
@@ -88,5 +88,16 @@ describe('diff messaging', () => {
       data: { type: 'error', payload: { source: 'diffStageHunk', message: 'nope' } },
     }));
     expect(diffStore.busy).toBe(false);
+  });
+
+  it('postStageLines posts diffStageLines with the current file + side + indices', () => {
+    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
+    postStageLines(0, [1, 2]);
+    expect(globalThis.__postedMessages).toContainEqual({
+      data: {
+        type: 'diffStageLines',
+        payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] },
+      },
+    });
   });
 });

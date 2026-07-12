@@ -21,7 +21,7 @@ export function listenForHostMessages(): void {
         if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }
         break;
       case 'error':
-        if (msg.payload?.source === 'diffStageHunk') {
+        if (msg.payload?.source === 'diffStageHunk' || msg.payload?.source === 'diffStageLines') {
           diffStore.error = String(msg.payload.message ?? '操作失敗');
         }
         diffStore.busy = false;
@@ -46,6 +46,26 @@ export function postStageHunk(hunkIndex: number): void {
       file: diffStore.file,
       side: diffStore.side,
       hunkIndex,
+    },
+  });
+}
+
+/** Post the gutter-selected changed lines of one hunk to the host; side decides
+ *  stage vs unstage. Gated on `busy` for the same index-shift reason as
+ *  postStageHunk (applying re-parses the diff and renumbers later hunks/lines). */
+export function postStageLines(hunkIndex: number, lineIndices: number[]): void {
+  if (diffStore.busy) { return; }
+  if (!diffStore.diff) { return; }
+  diffStore.error = null;
+  diffStore.busy = true;
+  vscode.postMessage({
+    type: 'diffStageLines',
+    payload: {
+      repoPath: diffStore.repoPath,
+      file: diffStore.file,
+      side: diffStore.side,
+      hunkIndex,
+      lineIndices,
     },
   });
 }
