@@ -14,7 +14,7 @@ import { resolveGitDirs } from '../services/file-watcher-helpers';
  *  extension host. Callers can override per-invocation via `maxBufferBytes`. */
 const DEFAULT_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 import { parseLog, parseBranches, parseTags, parseRemotes, parseStashList, parseDiff, parseWorktreeList, parseLfsFiles, parseLfsLocks, mapSignatureStatus } from './git-parser';
-import { buildReversePatch, buildForwardPatch } from './patch-builder';
+import { buildReversePatch, buildForwardPatch, buildForwardPatchLines } from './patch-builder';
 import type { Commit, BranchInfo, TagInfo, RemoteInfo, StashEntry, LogOptions, DiffData, WorktreeInfo, CommitSignature } from './types';
 
 export class GitError extends Error {
@@ -2315,6 +2315,41 @@ export class GitService {
     if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
     assertHunkStageable(raw, file);
     const patch = buildForwardPatch(raw, hunkIndices);
+    await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
+  }
+
+  /**
+   * Stage ONLY the selected changed lines of ONE hunk of a file's unstaged
+   * (index→working) diff into the index — the line-level counterpart of
+   * stageHunks. Builds a narrowed forward patch from the SAME diff the Diff
+   * webview rendered (workingFileDiffRaw) and `git apply --cached`s it.
+   * `hunkIndex`/`lineIndices` index that diff's parsed hunk/DiffLine list.
+   */
+  async stageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+    this.assertSafePath(file, 'apply');
+    const raw = await this.workingFileDiffRaw(file);
+    if (!raw.trim()) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    assertHunkStageable(raw, file);
+    const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices);
+    // exec routes 'apply' through withMutationLock; --cached stages into the index only.
+    await this.exec(['apply', '--cached'], { stdin: patch });
+  }
+
+  /**
+   * Unstage ONLY the selected changed lines of ONE hunk of a file's staged
+   * (HEAD→index) diff back to the working tree — the line-level counterpart of
+   * unstageHunks. Builds a narrowed forward patch from the STAGED diff and
+   * reverse-applies it to the index (`git apply --cached --reverse`).
+   */
+  async unstageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+    this.assertSafePath(file, 'apply');
+    const raw = await this.stagedFileDiffRaw(file);
+    if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
+    assertHunkStageable(raw, file);
+    // 'unstage': the raw diff here is HEAD→index, so the current-index baseline
+    // is the ADD side, not the DELETE side — see buildForwardPatchLines's
+    // `direction` doc for why this flips which unselected kind demotes vs omits.
+    const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices, 'unstage');
     await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
   }
 
