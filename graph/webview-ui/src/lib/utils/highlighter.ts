@@ -1,4 +1,5 @@
 import type { HighlighterCore, ThemedToken, LanguageRegistration } from 'shiki';
+import type { Range } from './word-diff';
 
 let highlighter: HighlighterCore | null = null;
 let loadingPromise: Promise<HighlighterCore> | null = null;
@@ -185,6 +186,68 @@ export async function highlightLine(content: string, lang: string): Promise<stri
   } catch {
     return escapeHtml(content);
   }
+}
+
+/**
+ * Like {@link highlightLineSync} but overlays a word-diff `background` class on
+ * the given char ranges without disturbing Shiki's syntax colors. Splits each
+ * colored token at range boundaries so an inner `word-diff-*` span wraps only the
+ * changed characters. Falls back to a single uncolored token (plain text) when
+ * the grammar is unavailable, so word-diff still shows without highlighting.
+ */
+export function highlightLineWithRanges(
+  h: HighlighterCore,
+  content: string,
+  lang: string,
+  ranges: Range[],
+  kind: 'add' | 'delete',
+  theme: 'dark-plus' | 'light-plus' = activeShikiTheme(),
+): string {
+  if (ranges.length === 0) { return highlightLineSync(h, content, lang, theme); }
+  const cls = kind === 'add' ? 'word-diff-add' : 'word-diff-del';
+
+  // Colored tokens as {text, color}; a single uncolored token when Shiki can't
+  // tokenize (no grammar / error) so word-diff still works on plain text.
+  let tokens: Array<{ text: string; color?: string }>;
+  try {
+    const loaded = !!lang && h.getLoadedLanguages().includes(lang as never);
+    if (loaded) {
+      const res = h.codeToTokens(content, { lang: lang as never, theme });
+      tokens = (res.tokens[0] ?? []).map((tk) => ({ text: tk.content, color: tk.color }));
+    } else {
+      tokens = [{ text: content }];
+    }
+  } catch {
+    tokens = [{ text: content }];
+  }
+  if (tokens.length === 0) { tokens = [{ text: content }]; }
+
+  const inRange = (pos: number): boolean => ranges.some((r) => pos >= r.start && pos < r.end);
+
+  let html = '';
+  let offset = 0;
+  for (const tk of tokens) {
+    const open = tk.color ? `<span style="color:${tk.color}">` : '';
+    const close = tk.color ? '</span>' : '';
+    html += open;
+    // Split the token into runs of same in/out-of-range, wrapping only the
+    // changed runs so the surrounding syntax color is preserved.
+    let run = '';
+    let runInRange = tk.text.length > 0 ? inRange(offset) : false;
+    for (let c = 0; c < tk.text.length; c++) {
+      const here = inRange(offset + c);
+      if (here !== runInRange) {
+        html += runInRange ? `<span class="${cls}">${escapeHtml(run)}</span>` : escapeHtml(run);
+        run = '';
+        runInRange = here;
+      }
+      run += tk.text[c];
+    }
+    if (run) { html += runInRange ? `<span class="${cls}">${escapeHtml(run)}</span>` : escapeHtml(run); }
+    html += close;
+    offset += tk.text.length;
+  }
+  return html;
 }
 
 export { escapeHtml };
