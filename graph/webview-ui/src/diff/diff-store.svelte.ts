@@ -12,6 +12,11 @@ class DiffStore {
   diff = $state<DiffData | null>(null);
   /** Soft error surfaced when a stage/unstage round-trip fails. */
   error = $state<string | null>(null);
+  /** True while a stage/unstage hunk request is in flight. Gates further
+   *  stage/unstage clicks so a second click can't race the first: staging one
+   *  hunk re-parses the diff and shifts every later hunk's index, so a click
+   *  that fires before the fresh `diffShow` lands would target the wrong hunk. */
+  busy = $state(false);
 
   reset(): void {
     this.repoPath = '';
@@ -19,6 +24,7 @@ class DiffStore {
     this.side = 'unstaged';
     this.diff = null;
     this.error = null;
+    this.busy = false;
   }
 
   setDiff(repoPath: string, file: string, side: DiffSide, diff: DiffData | null): void {
@@ -27,6 +33,7 @@ class DiffStore {
     this.side = side;
     this.diff = diff;
     this.error = null;
+    this.busy = false;
   }
 }
 

@@ -60,10 +60,15 @@
        Hunk", staged file → "Unstage Hunk"). Line-level staging is v2
        (buildForwardPatch has no lineIndices yet), so there is no onStageLines. */
     onStageHunk?: (target: { file: string; hunkIndex: number }) => void;
+    /* SNIPCODE-HOOK start (B-2c): full-tab busy gate — Diff.svelte passes
+       diffStore.busy so the Stage/Unstage buttons disable while a hunk op is
+       in flight (index shifts once the diff re-parses). Omitted by every other
+       caller (CommitDetails, PrView), so `undefined` there never disables. */
+    stageBusy?: boolean;
     /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, diffMode: diffModeProp, hideModeToggle = false }: Props = $props();
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, diffMode: diffModeProp, hideModeToggle = false, stageBusy }: Props = $props();
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -444,6 +449,7 @@
                 <!-- SNIPCODE-HOOK start (B-2c): inline per-hunk Stage/Unstage -->
                 {#if canStage && isHunkComplete(hunkIdx)}
                   <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                          disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
                           title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
                     <i class="codicon {staged ? 'codicon-remove' : 'codicon-add'}"></i>
@@ -494,6 +500,7 @@
                 <!-- SNIPCODE-HOOK start (B-2c): SBS overlay Stage/Unstage -->
                 {#if canStage && isHunkComplete(hunkIdx)}
                   <button class="sbs-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                          disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
                           title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
                     {staged ? t('file.unstageHunk') : t('file.stageHunk')}
@@ -731,6 +738,12 @@
   .sbs-hunk.hunk-hover .sbs-stage-btn,
   .sbs-stage-btn:focus {
     opacity: 1;
+  }
+  /* Busy gate (stageBusy prop): dim + block clicks even while hovered/focused. */
+  .hunk-stage-btn:disabled,
+  .sbs-stage-btn:disabled {
+    opacity: 0.35 !important;
+    cursor: not-allowed;
   }
   /* SNIPCODE-HOOK end */
 

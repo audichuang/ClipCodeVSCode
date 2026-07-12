@@ -52,4 +52,41 @@ describe('diff messaging', () => {
     }));
     expect(diffStore.error).toBe('nope');
   });
+
+  it('postStageHunk sets busy and ignores a second call until unlocked', () => {
+    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
+    postStageHunk(0);
+    expect(diffStore.busy).toBe(true);
+    postStageHunk(1); // dropped: a hunk op is already in flight
+    expect(globalThis.__postedMessages).toHaveLength(1);
+    expect(globalThis.__postedMessages).toContainEqual({
+      data: {
+        type: 'diffStageHunk',
+        payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0 },
+      },
+    });
+  });
+
+  it('diffShow clears busy so the next stage click is allowed again', () => {
+    listenForHostMessages();
+    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
+    postStageHunk(0);
+    expect(diffStore.busy).toBe(true);
+    const diff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', diff } },
+    }));
+    expect(diffStore.busy).toBe(false);
+  });
+
+  it('an error reply also clears busy', () => {
+    listenForHostMessages();
+    diffStore.setDiff('/r', 'src/a.ts', 'unstaged', { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] });
+    postStageHunk(0);
+    expect(diffStore.busy).toBe(true);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'error', payload: { source: 'diffStageHunk', message: 'nope' } },
+    }));
+    expect(diffStore.busy).toBe(false);
+  });
 });
