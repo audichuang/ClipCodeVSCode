@@ -376,10 +376,14 @@ export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: numb
  *     - UNSELECTED `-` → demoted to context ` ` (it stays in the index).
  *
  * This is the mirror image of {@link buildReversePatch} with the old/new sides
- * swapped: here the OLD side (the index baseline) always reaches EOF because
- * deletions are never dropped, while the NEW side (the staged result) can lose a
- * trailing line when an unselected trailing addition is omitted — so the
- * no-newline re-anchoring mirrors buildReversePatch with sides swapped.
+ * swapped: for `'stage'`, the OLD side (the index baseline) always reaches EOF
+ * because deletions are never dropped, while the NEW side (the staged result)
+ * can lose a trailing line when an unselected trailing addition is omitted.
+ * `'unstage'` inverts which side can be shortened instead: an unselected
+ * deletion is OMITTED (not demoted), so the OLD side can now end short of the
+ * hunk's true old-EOF entry — the no-newline re-anchoring tracks reachability
+ * for BOTH sides (`oldReachesEof`/`newReachesEof`) rather than assuming one
+ * side is always intact.
  *
  * `direction` picks which side of the RAW diff is the "current, don't-touch"
  * baseline for an UNSELECTED changed line, because the same function is reused
@@ -488,6 +492,24 @@ export function buildForwardPatchLines(
     // 'delete' — not on the new side; keep scanning.
   }
 
+  // Whether the hunk's final OLD-side entry survives onto the old side of our
+  // reconstruction (mirror of newReachesEof, for deletions). Context always
+  // survives; a trailing delete survives per direction: 'stage' demotes an
+  // unselected delete to context (always on the old side, so this is always
+  // true there — same as before this existed); 'unstage' OMITS an unselected
+  // delete entirely (survives only if selected). Adds aren't on the old side,
+  // so scan past them.
+  let oldReachesEof = false;
+  for (let i = orderedEntries.length - 1; i >= 0; i--) {
+    const { entry, origIdx } = orderedEntries[i];
+    if (entry.kind === 'context') { oldReachesEof = true; break; }
+    if (entry.kind === 'delete') {
+      oldReachesEof = direction === 'stage' ? true : isStaging(origIdx, 'delete');
+      break;
+    }
+    // 'add' — not on the old side; keep scanning past it.
+  }
+
   const bodyLines: BodyLine[] = [];
   let oldCount = 0;
   let newCount = 0;
@@ -544,23 +566,41 @@ export function buildForwardPatchLines(
     if (bodyLines[i].onNew) { lastNew = i; }
   }
 
-  // Old side always reaches old-EOF (deletions never dropped: selected stay `-`,
-  // unselected demote to context — both remain on the old side). It ends
-  // unterminated iff the old file did.
-  const oldEndsNoNewline = oldNoNewline && lastOld !== -1;
+  // Old side. For 'stage' this always reaches old-EOF (oldReachesEof is always
+  // true there, as documented above), so this reduces to the pre-existing
+  // "old side is always intact" behavior; for 'unstage' an unselected delete is
+  // OMITTED, so a trailing unselected delete can leave `lastOld` short of the
+  // hunk's true old-EOF entry — `oldReachesEof` gates `oldNoNewline` so we don't
+  // wrongly inherit HEAD's no-newline state onto an earlier, still-terminated line.
+  let oldEndsNoNewline = false;
+  if (lastOld !== -1) {
+    if (lastOld === lastNew) {
+      oldEndsNoNewline = (newNoNewline && newReachesEof) || (oldNoNewline && oldReachesEof);
+    } else if (lastOld > lastNew) {
+      // Kept deletions trail the last shared/new line → old side reaches old-EOF.
+      oldEndsNoNewline = oldNoNewline && oldReachesEof;
+    } else {
+      // Kept additions trail the old side's last line; the old side ends
+      // unterminated iff the new side's (reconstructed) tail did.
+      oldEndsNoNewline = newNoNewline && newReachesEof;
+    }
+  }
 
-  // New side (the staged result). Mirror of buildReversePatch's oldEndsNoNewline.
+  // New side (the staged result), mirrored the same way for symmetry — for
+  // 'unstage' newReachesEof is always true (documented above), so this is
+  // unchanged from before this fix.
   let newEndsNoNewline = false;
   if (lastNew !== -1) {
     if (lastNew === lastOld) {
-      newEndsNoNewline = oldNoNewline || (newNoNewline && newReachesEof);
+      newEndsNoNewline = (oldNoNewline && oldReachesEof) || (newNoNewline && newReachesEof);
     } else if (lastNew > lastOld) {
       // Kept additions trail the last shared/old line → new side reaches new-EOF.
       newEndsNoNewline = newNoNewline && newReachesEof;
     } else {
       // Kept deletions (old-only) trail the new side's last line. Removing them on
-      // the new side leaves that shared line last, so the result ends iff old did.
-      newEndsNoNewline = oldNoNewline;
+      // the new side leaves that shared line last, so the result ends iff the old
+      // side's (reconstructed) tail did.
+      newEndsNoNewline = oldNoNewline && oldReachesEof;
     }
   }
 
@@ -580,6 +620,13 @@ export function buildForwardPatchLines(
       // same as the context line it replaces — so the running counts are unchanged.
       const content = ln.text.slice(1);
       body.push('+' + content, NO_NEWLINE_MARKER, '-' + content);
+    } else if (isOldTerm && i < lastNew && ln.onOld && ln.onNew) {
+      // Mirror split: shared line is the old-side terminator but new-only
+      // (kept-add) lines follow (reachable in 'unstage', where the old side can
+      // now end short of the new side) — split so the marker terminates the old
+      // side without truncating the new.
+      const content = ln.text.slice(1);
+      body.push('-' + content, NO_NEWLINE_MARKER, '+' + content);
     } else if (isNewTerm) {
       body.push(ln.text, NO_NEWLINE_MARKER);
     } else if (isOldTerm) {
