@@ -1,29 +1,12 @@
-// Host <-> webview messaging for the Diff view, split out of diff.ts so
-// Diff.svelte can import postStageHunks without a circular entry import.
-// Mirrors workbench/messaging.ts: this bundle has its own vscode api context.
+// Host <-> webview messaging for the full-tab Diff panel. Uses the shared
+// memoized getVsCodeApi() (NOT a second raw acquireVsCodeApi) because
+// FileDiffView -> ImageDiff also calls getVsCodeApi(), and acquireVsCodeApi()
+// may be called only once per webview.
 import { diffStore } from './diff-store.svelte';
+import { getVsCodeApi } from '../lib/vscode-api';
+import { i18n } from '../lib/i18n/index.svelte';
 
-interface VsCodeApi {
-  postMessage(message: unknown): void;
-  getState(): unknown;
-  setState(state: unknown): void;
-}
-
-declare function acquireVsCodeApi(): VsCodeApi;
-
-const vscode = acquireVsCodeApi();
-
-// Bound wait so a disposed/reloaded view mid-apply doesn't leave the button
-// stuck disabled forever (the squash-modal stuck-forever bug family — AGENTS.md).
-const APPLY_TIMEOUT_MS = 30_000;
-let applyTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearApplyTimer(): void {
-  if (applyTimer !== null) {
-    clearTimeout(applyTimer);
-    applyTimer = null;
-  }
-}
+const vscode = getVsCodeApi();
 
 /** Wire the extension -> webview message handler. Call once at boot. */
 export function listenForHostMessages(): void {
@@ -31,15 +14,13 @@ export function listenForHostMessages(): void {
     const msg = (e as MessageEvent).data;
     switch (msg?.type) {
       case 'diffShow':
-        // A fresh diff arrived (initial click OR a re-render after apply) — the
-        // apply round-trip, if any, is done.
-        clearApplyTimer();
-        diffStore.setDiff(msg.payload.repoPath, msg.payload.file, msg.payload.side, msg.payload.hunks);
+        diffStore.setDiff(msg.payload.repoPath, msg.payload.file, msg.payload.side, msg.payload.diff);
+        break;
+      case 'setLocale':
+        if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }
         break;
       case 'error':
-        if (msg.payload?.source === 'diffStageHunks') {
-          clearApplyTimer();
-          diffStore.busy = false;
+        if (msg.payload?.source === 'diffStageHunk') {
           diffStore.error = String(msg.payload.message ?? '操作失敗');
         }
         break;
@@ -47,24 +28,17 @@ export function listenForHostMessages(): void {
   });
 }
 
-/** Post the checked hunks to the host; side decides stage vs unstage. */
-export function postStageHunks(): void {
-  if (!diffStore.canApply) { return; }
-  diffStore.busy = true;
+/** Post a single hunk to the host; side decides stage vs unstage. */
+export function postStageHunk(hunkIndex: number): void {
+  if (!diffStore.diff) { return; }
   diffStore.error = null;
-  clearApplyTimer();
-  applyTimer = setTimeout(() => {
-    applyTimer = null;
-    diffStore.busy = false;
-    diffStore.error = '操作逾時，未收到結果，請重新整理後確認狀態。';
-  }, APPLY_TIMEOUT_MS);
   vscode.postMessage({
-    type: 'diffStageHunks',
+    type: 'diffStageHunk',
     payload: {
       repoPath: diffStore.repoPath,
       file: diffStore.file,
       side: diffStore.side,
-      hunkIndices: diffStore.selectedIndices, // already a plain number[]
+      hunkIndex,
     },
   });
 }
