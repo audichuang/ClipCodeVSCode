@@ -103,6 +103,15 @@ B 要三樹（HEAD/index/working）關聯，並把 block index 從 HEAD↔workin
   單側視圖既有的風險，統一視圖不改變 per-side stage 語意、不擴大它。**
   <!-- ponytail: 接受既有 race；要收緊就把 diffShow 與 mutation request 用
        operation id 關聯、mutation 進行中 gate 住 busy。等有實際重現再做。 -->
+- **已接受的既有殘留（二）— 兩份 diff 非原子快照**（codex 實作審查 Major 1）：
+  `push` 用 `Promise.all` 平行啟兩個 git read，read 刻意不等 mutation lock。若在兩
+  read 之間有其他 mutation（外部 terminal git / 併發操作）interleave，可能組出
+  split snapshot（極端下短暫誤顯示 No changes，或同一變更暫時兩區都出現）。單一使用者
+  正常流程下 mutation 經 `runExclusive` 序列化、post-mutation refresh 在 mutation
+  完成後才跑、busy gate 擋住重複點擊，故實際觸發需外部併發 git；且 FileWatcher 的下一次
+  refresh 會自我修正。**接受為 v1 殘留**（與單側視圖同級風險，未擴大）。
+  <!-- ponytail: 要真原子就把兩 read 併成單一 git 呼叫或包進 read 專用短鎖；
+       等有實際重現再做。 -->
 - **後續驗證**：補一個 deterministic race test（git-shim 卡住一次 mutation）確認
   上述殘留的實際可達性，再決定是否加 operation correlation。列 backlog，不擋 v1。
 

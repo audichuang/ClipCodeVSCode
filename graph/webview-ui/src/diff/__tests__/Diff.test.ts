@@ -81,4 +81,17 @@ describe('Diff.svelte unified view', () => {
     const stageMsg = posted.find((d: any) => d.type === 'diffStageLines');
     expect(stageMsg.payload.side).toBe('staged');
   });
+
+  it('staging a block in the unstaged section posts side:unstaged', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff());
+    const { container } = render(Diff);
+    // Second section is Unstaged.
+    const unstagedSection = container.querySelectorAll('.diff-section')[1];
+    const arrow = unstagedSection.querySelector('.sbs-block-stage-btn');
+    expect(arrow).toBeTruthy();
+    await fireEvent.click(arrow!);
+    const posted = globalThis.__postedMessages.map((m: any) => m.data);
+    const stageMsg = posted.find((d: any) => d.type === 'diffStageLines');
+    expect(stageMsg.payload.side).toBe('unstaged');
+  });
 });
