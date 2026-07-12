@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { MainPanel } from './MainPanel';
 import { SequenceGuard } from '../utils/sequence-guard';
-import type { ChangeGroup } from '../tree/build-change-tree';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
 
 /**
@@ -19,8 +18,9 @@ export class DiffPanel {
   private static instance: DiffPanel | undefined;
 
   private panel: vscode.WebviewPanel | undefined;
-  /** The file currently shown; drives retitle + refreshIfCurrent. */
-  private current: { repoPath: string; file: string; side: ChangeGroup } | undefined;
+  /** The file currently shown; drives retitle + refreshIfCurrent. Both sides
+   *  (staged + unstaged) are pushed together, so this is keyed by file only. */
+  private current: { repoPath: string; file: string } | undefined;
   /** Set once the webview's listener has confirmed it's installed (`diffReady`).
    *  Guards against posting `diffShow`/`setLocale` before the listener exists,
    *  which would silently drop the message (see the `diffReady` handler below,
@@ -40,9 +40,9 @@ export class DiffPanel {
     return DiffPanel.instance;
   }
 
-  /** Open (or reveal) the panel for a file and push its diff. */
-  show(repoPath: string, file: string, side: ChangeGroup): void {
-    this.current = { repoPath, file, side };
+  /** Open (or reveal) the panel for a file and push both sides' diffs. */
+  show(repoPath: string, file: string): void {
+    this.current = { repoPath, file };
     const ticket = this.seq.issue();
     if (!this.panel) { this.createPanel(); }
     this.panel!.title = `Diff: ${path.basename(file)}`;
@@ -55,9 +55,9 @@ export class DiffPanel {
   }
 
   /** Re-render ONLY if it is still the file the user is viewing (post-apply). */
-  refreshIfCurrent(repoPath: string, file: string, side: ChangeGroup): void {
-    if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file && this.current?.side === side) {
-      this.show(repoPath, file, side);
+  refreshIfCurrent(repoPath: string, file: string): void {
+    if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
+      this.show(repoPath, file);
     }
   }
 
@@ -132,14 +132,20 @@ export class DiffPanel {
   }
 
   private async push(
-    target: { repoPath: string; file: string; side: ChangeGroup },
+    target: { repoPath: string; file: string },
     ticket: number,
   ): Promise<void> {
     if (!this.panel) { return; }
-    const { repoPath, file, side } = target;
-    const diff = await this.workbench.fileDiffData(repoPath, file, side);
+    const { repoPath, file } = target;
+    // One ticket for the combined fetch: both sides resolve, then a single
+    // isCurrent() check + single post, so rapid file navigation stays latest-wins
+    // and the view never shows half-old / half-new.
+    const [stagedDiff, unstagedDiff] = await Promise.all([
+      this.workbench.fileDiffData(repoPath, file, 'staged'),
+      this.workbench.fileDiffData(repoPath, file, 'unstaged'),
+    ]);
     if (!this.seq.isCurrent(ticket) || !this.panel) { return; } // superseded / disposed
-    this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, side, diff } });
+    this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, stagedDiff, unstagedDiff } });
   }
 
   private postLocale(panel: vscode.WebviewPanel): void {
