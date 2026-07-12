@@ -70,18 +70,69 @@ export class ChangesWorkbench implements vscode.Disposable {
     const out: RepoStatus[] = [];
     for (const r of found) {
       const svc = this.svcFor(r.path);
-      const [diff, branches] = await Promise.all([
+      const [diff, branches, aheadBehind] = await Promise.all([
         svc.getUncommittedDiff().catch(() => ({ staged: [], unstaged: [] })),
         svc.branches().catch(() => []),
+        svc.aheadBehind(), // never throws; null when no upstream
       ]);
       const current = branches.find(b => b.current);
       const branch = current?.detached ? 'HEAD (detached)' : (current?.name ?? '(no branch)');
-      out.push({ repoName: path.basename(r.path), repoPath: r.path, branch, staged: diff.staged, unstaged: diff.unstaged });
+      out.push({
+        repoName: path.basename(r.path), repoPath: r.path, branch,
+        ahead: aheadBehind?.ahead, behind: aheadBehind?.behind,
+        staged: diff.staged, unstaged: diff.unstaged,
+      });
     }
     return out;
   }
 
   async refresh(): Promise<void> { await this.tree.refresh(); }
+
+  /** Toolbar one-click ops across ALL repos (IntelliJ 更新專案 style): run `op`
+   *  per repo sequentially with progress; ONE repo failing must not stop the
+   *  rest — failures/skips are collected and reported once at the end. Network
+   *  ops don't take GitService's mutation lock; runExclusive only keeps them
+   *  from interleaving with this extension's own queued operations. */
+  private async forAllRepos(verb: string, op: (svc: GitService) => Promise<unknown>): Promise<void> {
+    const repos = await this.discover();
+    if (repos.length === 0) {
+      void vscode.window.showInformationMessage('No git repositories in workspace');
+      return;
+    }
+    const failures: string[] = [];
+    const skipped: string[] = [];
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: verb },
+      async (progress) => {
+        for (const [i, r] of repos.entries()) {
+          const name = path.basename(r.path);
+          progress.report({ message: `${name} (${i + 1}/${repos.length})`, increment: 100 / repos.length });
+          try {
+            const res = await runExclusive(r.path, () => op(this.svcFor(r.path)));
+            if ((res as { pushed?: boolean })?.pushed === false) {
+              skipped.push(`${name}: 無 remote，已略過`);
+            }
+          } catch (err) {
+            failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      },
+    );
+    await this.refresh();
+    const ok = repos.length - failures.length - skipped.length;
+    if (failures.length > 0) {
+      void vscode.window.showErrorMessage(`${verb}：${ok}/${repos.length} 成功；${[...failures, ...skipped].join('；')}`);
+    } else if (skipped.length > 0) {
+      void vscode.window.showWarningMessage(`${verb}：${ok}/${repos.length} 成功；${skipped.join('；')}`);
+    } else {
+      vscode.window.setStatusBarMessage(`${verb} ✓ (${repos.length} repos)`, 5000);
+    }
+  }
+
+  async fetchAll(): Promise<void> { return this.forAllRepos('Fetch', (svc) => svc.fetch(undefined, { prune: true })); }
+  /** No args on purpose: each repo's own pull.rebase / merge config decides. */
+  async pullAll(): Promise<void> { return this.forAllRepos('Pull', (svc) => svc.pull()); }
+  async pushAll(): Promise<void> { return this.forAllRepos('Push', (svc) => svc.pushCurrentBranch()); }
 
   /** Debounced refresh; wired to the FileWatcher in extension.ts. */
   scheduleRefresh(): void {
@@ -296,6 +347,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
+    reg('snipcode.git.fetchAll', () => this.fetchAll());
+    reg('snipcode.git.pullAll', () => this.pullAll());
+    reg('snipcode.git.pushAll', () => this.pushAll());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
     reg('snipcode.git.showDiff', (n) => this.showInDiffView(n as FileNode));
     reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(sel<ChangeTreeNode>(n, ns)));

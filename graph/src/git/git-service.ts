@@ -919,6 +919,20 @@ export class GitService {
     return { staged, unstaged };
   }
 
+  /* SNIPCODE-HOOK start: current-branch ahead/behind vs upstream for the Changes
+   *  tree's repo badges (`main ↓3 ↑1`). Read-only; ANY failure (no upstream,
+   *  detached HEAD, unborn branch) → null so the tree renders without badges. */
+  async aheadBehind(): Promise<{ ahead: number; behind: number } | null> {
+    try {
+      const raw = await this.exec(['rev-list', '--left-right', '--count', '@{upstream}...HEAD']);
+      const [behindStr = '0', aheadStr = '0'] = raw.trim().split('\t');
+      return { behind: parseInt(behindStr, 10) || 0, ahead: parseInt(aheadStr, 10) || 0 };
+    } catch {
+      return null;
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: full file content at a ref for the Diff tab's
    *  open-in-editor view. ref '' = index (stage 0, `git show :<path>`); anything
    *  else is `git show <ref>:<path>`. Throws when the file is absent at the ref
