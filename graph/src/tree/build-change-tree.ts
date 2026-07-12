@@ -12,6 +12,9 @@ export interface RepoStatus {
   repoPath: string;
   /** Current branch (or '' / 'HEAD' when detached/unborn). */
   branch: string;
+  /** Commits ahead/behind upstream (undefined when there is no upstream). */
+  ahead?: number;
+  behind?: number;
   staged: Array<{ path: string; status: string }>;
   unstaged: Array<{ path: string; status: string }>;
 }
@@ -30,6 +33,8 @@ export interface RepoNode {
   repoName: string;
   repoPath: string;
   branch: string;
+  ahead?: number;
+  behind?: number;
   group: ChangeGroup;
   files: FileNode[];
 }
@@ -55,6 +60,8 @@ function groupNode(repos: RepoStatus[], group: ChangeGroup): GroupNode {
       repoName: repo.repoName,
       repoPath: repo.repoPath,
       branch: repo.branch,
+      ahead: repo.ahead,
+      behind: repo.behind,
       group,
       files: entries.map((e) => ({
         kind: 'file',

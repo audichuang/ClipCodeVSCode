@@ -50,7 +50,10 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     }
     if (node.kind === 'repo') {
       const item = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.Expanded);
-      item.description = node.branch;
+      // IntelliJ-style incoming/outgoing badges; zero or no-upstream sides drop out.
+      item.description = node.branch
+        + (node.behind ? ` ↓${node.behind}` : '')
+        + (node.ahead ? ` ↑${node.ahead}` : '');
       item.contextValue = `repo-${node.group}`;
       item.iconPath = new vscode.ThemeIcon('repo');
       // Distinguish the same repo appearing under both groups.
