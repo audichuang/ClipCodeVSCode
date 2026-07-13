@@ -22,8 +22,10 @@ let nextOperationId = 0;
 // Page-unique prefix: a host mutation can outlive a webview reload, and a
 // counter restarting at diff-1 would let the OLD page's late reply correlate
 // with (and unlock) a NEW page's first operation. Known residual: a late
-// correlated reply from before the reload is dropped by the fresh page —
-// the diffReady re-push and the stale-fingerprint recovery cover that window.
+// correlated reply from before the reload is dropped by the fresh page, and
+// the diffReady re-push can itself be superseded by that reply's refresh —
+// in that rare race the panel sits on its empty state until the user
+// re-clicks the file. Never mis-stages or mis-unlocks; recovery is manual.
 const pageId = Math.random().toString(36).slice(2, 10);
 /* SNIPCODE-HOOK end */
 
