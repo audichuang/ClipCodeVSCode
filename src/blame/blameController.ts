@@ -100,8 +100,21 @@ export class BlameController {
   // clean instead of inheriting the previous tab's enabled/generation state.
   // The document may stay open elsewhere (split, other group), so this fires
   // even when onCloseDocument doesn't.
-  onTabClosed(docUri: string, viewColumn: number | undefined): void {
+  //
+  // `uriStillOpen` = some tab (any column) still shows this URI. When the LAST
+  // tab goes, sweep every per-column key: the tab event's column cannot
+  // address keys recorded as '::none' (TextEditor.viewColumn is undefined
+  // beyond column three) or keys stranded by an earlier group renumbering.
+  // Known ceiling: a stale key for a STILL-open URI (renumber, >3 columns)
+  // survives until the document closes; migrate keys via
+  // window.onDidChangeTextEditorViewColumn if this ever matters in practice.
+  onTabClosed(docUri: string, viewColumn: number | undefined, uriStillOpen = true): void {
     this.resetEditor(tabKey(docUri, viewColumn));
+    if (uriStillOpen) return;
+    const prefix = `${docUri}::`;
+    for (const key of this.enabled) {
+      if (key.startsWith(prefix)) this.resetEditor(key);
+    }
   }
 
   onCloseDocument(doc: vscode.TextDocument): void {

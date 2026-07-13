@@ -305,6 +305,33 @@ describe('GitService integration — reverseCommitChanges byte fidelity', () => 
 
     expect(readFileSync(join(repo.path, 'bin.txt'))).toEqual(bytes);
   });
+
+  it('reverses a single selected line of a non-UTF-8 no-newline file byte-identically', async () => {
+    // Byte-bearing content through the LINE-level reconstruction path,
+    // including the no-newline marker handling.
+    const base = Buffer.from([0x61, 0x80]); // "a<inv>" no trailing newline
+    writeFileSync(join(repo.path, 'bin.txt'), base);
+    runGit(repo.path, ['add', '--', 'bin.txt']);
+    commit(repo.path, 'base bin');
+    const changed = Buffer.from([0x61, 0x80, 0x0a, 0x63, 0x82]); // adds "c<inv>" line
+    writeFileSync(join(repo.path, 'bin.txt'), changed);
+    runGit(repo.path, ['add', '--', 'bin.txt']);
+    const mod = commit(repo.path, 'append bin line');
+
+    // The old last line loses its no-newline terminator, so git renders the
+    // change as delete+add pairs; select every changed line via the LINE-level
+    // path (exercises the marker-aware line reconstruction, not the hunk copy).
+    const hunk = (await svc.showCommitDiff(mod, 'bin.txt'))[0].hunks[0];
+    const changedLines = hunk.lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.type !== 'context')
+      .map(({ i }) => i);
+    expect(changedLines.length).toBeGreaterThan(0);
+
+    await svc.reverseCommitChanges(mod, 'bin.txt', { hunkIndex: 0, lineIndices: changedLines });
+
+    expect(readFileSync(join(repo.path, 'bin.txt'))).toEqual(base);
+  });
 });
 /* SNIPCODE-HOOK end */
 

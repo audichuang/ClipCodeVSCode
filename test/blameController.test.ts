@@ -338,6 +338,45 @@ test('closing one split tab resets its editor state while the document remains v
   controller.dispose();
 });
 
+test('closing the last tab of a document resets every per-column blame key', async () => {
+  const { BlameController } = await controllerModule;
+  const document = makeDocument();
+  const left = makeEditor(document, 1);
+  const right = makeEditor(document, 2);
+  vscode.window.activeTextEditor = left;
+  vscode.window.visibleTextEditors = [left, right];
+  const controller = new BlameController({
+    getGitPath: () => 'git',
+    resolveRepoRoot: () => ({ repoRoot: '/repo', head: 'HEAD' }),
+  });
+
+  const leftEnable = controller.toggle();
+  await waitForProcess(1);
+  processes[0].succeed(blameOutput('Old', '1111111111111111111111111111111111111111'));
+  await leftEnable;
+  vscode.window.activeTextEditor = right;
+  await controller.toggle(); // right renders from cache
+
+  // The document's LAST tab closes from column 2. Column 1's tab is already
+  // gone in a way the tab event could not address (e.g. its editor key was
+  // recorded as '::none' beyond column three, or the group was renumbered) —
+  // with no tab left for the URI, every per-column key must be swept.
+  vscode.window.activeTextEditor = undefined;
+  vscode.window.visibleTextEditors = [];
+  (controller as unknown as { onTabClosed(docUri: string, viewColumn: number, uriStillOpen?: boolean): void })
+    .onTabClosed(document.uri.toString(), 2, false);
+
+  const reopenedLeft = makeEditor(document, 1);
+  vscode.window.activeTextEditor = reopenedLeft;
+  vscode.window.visibleTextEditors = [reopenedLeft];
+  await controller.onActiveEditor(reopenedLeft as never);
+
+  // No inherited toggle on either column.
+  assert.equal(processes.length, 1);
+  assert.deepEqual(labels(reopenedLeft), []);
+  controller.dispose();
+});
+
 test('switching tabs away and back keeps blame enabled (no tab was closed)', async () => {
   const { BlameController } = await controllerModule;
   const document = makeDocument();
