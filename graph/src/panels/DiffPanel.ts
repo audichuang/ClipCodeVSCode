@@ -99,6 +99,17 @@ export class DiffPanel {
 
   /** Open (or reveal) the panel for a file and push both sides' diffs. */
   /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+  /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+  /** Operation id of a correlated push that has not posted its diffShow yet.
+   *  A same-target re-show (e.g. a tree click on the file already shown) that
+   *  supersedes such a push must inherit this id: the webview's strict
+   *  correlation drops uncorrelated diffShows while an op is in flight, so an
+   *  uncorrelated superseding push would starve the op's terminal reply and
+   *  leave `busy` locked. Cleared once the correlated diffShow is posted, on
+   *  webview handshake (fresh page has no op gate), and on panel disposal. */
+  private pendingOpId: string | undefined;
+  /* SNIPCODE-HOOK end */
+
   show(repoPath: string, file: string, operationId?: string): void {
     const ticket = this.seq.issue();
     /* SNIPCODE-HOOK start: loading state only on navigation */
@@ -106,6 +117,10 @@ export class DiffPanel {
     // until the fresh diffShow lands; only real navigation clears it with a
     // loading state — otherwise every hunk stage flashes "Loading changes".
     const sameTarget = this.current?.repoPath === repoPath && this.current?.file === file;
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+    const effectiveOpId = operationId ?? (sameTarget ? this.pendingOpId : undefined);
+    this.pendingOpId = effectiveOpId;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B image request identity */
     this.current = { repoPath, file, generation: ticket };
@@ -122,11 +137,11 @@ export class DiffPanel {
       if (!sameTarget) {
         this.panel!.webview.postMessage({
           type: 'diffLoading',
-          payload: { repoPath, file, generation: ticket, ...(operationId ? { operationId } : {}) },
+          payload: { repoPath, file, generation: ticket, ...(effectiveOpId ? { operationId: effectiveOpId } : {}) },
         });
       }
       /* SNIPCODE-HOOK end */
-      void this.push(this.current, ticket, operationId);
+      void this.push(this.current, ticket, effectiveOpId);
     }
   }
   /* SNIPCODE-HOOK end */
@@ -176,6 +191,11 @@ export class DiffPanel {
       if (msg?.type === 'diffReady') {
         this.ready = true;
         this.postLocale(panel);
+        /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+        // A fresh page has no op gate; a pending id from the previous page
+        // would make later same-target pushes wrongly correlated.
+        this.pendingOpId = undefined;
+        /* SNIPCODE-HOOK end */
         /* SNIPCODE-HOOK start: Batch B image request identity */
         if (this.current) {
           const generation = this.seq.issue();
@@ -291,6 +311,9 @@ export class DiffPanel {
       this.panel = undefined;
       this.current = undefined;
       this.ready = false;
+      /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+      this.pendingOpId = undefined;
+      /* SNIPCODE-HOOK end */
     });
     this.panel = panel;
   }
@@ -327,6 +350,11 @@ export class DiffPanel {
     if (!this.seq.isCurrent(ticket) || !this.panel) { return; } // superseded / disposed
     /* SNIPCODE-HOOK start: Batch B stage operation correlation */
     this.panel.webview.postMessage({ type: 'diffShow', payload: { repoPath, file, generation, stagedDiff, unstagedDiff, fetchError, ...(operationId ? { operationId } : {}) } });
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+    // The op's terminal reply is out; a LATER same-target show must not
+    // resurrect the id (the webview would drop it as a stale correlation).
+    if (operationId !== undefined && this.pendingOpId === operationId) { this.pendingOpId = undefined; }
     /* SNIPCODE-HOOK end */
   }
 

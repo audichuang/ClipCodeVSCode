@@ -368,6 +368,46 @@ describe('DiffPanel', () => {
   });
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: inherit pending op-id on same-target re-show */
+  it('a same-file tree click during a correlated refresh keeps the terminal reply correlated', async () => {
+    const wb = makeWorkbench();
+    const dp = await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    wb.fileDiffData.mockImplementation(async () => { await gate; return stagedDiff; });
+
+    // A successful stage kicked off its correlated refresh (op-1)…
+    dp.refreshIfCurrent('/r', 'a.ts', 'op-1');
+    // …and the user clicks the SAME file in the tree before it lands. The
+    // superseding push must inherit op-1 — otherwise the webview (strict
+    // correlation) drops the uncorrelated reply and busy sticks forever.
+    dp.show('/r', 'a.ts');
+    release();
+    await flush();
+
+    const shows = diffShows();
+    expect(shows).toHaveLength(1); // latest-wins still holds
+    expect(shows[0].payload.operationId).toBe('op-1');
+  });
+
+  it('a same-file show after the correlated refresh landed stays uncorrelated', async () => {
+    const wb = makeWorkbench();
+    const dp = await shownPanel(wb);
+    dp.refreshIfCurrent('/r', 'a.ts', 'op-1');
+    await flush(); // op-1 refresh posts its correlated diffShow
+    H.panel!.webview.postMessage.mockClear();
+
+    dp.show('/r', 'a.ts');
+    await flush();
+
+    // The op is settled; a later same-file push must NOT resurrect its id
+    // (the webview would drop a correlated diffShow for a cleared op).
+    expect(diffShows()).toHaveLength(1);
+    expect(diffShows()[0].payload.operationId).toBeUndefined();
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: loading state only on navigation */
   it('a same-file refresh keeps the body instead of flashing the loading state', async () => {
     const wb = makeWorkbench();

@@ -363,8 +363,8 @@ test('closing the last tab of a document resets every per-column blame key', asy
   // with no tab left for the URI, every per-column key must be swept.
   vscode.window.activeTextEditor = undefined;
   vscode.window.visibleTextEditors = [];
-  (controller as unknown as { onTabClosed(docUri: string, viewColumn: number, uriStillOpen?: boolean): void })
-    .onTabClosed(document.uri.toString(), 2, false);
+  (controller as unknown as { onTabClosed(docUri: string, viewColumn: number, remaining?: { sameKey: boolean; sameUri: boolean }): void })
+    .onTabClosed(document.uri.toString(), 2, { sameKey: false, sameUri: false });
 
   const reopenedLeft = makeEditor(document, 1);
   vscode.window.activeTextEditor = reopenedLeft;
@@ -374,6 +374,39 @@ test('closing the last tab of a document resets every per-column blame key', asy
   // No inherited toggle on either column.
   assert.equal(processes.length, 1);
   assert.deepEqual(labels(reopenedLeft), []);
+  controller.dispose();
+});
+
+test('closing a diff tab whose side aliases the text tab key keeps blame on the text tab', async () => {
+  const { BlameController } = await controllerModule;
+  const document = makeDocument();
+  const editor = makeEditor(document, 1);
+  vscode.window.activeTextEditor = editor;
+  vscode.window.visibleTextEditors = [editor];
+  const controller = new BlameController({
+    getGitPath: () => 'git',
+    resolveRepoRoot: () => ({ repoRoot: '/repo', head: 'HEAD' }),
+  });
+
+  const enable = controller.toggle();
+  await waitForProcess(1);
+  processes[0].succeed(blameOutput('Old', '1111111111111111111111111111111111111111'));
+  await enable;
+
+  // A native diff tab whose modified side is the SAME uri sits in the SAME
+  // group (e.g. the panel's "a.ts (Working Tree)" diff). Closing only the
+  // diff tab reports that another tab still holds this exact uri+column key —
+  // the text tab's toggle must survive.
+  (controller as unknown as { onTabClosed(docUri: string, viewColumn: number, remaining?: { sameKey: boolean; sameUri: boolean }): void })
+    .onTabClosed(document.uri.toString(), 1, { sameKey: true, sameUri: true });
+
+  const back = makeEditor(document, 1);
+  vscode.window.activeTextEditor = back;
+  vscode.window.visibleTextEditors = [back];
+  await controller.onActiveEditor(back as never);
+
+  assert.equal(processes.length, 1); // cache hit — still enabled
+  assert.deepEqual(authors(back), ['Old']);
   controller.dispose();
 });
 
