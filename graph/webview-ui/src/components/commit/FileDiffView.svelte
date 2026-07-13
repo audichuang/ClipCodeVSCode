@@ -281,6 +281,9 @@
   // diff starts collapsed even if the previous one was expanded.
   $effect(() => {
     diff;
+    /* SNIPCODE-HOOK start: Batch C reset reused diff-view highlight state. */
+    highlightedLines = new Map();
+    /* SNIPCODE-HOOK end */
     showFullDiff = false;
     lineSel = null;
   });
@@ -301,10 +304,12 @@
   );
   let diffTruncated = $derived(!showFullDiff && totalDiffLines > MAX_RENDER_LINES);
 
+  /* SNIPCODE-HOOK start: Batch C describe file/content-aware highlight keys. */
   // Hunks actually handed to the template. When truncated, include whole hunks
   // until the line budget runs out, slicing the final partial hunk. The sliced
-  // hunk keeps its original `oldStart` and the first-N line indices, so the
-  // highlight-cache keys (`${oldStart}-${lineIndex}`) still line up.
+  // hunk keeps its original `oldStart`, content, and first-N line indices, so
+  // its file/content-aware highlight keys still line up.
+  /* SNIPCODE-HOOK end */
   let renderHunks = $derived.by(() => {
     if (!diff || diff.isBinary) return [];
     if (!diffTruncated) return diff.hunks;
@@ -322,6 +327,46 @@
     }
     return out;
   });
+
+  /* SNIPCODE-HOOK start: Batch C align replacement rows side-by-side. */
+  type DiffLine = DiffData['hunks'][number]['lines'][number];
+  interface SbsLine { line: DiffLine; index: number }
+  interface SbsRow { left?: SbsLine; right?: SbsLine }
+
+  function pairSideBySideRows(lines: DiffLine[]): SbsRow[] {
+    const rows: SbsRow[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].type === 'context') {
+        const entry = { line: lines[i], index: i };
+        rows.push({ left: entry, right: entry });
+        i++;
+        continue;
+      }
+      if (lines[i].type === 'add') {
+        rows.push({ right: { line: lines[i], index: i } });
+        i++;
+        continue;
+      }
+      const deletes: SbsLine[] = [];
+      while (i < lines.length && lines[i].type === 'delete') {
+        deletes.push({ line: lines[i], index: i });
+        i++;
+      }
+      const adds: SbsLine[] = [];
+      while (i < lines.length && lines[i].type === 'add') {
+        adds.push({ line: lines[i], index: i });
+        i++;
+      }
+      for (let row = 0; row < Math.max(deletes.length, adds.length); row++) {
+        rows.push({ left: deletes[row], right: adds[row] });
+      }
+    }
+    return rows;
+  }
+
+  const sbsRows = $derived(renderHunks.map(hunk => pairSideBySideRows(hunk.lines)));
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: contiguous change blocks per hunk. Each run of adjacent
      +/- lines is one block; the SBS gutter arrow anchors on the block's first
@@ -354,11 +399,17 @@
     for (const hunk of renderHunks) {
       const paired = pairHunkWordDiffs(hunk.lines);
       for (const [lineIdx, entry] of paired) {
-        map.set(`${hunk.oldStart}-${lineIdx}`, entry);
+        map.set(highlightKey(diff.file, hunk.oldStart, lineIdx, hunk.lines[lineIdx].content), entry);
       }
     }
     return map;
   });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: Batch C bind cached HTML to file and content identity. */
+  function highlightKey(file: string, hunkStart: number, lineIdx: number, content: string): string {
+    return JSON.stringify([file, hunkStart, lineIdx, content]);
+  }
   /* SNIPCODE-HOOK end */
 
   const MAX_HIGHLIGHT_LINES = 5000;
@@ -398,9 +449,11 @@
     // so the revealed lines get highlighted then.
     const visibleHunks = renderHunks;
     const theme = shikiTheme; // capture so a theme switch invalidates the pass
+    /* SNIPCODE-HOOK start: Batch C task-yielded highlighting. */
     // Yield to the event loop between chunks so a multi-thousand-line diff
     // doesn't freeze the panel. Each batch processes CHUNK_SIZE lines then
-    // hands control back via a microtask.
+    // hands control back via a task so paint and input can run.
+    /* SNIPCODE-HOOK end */
     const CHUNK_SIZE = 250;
     let cancelled = false;
     getHighlighter()
@@ -416,7 +469,12 @@
         const flat: Array<{ key: string; content: string }> = [];
         for (const hunk of visibleHunks) {
           for (let i = 0; i < hunk.lines.length; i++) {
-            flat.push({ key: `${hunk.oldStart}-${i}`, content: hunk.lines[i].content });
+            /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
+            flat.push({
+              key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content),
+              content: hunk.lines[i].content,
+            });
+            /* SNIPCODE-HOOK end */
           }
         }
         for (let i = 0; i < flat.length; i += CHUNK_SIZE) {
@@ -431,11 +489,13 @@
                 : highlightLineSync(h, flat[j].content, lang, theme),
             );
           }
-          // Defer to next microtask so user interaction (scroll, switch file)
+          /* SNIPCODE-HOOK start: Batch C yield to paint/input between chunks. */
+          // Defer to the next task so user interaction (scroll, switch file)
           // can interrupt mid-highlight without paying for the whole pass.
           if (end < flat.length) {
-            await new Promise<void>(resolve => queueMicrotask(resolve));
+            await new Promise<void>(resolve => setTimeout(resolve, 0));
           }
+          /* SNIPCODE-HOOK end */
         }
         if (cancelled || diff !== target) return;
         highlightedLines = newMap;
@@ -445,7 +505,9 @@
   });
 
   function getHighlighted(hunkStart: number, lineIdx: number, content: string): string {
-    const key = `${hunkStart}-${lineIdx}`;
+    /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
+    const key = highlightKey(diff.file, hunkStart, lineIdx, content);
+    /* SNIPCODE-HOOK end */
     return highlightedLines.get(key) ?? escapeHtml(content);
   }
 </script>
@@ -582,7 +644,8 @@
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
-                {#each hunk.lines as line, lineIndex}
+                <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
+                {#each sbsRows[hunkIdx] as row}
                   <!-- SNIPCODE-HOOK start: per-change-block stage arrow. Anchored
                        on the block's first line (works even for a pure-addition
                        block, whose left-pane row is an empty placeholder). The
@@ -590,11 +653,13 @@
                        stays pinned to the visible right edge of the left pane (≈
                        the center gutter, IntelliJ-style) instead of scrolling off
                        with the long `pre` line content. -->
+                  {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
                   {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
-                  {#if line.type === 'context' || line.type === 'delete'}
+                  {#if row.left}
+                    {@const line = row.left.line}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
@@ -620,6 +685,7 @@
                   {/if}
                   <!-- SNIPCODE-HOOK end -->
                 {/each}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>
@@ -636,11 +702,13 @@
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
-                {#each hunk.lines as line, lineIndex}
-                  {#if line.type === 'context' || line.type === 'add'}
+                <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
+                {#each sbsRows[hunkIdx] as row}
+                  {#if row.right}
+                    {@const line = row.right.line}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
@@ -649,6 +717,7 @@
                     </div>
                   {/if}
                 {/each}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>

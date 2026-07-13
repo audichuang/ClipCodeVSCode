@@ -15,6 +15,17 @@ export interface WordDiffResult { delRanges: Range[]; addRanges: Range[] }
 // callers fall back to whole-line coloring.
 // ponytail: fixed cap; make it configurable only if a real file needs it.
 const MAX_LEN = 400;
+/* SNIPCODE-HOOK start: Batch C bound eager word-diff work. */
+const MAX_TOKEN_DP_CELLS = 20_000;
+const MAX_REWRITE_LINES = 400;
+
+function lineLevelFallback(oldLine: string, newLine: string): WordDiffResult {
+  return {
+    delRanges: oldLine.length ? [{ start: 0, end: oldLine.length }] : [],
+    addRanges: newLine.length ? [{ start: 0, end: newLine.length }] : [],
+  };
+}
+/* SNIPCODE-HOOK end */
 
 // Split a line into tokens: runs of word chars, runs of whitespace, and single
 // other chars. Keeping delimiters as their own tokens means the joined tokens
@@ -46,17 +57,19 @@ function tokensToRanges(tokens: string[], changed: boolean[]): Range[] {
 }
 
 export function computeWordDiff(oldLine: string, newLine: string): WordDiffResult {
+  /* SNIPCODE-HOOK start: Batch C share the bounded line-level fallback. */
   if (oldLine.length > MAX_LEN || newLine.length > MAX_LEN) {
-    return {
-      delRanges: oldLine.length ? [{ start: 0, end: oldLine.length }] : [],
-      addRanges: newLine.length ? [{ start: 0, end: newLine.length }] : [],
-    };
+    return lineLevelFallback(oldLine, newLine);
   }
+  /* SNIPCODE-HOOK end */
 
   const a = tokenize(oldLine);
   const b = tokenize(newLine);
   const n = a.length;
   const m = b.length;
+  /* SNIPCODE-HOOK start: Batch C avoid pathological token LCS matrices. */
+  if (n * m > MAX_TOKEN_DP_CELLS) return lineLevelFallback(oldLine, newLine);
+  /* SNIPCODE-HOOK end */
 
   // LCS length DP: dp[i][j] = LCS of a[i..] and b[j..].
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
@@ -104,6 +117,12 @@ export function pairHunkWordDiffs(
     while (a < lines.length && lines[a].type === 'add') { a++; }
     const dels = d - i;      // delete lines [i, d)
     const adds = a - d;      // add lines    [d, a)
+    /* SNIPCODE-HOOK start: Batch C fall back to line-level for mass rewrites. */
+    if (dels + adds > MAX_REWRITE_LINES) {
+      i = a > i ? a : i + 1;
+      continue;
+    }
+    /* SNIPCODE-HOOK end */
     const pairs = Math.min(dels, adds);
     for (let k = 0; k < pairs; k++) {
       const delIdx = i + k;

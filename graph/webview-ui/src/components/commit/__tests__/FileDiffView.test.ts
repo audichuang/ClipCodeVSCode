@@ -393,6 +393,25 @@ describe('FileDiffView gutter line-selection', () => {
   });
 });
 
+/* SNIPCODE-HOOK start: Batch C side-by-side alignment regression. */
+describe('FileDiffView side-by-side alignment', () => {
+  it('pairs adjacent delete and add lines on the same visual row', () => {
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(),
+      diffMode: 'side-by-side',
+      hideModeToggle: true,
+    });
+
+    const leftRows = container.querySelectorAll('.sbs-left .diff-line');
+    const rightRows = container.querySelectorAll('.sbs-right .diff-line');
+    expect(leftRows.length).toBe(6);
+    expect(rightRows.length).toBe(6);
+    expect(leftRows[1].querySelector('.line-content')?.textContent).toBe('b');
+    expect(rightRows[1].querySelector('.line-content')?.textContent).toBe('b2');
+  });
+});
+/* SNIPCODE-HOOK end */
+
 // A blank line whose content is the empty string — exercises the edge where
 // selectedLinesText() returns '' for a single selected blank line.
 function blankLineDiff(): DiffData {

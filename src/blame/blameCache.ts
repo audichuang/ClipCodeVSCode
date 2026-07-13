@@ -19,6 +19,12 @@ export class BlameCache {
   clear(): void { this.map.clear(); this.lastKeyForDoc.clear(); }
   get size(): number { return this.map.size; }
 
+  deleteForDoc(docKey: string): void {
+    const cacheKey = this.lastKeyForDoc.get(docKey);
+    if (cacheKey) this.map.delete(cacheKey);
+    this.lastKeyForDoc.delete(docKey);
+  }
+
   // Stores `lines` under `key` for `docKey`, evicting whatever entry was
   // previously cached for the same document (its old document.version) so
   // the cache stays bounded to one entry per open document.
