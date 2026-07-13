@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+/* SNIPCODE-HOOK start: Batch A patch-safety integration coverage */
+import { execFileSync } from 'child_process';
+import { unlinkSync, writeFileSync } from 'fs';
+/* SNIPCODE-HOOK end */
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
 
@@ -104,6 +108,52 @@ describe('GitService integration — stageLines / unstageLines', () => {
     const indexBlob = runGit(repo.path, ['show', ':k.txt']);
     expect(indexBlob).toBe('X\nA'); // B unstaged; A stays, taking on the no-newline tail
   });
+
+  /* SNIPCODE-HOOK start: Batch A patch-safety regressions */
+  it('keeps quoted whole-file paths when partially staging a delete and unstaging a new file', async () => {
+    const deletedFile = 'quote"name.txt';
+    commit(repo.path, 'quoted-delete-base', { [deletedFile]: 'keep\nremove\n' });
+    unlinkSync(`${repo.path}/${deletedFile}`);
+
+    await svc.stageLines(deletedFile, 0, [1]);
+
+    expect(runGit(repo.path, ['show', `:${deletedFile}`])).toBe('keep\n');
+    expect(runGit(repo.path, ['ls-files', '-z', '--', deletedFile])).toBe(`${deletedFile}\0`);
+    expect(runGit(repo.path, ['ls-files', '--', 'dev/null'])).toBe('');
+
+    const newFile = 'new"quote.txt';
+    writeFile(repo.path, newFile, 'keep\nunstage\n');
+    runGit(repo.path, ['add', '--', newFile]);
+
+    await svc.unstageLines(newFile, 0, [1]);
+
+    expect(runGit(repo.path, ['show', `:${newFile}`])).toBe('keep\n');
+    expect(runGit(repo.path, ['ls-files', '-z', '--', newFile])).toBe(`${newFile}\0`);
+    expect(runGit(repo.path, ['ls-files', '--', 'dev/null'])).toBe('');
+  });
+
+  it('stages non-UTF-8 file bytes without changing the index blob', async () => {
+    const file = 'invalid-utf8.txt';
+    const bytes = Buffer.from([0x61, 0x80, 0x0a]);
+    writeFileSync(`${repo.path}/${file}`, bytes);
+
+    await svc.stageLines(file, 0, [0]);
+
+    expect(execFileSync('git', ['show', `:${file}`], { cwd: repo.path })).toEqual(bytes);
+  });
+
+  it('preserves each side EOF when staging and unstaging a mixed-EOF replacement', async () => {
+    const file = 'mixed-eof-replacement.txt';
+    commit(repo.path, 'mixed-eof-replacement-base', { [file]: 'old\n' });
+    writeFile(repo.path, file, 'new');
+
+    await svc.stageLines(file, 0, [0, 1]);
+    expect(runGit(repo.path, ['show', `:${file}`])).toBe('new');
+
+    await svc.unstageLines(file, 0, [0, 1]);
+    expect(runGit(repo.path, ['show', `:${file}`])).toBe('old\n');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('throws when the file has no unstaged changes', async () => {
     runGit(repo.path, ['checkout', '--', 'f.txt']);
