@@ -298,7 +298,7 @@ test('closing and reopening the same editor identity resets blame state and cach
   controller.dispose();
 });
 
-test('closing one split resets its editor state while the document remains visible elsewhere', async () => {
+test('closing one split tab resets its editor state while the document remains visible elsewhere', async () => {
   const { BlameController } = await controllerModule;
   const document = makeDocument();
   const left = makeEditor(document, 1);
@@ -315,24 +315,65 @@ test('closing one split resets its editor state while the document remains visib
   processes[0].succeed(blameOutput('Old', '1111111111111111111111111111111111111111'));
   await enable;
 
+  // The left split's TAB is closed (the document stays open in the right
+  // split, so no onDidCloseTextDocument fires).
   vscode.window.visibleTextEditors = [right];
-  (controller as unknown as { onVisibleEditors(editors: TestEditor[]): void })
-    .onVisibleEditors([right]);
+  (controller as unknown as { onTabClosed(docUri: string, viewColumn: number): void })
+    .onTabClosed(document.uri.toString(), 1);
 
   const reopened = makeEditor(document, 1);
   vscode.window.activeTextEditor = reopened;
   vscode.window.visibleTextEditors = [reopened, right];
-  (controller as unknown as { onVisibleEditors(editors: TestEditor[]): void })
-    .onVisibleEditors([reopened, right]);
   await controller.onActiveEditor(reopened as never);
+  // The reopened tab must NOT inherit the closed tab's enabled state.
   assert.equal(processes.length, 1);
   assert.deepEqual(labels(reopened), []);
 
+  // Re-toggling renders again. Same head + doc version → the content-addressed
+  // cache is still valid, so no second git process is needed.
   const reopenedRender = controller.toggle();
-  await waitForProcess(2);
-  processes[1].succeed(blameOutput('New', '2222222222222222222222222222222222222222'));
   await reopenedRender;
-  assert.deepEqual(authors(reopened), ['New']);
+  assert.equal(processes.length, 1);
+  assert.deepEqual(authors(reopened), ['Old']);
+  controller.dispose();
+});
+
+test('switching tabs away and back keeps blame enabled (no tab was closed)', async () => {
+  const { BlameController } = await controllerModule;
+  const document = makeDocument();
+  const editor = makeEditor(document, 1);
+  vscode.window.activeTextEditor = editor;
+  vscode.window.visibleTextEditors = [editor];
+  const controller = new BlameController({
+    getGitPath: () => 'git',
+    resolveRepoRoot: () => ({ repoRoot: '/repo', head: 'HEAD' }),
+  });
+
+  const enable = controller.toggle();
+  await waitForProcess(1);
+  processes[0].succeed(blameOutput('Old', '1111111111111111111111111111111111111111'));
+  await enable;
+
+  // Switch to another tab in the same group: the editor leaves
+  // visibleTextEditors but its tab is NOT closed. The legacy visibility
+  // handler (if present) must not treat this as a close.
+  vscode.window.activeTextEditor = undefined;
+  vscode.window.visibleTextEditors = [];
+  (controller as unknown as { onVisibleEditors?(editors: TestEditor[]): void })
+    .onVisibleEditors?.([]);
+
+  // Switch back: VS Code hands out a fresh TextEditor instance for the same
+  // document + viewColumn. Blame must still be enabled and re-render (from
+  // cache — same head + doc version — so no new git process).
+  const back = makeEditor(document, 1);
+  vscode.window.activeTextEditor = back;
+  vscode.window.visibleTextEditors = [back];
+  (controller as unknown as { onVisibleEditors?(editors: TestEditor[]): void })
+    .onVisibleEditors?.([back]);
+  await controller.onActiveEditor(back as never);
+
+  assert.equal(processes.length, 1);
+  assert.deepEqual(authors(back), ['Old']);
   controller.dispose();
 });
 

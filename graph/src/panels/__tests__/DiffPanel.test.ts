@@ -24,6 +24,9 @@ import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DiffPanel } from '../DiffPanel';
+/* SNIPCODE-HOOK start: stale fingerprint recovery */
+import { StaleDiffError } from '../../git/git-service';
+/* SNIPCODE-HOOK end */
 import type { ChangesWorkbench } from '../../tree/changes-workbench';
 
 const extUri = { fsPath: '/ext' } as unknown as import('vscode').Uri;
@@ -336,6 +339,48 @@ describe('DiffPanel', () => {
     expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Stage/Unstage 失敗：patch does not apply');
     expect(H.panel!.webview.postMessage).not.toHaveBeenCalled();
   });
+
+  /* SNIPCODE-HOOK start: stale fingerprint recovery */
+  it('a stale-fingerprint failure re-pushes the fresh diff so the next click can succeed', async () => {
+    const wb = makeWorkbench();
+    wb.stageHunks.mockRejectedValueOnce(new StaleDiffError('stale diff; refresh before staging'));
+    await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'old-fp', operationId: 'op-1' } });
+    await flush();
+
+    // The error still lands (unlocks the gate)…
+    expect(posted().filter((m) => m.type === 'error')).toHaveLength(1);
+    // …and the panel re-pushes the CURRENT diff (fresh fingerprint), instead of
+    // leaving the webview stuck re-sending the stale one forever.
+    expect(diffShows()).toHaveLength(1);
+  });
+
+  it('a non-stale stage failure does not trigger a re-push', async () => {
+    const wb = makeWorkbench();
+    wb.stageHunks.mockRejectedValueOnce(new Error('patch does not apply'));
+    await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp', operationId: 'op-1' } });
+    await flush();
+    expect(diffShows()).toHaveLength(0);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: loading state only on navigation */
+  it('a same-file refresh keeps the body instead of flashing the loading state', async () => {
+    const wb = makeWorkbench();
+    const dp = await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+
+    dp.refreshIfCurrent('/r', 'a.ts');
+    await flush();
+
+    expect(posted().filter((m) => m.type === 'diffLoading')).toHaveLength(0);
+    expect(diffShows()).toHaveLength(1);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('a failing stage op posts a matching error back to the webview', async () => {
     const wb = makeWorkbench();

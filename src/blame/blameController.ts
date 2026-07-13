@@ -26,8 +26,12 @@ export interface BlameDeps {
 // Per-editor toggle key: document URI is not enough because the same
 // document opened in a left/right split view shares one URI — bundling
 // viewColumn in makes each pane's blame toggle independent of the other.
+function tabKey(docUri: string, viewColumn: number | undefined): string {
+  return `${docUri}::${viewColumn ?? 'none'}`;
+}
+
 function editorKey(editor: vscode.TextEditor): string {
-  return `${editor.document.uri.toString()}::${editor.viewColumn ?? 'none'}`;
+  return tabKey(editor.document.uri.toString(), editor.viewColumn);
 }
 
 export class BlameController {
@@ -39,12 +43,8 @@ export class BlameController {
   private readonly types: vscode.TextEditorDecorationType[] = [];
   private readonly docChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly inFlight = new Map<string, AbortController>();
-  private readonly visibleEditors = new Map<string, vscode.TextEditor>();
 
   constructor(private readonly deps: BlameDeps) {
-    for (const editor of vscode.window.visibleTextEditors) {
-      this.visibleEditors.set(editorKey(editor), editor);
-    }
     for (let i = 0; i < AGE_BUCKETS; i++) {
       // Newest bucket brightest; older buckets fade toward a muted colour.
       this.types.push(vscode.window.createTextEditorDecorationType({
@@ -57,12 +57,14 @@ export class BlameController {
   }
 
   dispose(): void {
+    // Clear enabled first: an in-flight render that rejects after this point
+    // fails the isRenderCurrent check instead of touching disposed types.
+    this.enabled.clear();
     for (const t of this.types) t.dispose();
     for (const timer of this.docChangeTimers.values()) clearTimeout(timer);
     this.docChangeTimers.clear();
     for (const controller of this.inFlight.values()) controller.abort();
     this.inFlight.clear();
-    this.visibleEditors.clear();
     this.cache.clear();
   }
 
@@ -92,15 +94,14 @@ export class BlameController {
     }
   }
 
-  onVisibleEditors(editors: readonly vscode.TextEditor[]): void {
-    const next = new Map(editors.map(editor => [editorKey(editor), editor]));
-    for (const [key, editor] of this.visibleEditors) {
-      if (next.get(key) === editor) continue;
-      this.resetEditor(key);
-      this.cache.deleteForDoc(editor.document.uri.toString());
-    }
-    this.visibleEditors.clear();
-    for (const [key, editor] of next) this.visibleEditors.set(key, editor);
+  // A CLOSED TAB — not mere invisibility — is what invalidates an editor's
+  // toggle: switching tabs keeps blame enabled (the editor re-renders on
+  // activation), while close + reopen of the same URI/viewColumn must start
+  // clean instead of inheriting the previous tab's enabled/generation state.
+  // The document may stay open elsewhere (split, other group), so this fires
+  // even when onCloseDocument doesn't.
+  onTabClosed(docUri: string, viewColumn: number | undefined): void {
+    this.resetEditor(tabKey(docUri, viewColumn));
   }
 
   onCloseDocument(doc: vscode.TextDocument): void {
@@ -108,11 +109,6 @@ export class BlameController {
     const editorKeyPrefix = `${docKey}::`;
     for (const key of this.enabled) {
       if (!key.startsWith(editorKeyPrefix)) continue;
-      this.resetEditor(key);
-    }
-    for (const [key, editor] of this.visibleEditors) {
-      if (editor.document !== doc) continue;
-      this.visibleEditors.delete(key);
       this.resetEditor(key);
     }
     const timer = this.docChangeTimers.get(docKey);
@@ -170,6 +166,9 @@ export class BlameController {
       return;
     }
     const generation = this.gate.bump(key);
+    // The bump above already made any in-flight request stale; kill its
+    // process too (a cache hit below would otherwise let it run to waste).
+    this.cancelRender(key);
     const doc = editor.document;
     const docVersion = doc.version;
     const info = this.deps.resolveRepoRoot(doc.uri);
@@ -177,7 +176,6 @@ export class BlameController {
     const cacheKey = blameCacheKey(info.repoRoot, info.head, doc.version, doc.uri.fsPath);
     let lines = this.cache.get(cacheKey);
     if (!lines) {
-      this.cancelRender(key);
       const abort = new AbortController();
       this.inFlight.set(key, abort);
       try {

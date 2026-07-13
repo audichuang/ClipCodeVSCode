@@ -34,6 +34,17 @@ export class GitError extends Error {
   }
 }
 
+/* SNIPCODE-HOOK start: stale fingerprint recovery */
+/** The rendered diff no longer matches the working tree / index. Recoverable:
+ *  the UI should re-fetch and re-render rather than just show the failure. */
+export class StaleDiffError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StaleDiffError';
+  }
+}
+/* SNIPCODE-HOOK end */
+
 /* SNIPCODE-HOOK start: byte-preserving patch transport */
 interface ExecOptions {
   stdin?: string | Buffer;
@@ -1034,7 +1045,9 @@ export class GitService {
   private assertDiffFingerprint(raw: Buffer, expected: string): void {
     if (!expected) throw new Error('missing diff fingerprint; refresh before staging');
     if (this.diffFingerprint(raw) !== expected) {
-      throw new Error('stale diff; refresh before staging');
+      /* SNIPCODE-HOOK start: stale fingerprint recovery */
+      throw new StaleDiffError('stale diff; refresh before staging');
+      /* SNIPCODE-HOOK end */
     }
   }
   /* SNIPCODE-HOOK end */
@@ -1506,15 +1519,20 @@ export class GitService {
    * patch we reverse ({@link reverseCommitChanges}) can never pick different
    * parents — see the merge-commit case below.
    */
-  private async commitFileDiff(hash: string, file: string): Promise<{ raw: string; parsed: DiffData[] }> {
+  /* SNIPCODE-HOOK start: byte-preserving commit reverse */
+  private async commitFileDiff(hash: string, file: string): Promise<{ raw: Buffer; parsed: DiffData[] }> {
     this.assertSafeRef(hash, 'diff');
     this.assertSafePath(file, 'diff');
     const parents = await this.commitParents(hash);
 
+    // Raw bytes feed `git apply --reverse` and must stay byte-identical (a lossy
+    // utf8 decode rewrites invalid sequences as U+FFFD); the parsed form is
+    // display-only, so decoding it as utf8 is fine. Both decodings preserve line
+    // structure, so hunk/line indices agree between them.
     if (parents.length === 0) {
       // Root commit: diff against the empty tree.
-      const raw = await this.exec(['show', '--no-color', '--format=', hash, '--', file]);
-      return { raw, parsed: parseDiff(raw) };
+      const raw = await this.exec(['show', '--no-color', '--format=', hash, '--', file], { encoding: 'buffer' });
+      return { raw, parsed: parseDiff(raw.toString('utf8')) };
     }
 
     if (parents.length > 1) {
@@ -1525,18 +1543,19 @@ export class GitService {
       // doesn't shadow the later parent that actually holds the content.
       for (const parent of parents) {
         this.assertSafeRef(parent, 'diff');
-        const raw = await this.exec(['diff', '--no-color', `${parent}..${hash}`, '--', file]);
-        const parsed = parseDiff(raw);
+        const raw = await this.exec(['diff', '--no-color', `${parent}..${hash}`, '--', file], { encoding: 'buffer' });
+        const parsed = parseDiff(raw.toString('utf8'));
         if (parsed.length > 0 && parsed[0].hunks.length > 0) {
           return { raw, parsed };
         }
       }
-      return { raw: '', parsed: [] };
+      return { raw: Buffer.alloc(0), parsed: [] };
     }
 
-    const raw = await this.exec(['diff', '--no-color', `${hash}^..${hash}`, '--', file]);
-    return { raw, parsed: parseDiff(raw) };
+    const raw = await this.exec(['diff', '--no-color', `${hash}^..${hash}`, '--', file], { encoding: 'buffer' });
+    return { raw, parsed: parseDiff(raw.toString('utf8')) };
   }
+  /* SNIPCODE-HOOK end */
 
   /**
    * Reverse-apply (undo) a commit's change to one file in the working tree.
@@ -1557,13 +1576,16 @@ export class GitService {
     this.assertSafePath(file, 'apply');
 
     const { raw } = await this.commitFileDiff(hash, file);
-    if (!raw.trim()) {
+    /* SNIPCODE-HOOK start: byte-preserving commit reverse */
+    if (!raw.toString('latin1').trim()) {
       throw new GitError(`No changes to reverse for ${file} in ${hash.substring(0, 7)}`, null, []);
     }
 
+    // Buffer in → Buffer out: the patch reaches git's stdin byte-identical.
     const patch = selection && selection.hunkIndex !== undefined
       ? buildReversePatch(raw, selection.hunkIndex, selection.lineIndices)
       : raw;
+    /* SNIPCODE-HOOK end */
 
     // --recount lets git fix up the line counts of our reconstructed hunks;
     // applying without --cached touches only the working tree.
@@ -2501,6 +2523,11 @@ export class GitService {
    * NOTE: runs inside withMutationLock, so all MUTATING git commands use
    * execUnlocked directly (exec would re-enter the lock and deadlock). Read-only
    * commands use exec, which does not take the lock for reads.
+   *
+   * WARNING: unlike stageHunks/stageLines this path has NO diff-fingerprint
+   * guard — hunkIndices are trusted as-is. Its only caller today is the
+   * orphaned commit-across-repos protocol (see AGENTS.md); thread a rendered
+   * fingerprint through (assertDiffFingerprint) before wiring it to live UI.
    */
   async commitSelected(
     message: string,
