@@ -41,6 +41,18 @@ describe('computeWordDiff', () => {
     expect(delRanges).toEqual([{ start: 0, end: 500 }]);
     expect(addRanges).toEqual([{ start: 0, end: 501 }]);
   });
+
+  /* SNIPCODE-HOOK start: Batch C word-diff token-matrix cap regression. */
+  it('falls back to whole-line ranges when the token matrix exceeds the cap', () => {
+    const oldLine = `!${'.'.repeat(199)}?`;
+    const newLine = `!${'#'.repeat(199)}?`;
+
+    expect(computeWordDiff(oldLine, newLine)).toEqual({
+      delRanges: [{ start: 0, end: 201 }],
+      addRanges: [{ start: 0, end: 201 }],
+    });
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('pairHunkWordDiffs', () => {
@@ -81,4 +93,14 @@ describe('pairHunkWordDiffs', () => {
     expect(map.has(1)).toBe(true);
     expect(map.has(2)).toBe(false);  // extra add unpaired
   });
+
+  /* SNIPCODE-HOOK start: Batch C word-diff performance regression. */
+  it('falls back to line-level highlighting for a 1500-line rewrite block', () => {
+    const lines: DiffLineLite[] = [];
+    for (let i = 0; i < 1500; i++) lines.push({ type: 'delete', content: `old value ${i}` });
+    for (let i = 0; i < 1500; i++) lines.push({ type: 'add', content: `new value ${i}` });
+
+    expect(pairHunkWordDiffs(lines).size).toBe(0);
+  });
+  /* SNIPCODE-HOOK end */
 });
