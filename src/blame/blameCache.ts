@@ -1,9 +1,9 @@
-// Blame results are cached per (repo, HEAD, document.version) so an unsaved
-// edit (which bumps document.version) or a HEAD move invalidates naturally.
+// Blame results are cached per (repo, file, HEAD, document.version) so an
+// unsaved edit (which bumps document.version) or a HEAD move invalidates naturally.
 import type { BlameLine } from './blameParser.js';
 
-export function blameCacheKey(repoRoot: string, head: string, docVersion: number): string {
-  return `${repoRoot} ${head} ${docVersion}`;
+export function blameCacheKey(repoRoot: string, head: string, docVersion: number, fsPath: string): string {
+  return JSON.stringify([repoRoot, fsPath, head, docVersion]);
 }
 
 export class BlameCache {

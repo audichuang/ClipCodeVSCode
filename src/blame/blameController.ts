@@ -113,7 +113,7 @@ export class BlameController {
     const doc = editor.document;
     const info = this.deps.resolveRepoRoot(doc.uri);
     if (!info) return;
-    const cacheKey = blameCacheKey(info.repoRoot, info.head, doc.version);
+    const cacheKey = blameCacheKey(info.repoRoot, info.head, doc.version, doc.uri.fsPath);
     let lines = this.cache.get(cacheKey);
     if (!lines) {
       try {
@@ -159,7 +159,7 @@ export class BlameController {
         : `${c.author} · ${formatRelativeTime(c.authorTime, nowSec)}`;
       const bucket = c.isUncommitted ? 0 : ageBucket(c.authorTime, nowSec);
       const hover = new vscode.MarkdownString();
-      hover.isTrusted = true;
+      hover.isTrusted = { enabledCommands: ['clipcode.blame.revealCommit'] };
       if (c.isUncommitted) {
         hover.appendMarkdown('尚未提交');
       } else {

@@ -22,12 +22,25 @@ export class GitError extends Error {
     public stderr: string,
     public exitCode: number | null,
     public args: string[],
-    public stdout: string = ''
+    public stdout: string = '',
+    /* SNIPCODE-HOOK start: retain raw diff bytes on expected non-zero exits */
+    public stdoutBuffer: Buffer = Buffer.alloc(0),
+    /* SNIPCODE-HOOK end */
   ) {
     super(`git ${args.join(' ')} failed (exit ${exitCode}): ${stderr.trim()}`);
     this.name = 'GitError';
   }
 }
+
+/* SNIPCODE-HOOK start: byte-preserving patch transport */
+interface ExecOptions {
+  stdin?: string | Buffer;
+  timeout?: number;
+  silent?: boolean;
+  maxBufferBytes?: number;
+  encoding?: 'buffer';
+}
+/* SNIPCODE-HOOK end */
 
 /**
  * Per-hunk staging emits the file's whole diff header (everything before the
@@ -458,7 +471,11 @@ export class GitService {
     }
   }
 
-  private exec(args: string[], options?: { stdin?: string; timeout?: number; silent?: boolean; maxBufferBytes?: number }): Promise<string> {
+  /* SNIPCODE-HOOK start: optional raw stdout for patch reconstruction */
+  private exec(args: string[], options: ExecOptions & { encoding: 'buffer' }): Promise<Buffer>;
+  private exec(args: string[], options?: ExecOptions): Promise<string>;
+  private exec(args: string[], options?: ExecOptions): Promise<string | Buffer> {
+  /* SNIPCODE-HOOK end */
     // Mutations go through the lock; reads (and network-only fetch/push) spawn
     // freely. See withMutationLock for why.
     if (this.invalidatesReadCache(args) && args[0] !== 'fetch' && args[0] !== 'push') {
@@ -467,7 +484,11 @@ export class GitService {
     return this.execUnlocked(args, options);
   }
 
-  private execUnlocked(args: string[], options?: { stdin?: string; timeout?: number; silent?: boolean; maxBufferBytes?: number }): Promise<string> {
+  /* SNIPCODE-HOOK start: optional raw stdout for patch reconstruction */
+  private execUnlocked(args: string[], options: ExecOptions & { encoding: 'buffer' }): Promise<Buffer>;
+  private execUnlocked(args: string[], options?: ExecOptions): Promise<string>;
+  private execUnlocked(args: string[], options?: ExecOptions): Promise<string | Buffer> {
+  /* SNIPCODE-HOOK end */
     const startTime = Date.now();
     const command = `git ${args.join(' ')}`;
     const timeoutMs = options?.timeout ?? this.defaultTimeoutMs;
@@ -536,7 +557,8 @@ export class GitService {
         failAfterExit(new GitError(`Command timed out after ${timeoutMs}ms`, null, args));
       }, timeoutMs);
 
-      if (options?.stdin) {
+      /* SNIPCODE-HOOK start: git apply accepts raw patch bytes */
+      if (options?.stdin !== undefined) {
         // git may close stdin before consuming everything (e.g. it rejects a
         // patch early). The resulting EPIPE surfaces as a writable-stream
         // 'error' event; without a listener Node rethrows it as an
@@ -546,6 +568,7 @@ export class GitService {
         proc.stdin.write(options.stdin);
         proc.stdin.end();
       }
+      /* SNIPCODE-HOOK end */
 
       // Bound stdout/stderr to prevent a pathological git invocation from
       // exhausting the extension host's memory. Overflow kills the process
@@ -586,9 +609,11 @@ export class GitService {
         recordActivity(code === 0);
         if (code === 0) {
           if (this.invalidatesReadCache(args)) this.clearReadCache();
-          resolve(stdout);
+          /* SNIPCODE-HOOK start: return and retain raw patch bytes */
+          resolve(options?.encoding === 'buffer' ? stdoutBuf : stdout);
         } else {
-          reject(new GitError(stderr, code, args, stdout));
+          reject(new GitError(stderr, code, args, stdout, stdoutBuf));
+          /* SNIPCODE-HOOK end */
         }
       });
 
@@ -2281,35 +2306,36 @@ export class GitService {
     return 'clean';
   }
 
+  /* SNIPCODE-HOOK start: byte-preserving selective staging */
   /**
    * Raw HEAD→working-tree unified diff for a single file (no color), the text
    * `buildForwardPatch` parses. Mirrors getUncommittedFileDiff's command
-   * selection but returns the raw string instead of a parsed DiffData: tracked
+   * selection but returns raw bytes instead of a parsed DiffData: tracked
    * files use `git diff -- file`; an untracked new file uses
    * `git diff --no-index /dev/null file` (which exits 1 when it finds the
    * additions — normal, its stdout carries the diff).
    */
-  private async workingFileDiffRaw(file: string): Promise<string> {
+  private async workingFileDiffRaw(file: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
     const isTracked = await this.exec(['ls-files', '--error-unmatch', '--', file])
       .then(() => true)
       .catch(() => false);
     if (!isTracked) {
-      return this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file])
-        .catch(err => (err instanceof GitError && err.exitCode === 1) ? err.stdout : '');
+      return this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file], { encoding: 'buffer' })
+        .catch(err => (err instanceof GitError && err.exitCode === 1) ? err.stdoutBuffer : Buffer.alloc(0));
     }
-    return this.exec(['diff', '--no-color', '--', file]).catch(() => '');
+    return this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' }).catch(() => Buffer.alloc(0));
   }
 
   /**
-   * Raw HEAD→index (staged) unified diff for one file (no color) — the text
+   * Raw HEAD→index (staged) unified diff bytes for one file (no color), which
    * buildForwardPatch parses to reverse-stage selected hunks. Mirrors
    * getUncommittedFileDiff(file, true)'s command so the parsed hunk order lines
    * up with the diff the webview rendered.
    */
-  private async stagedFileDiffRaw(file: string): Promise<string> {
+  private async stagedFileDiffRaw(file: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
-    return this.exec(['diff', '--no-color', '--cached', '--', file]).catch(() => '');
+    return this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' }).catch(() => Buffer.alloc(0));
   }
 
   /**
@@ -2324,8 +2350,8 @@ export class GitService {
   async stageHunks(file: string, hunkIndices: number[]): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
-    if (!raw.trim()) { throw new Error(`no unstaged changes to stage for ${file}`); }
-    assertHunkStageable(raw, file);
+    if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
     // exec routes 'apply' through withMutationLock (it is a mutation); stdin
     // feeds the patch (same as reverseCommitChanges). --cached stages only.
@@ -2342,8 +2368,8 @@ export class GitService {
   async unstageHunks(file: string, hunkIndices: number[]): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
-    if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
-    assertHunkStageable(raw, file);
+    if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
     await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
   }
@@ -2358,8 +2384,8 @@ export class GitService {
   async stageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
-    if (!raw.trim()) { throw new Error(`no unstaged changes to stage for ${file}`); }
-    assertHunkStageable(raw, file);
+    if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices);
     // exec routes 'apply' through withMutationLock; --cached stages into the index only.
     await this.exec(['apply', '--cached'], { stdin: patch });
@@ -2374,8 +2400,8 @@ export class GitService {
   async unstageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
-    if (!raw.trim()) { throw new Error(`no staged changes to unstage for ${file}`); }
-    assertHunkStageable(raw, file);
+    if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    assertHunkStageable(raw.toString('latin1'), file);
     // 'unstage': the raw diff here is HEAD→index, so the current-index baseline
     // is the ADD side, not the DELETE side — see buildForwardPatchLines's
     // `direction` doc for why this flips which unselected kind demotes vs omits.
@@ -2435,7 +2461,7 @@ export class GitService {
       try {
         for (const { path, hunkIndices } of files) {
           const raw = await this.workingFileDiffRaw(path);
-          if (!raw.trim()) {
+          if (raw.length === 0) {
             throw new Error(`no working-tree changes to stage for ${path}`);
           }
           const patch = buildForwardPatch(raw, hunkIndices);
@@ -2460,6 +2486,7 @@ export class GitService {
       return (await this.exec(['rev-parse', 'HEAD'])).trim();
     });
   }
+  /* SNIPCODE-HOOK end */
 
   async continueOperation(): Promise<void> {
     const conflictFiles = await this.getConflictFiles();

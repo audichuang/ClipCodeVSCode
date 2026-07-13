@@ -96,6 +96,24 @@ interface BodyLine {
  *  the canonical form rather than echoing the (whitespace-identical) original. */
 const NO_NEWLINE_MARKER = '\\ No newline at end of file';
 
+/* SNIPCODE-HOOK start: mirror whole-file paths even when Git C-quotes them */
+function mirrorHeaderPath(
+  header: string[],
+  sourceMarker: '---' | '+++',
+  sourcePrefix: 'a/' | 'b/',
+  targetMarker: '---' | '+++',
+  targetPrefix: 'a/' | 'b/',
+): string | undefined {
+  const unquoted = `${sourceMarker} ${sourcePrefix}`;
+  const quoted = `${sourceMarker} "${sourcePrefix}`;
+  const source = header.find((line) => line.startsWith(unquoted) || line.startsWith(quoted));
+  if (!source) return undefined;
+  const prefix = source.startsWith(quoted) ? quoted : unquoted;
+  const target = source.startsWith(quoted) ? `${targetMarker} "${targetPrefix}` : `${targetMarker} ${targetPrefix}`;
+  return target + source.slice(prefix.length);
+}
+/* SNIPCODE-HOOK end */
+
 /**
  * A whole-file add/delete diff carries a `new file mode`/`deleted file mode`
  * line and a `/dev/null` side. That header reverses cleanly only while one side
@@ -125,11 +143,13 @@ function normalizeWholeFileHeader(header: string[], oldCount: number, newCount: 
     const modeMatch = line.match(/^(?:new|deleted) file mode (\d+)$/);
     if (modeMatch) { mode = modeMatch[1]; continue; }
     if (rewriteOld && line === '--- /dev/null') {
-      const plus = header.find((l) => l.startsWith('+++ b/'));
-      out.push(plus ? '--- a/' + plus.slice('+++ b/'.length) : line);
+      /* SNIPCODE-HOOK start: support Git C-quoted whole-file paths */
+      out.push(mirrorHeaderPath(header, '+++', 'b/', '---', 'a/') ?? line);
+      /* SNIPCODE-HOOK end */
     } else if (rewriteNew && line === '+++ /dev/null') {
-      const minus = header.find((l) => l.startsWith('--- a/'));
-      out.push(minus ? '+++ b/' + minus.slice('--- a/'.length) : line);
+      /* SNIPCODE-HOOK start: support Git C-quoted whole-file paths */
+      out.push(mirrorHeaderPath(header, '---', 'a/', '+++', 'b/') ?? line);
+      /* SNIPCODE-HOOK end */
     } else {
       out.push(line);
     }
@@ -333,11 +353,22 @@ export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIn
  *
  * @throws if nothing is selected or a selected index is out of range.
  */
-export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: number[]): string {
+/* SNIPCODE-HOOK start: byte-preserving forward hunk and line patches */
+function decodePatchBytes(rawFileDiff: string | Buffer): string {
+  return Buffer.isBuffer(rawFileDiff) ? rawFileDiff.toString('latin1') : rawFileDiff;
+}
+
+function encodePatchBytes(rawFileDiff: string | Buffer, patch: string): string | Buffer {
+  return Buffer.isBuffer(rawFileDiff) ? Buffer.from(patch, 'latin1') : patch;
+}
+
+export function buildForwardPatch(rawFileDiff: Buffer, selectedHunkIndices: number[]): Buffer;
+export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: number[]): string;
+export function buildForwardPatch(rawFileDiff: string | Buffer, selectedHunkIndices: number[]): string | Buffer {
   if (selectedHunkIndices.length === 0) {
     throw new Error('No hunks selected to stage');
   }
-  const { header, hunks } = parseFileDiff(rawFileDiff);
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
   const ordered = [...new Set(selectedHunkIndices)].sort((a, b) => a - b);
 
   let oldCount = 0;
@@ -358,7 +389,8 @@ export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: numb
   }
 
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
-  return [...finalHeader, ...body].join('\n') + '\n';
+  const patch = [...finalHeader, ...body].join('\n') + '\n';
+  return encodePatchBytes(rawFileDiff, patch);
 }
 
 /**
@@ -409,12 +441,24 @@ export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: numb
  * @throws if the hunk index is out of range or nothing stageable is selected.
  */
 export function buildForwardPatchLines(
+  rawFileDiff: Buffer,
+  hunkIndex: number,
+  lineIndices?: number[],
+  direction?: 'stage' | 'unstage',
+): Buffer;
+export function buildForwardPatchLines(
   rawFileDiff: string,
   hunkIndex: number,
   lineIndices?: number[],
+  direction?: 'stage' | 'unstage',
+): string;
+export function buildForwardPatchLines(
+  rawFileDiff: string | Buffer,
+  hunkIndex: number,
+  lineIndices?: number[],
   direction: 'stage' | 'unstage' = 'stage',
-): string {
-  const { header, hunks } = parseFileDiff(rawFileDiff);
+): string | Buffer {
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
   const hunk = hunks[hunkIndex];
   if (!hunk) {
     throw new Error(`Hunk ${hunkIndex} not found in diff`);
@@ -489,7 +533,12 @@ export function buildForwardPatchLines(
       newReachesEof = direction === 'unstage' ? true : isStaging(origIdx, 'add');
       break;
     }
-    // 'delete' — not on the new side; keep scanning.
+    if (direction === 'stage' && !isStaging(origIdx, 'delete')) {
+      // An unselected deletion is demoted to context, so the staged result
+      // retains the old side's EOF instead of reaching the working side's EOF.
+      break;
+    }
+    // Selected delete — absent from the new side; keep scanning.
   }
 
   // Whether the hunk's final OLD-side entry survives onto the old side of our
@@ -507,7 +556,12 @@ export function buildForwardPatchLines(
       oldReachesEof = direction === 'stage' ? true : isStaging(origIdx, 'delete');
       break;
     }
-    // 'add' — not on the old side; keep scanning past it.
+    if (direction === 'unstage' && !isStaging(origIdx, 'add')) {
+      // An unselected addition is demoted to context, so the partially
+      // unstaged result retains the index side's EOF.
+      break;
+    }
+    // Selected add — removed from the old side on reverse; keep scanning.
   }
 
   const bodyLines: BodyLine[] = [];
@@ -566,43 +620,16 @@ export function buildForwardPatchLines(
     if (bodyLines[i].onNew) { lastNew = i; }
   }
 
-  // Old side. For 'stage' this always reaches old-EOF (oldReachesEof is always
-  // true there, as documented above), so this reduces to the pre-existing
-  // "old side is always intact" behavior; for 'unstage' an unselected delete is
-  // OMITTED, so a trailing unselected delete can leave `lastOld` short of the
-  // hunk's true old-EOF entry — `oldReachesEof` gates `oldNoNewline` so we don't
-  // wrongly inherit HEAD's no-newline state onto an earlier, still-terminated line.
-  let oldEndsNoNewline = false;
-  if (lastOld !== -1) {
-    if (lastOld === lastNew) {
-      oldEndsNoNewline = (newNoNewline && newReachesEof) || (oldNoNewline && oldReachesEof);
-    } else if (lastOld > lastNew) {
-      // Kept deletions trail the last shared/new line → old side reaches old-EOF.
-      oldEndsNoNewline = oldNoNewline && oldReachesEof;
-    } else {
-      // Kept additions trail the old side's last line; the old side ends
-      // unterminated iff the new side's (reconstructed) tail did.
-      oldEndsNoNewline = newNoNewline && newReachesEof;
-    }
-  }
-
-  // New side (the staged result), mirrored the same way for symmetry — for
-  // 'unstage' newReachesEof is always true (documented above), so this is
-  // unchanged from before this fix.
-  let newEndsNoNewline = false;
-  if (lastNew !== -1) {
-    if (lastNew === lastOld) {
-      newEndsNoNewline = (oldNoNewline && oldReachesEof) || (newNoNewline && newReachesEof);
-    } else if (lastNew > lastOld) {
-      // Kept additions trail the last shared/old line → new side reaches new-EOF.
-      newEndsNoNewline = newNoNewline && newReachesEof;
-    } else {
-      // Kept deletions (old-only) trail the new side's last line. Removing them on
-      // the new side leaves that shared line last, so the result ends iff the old
-      // side's (reconstructed) tail did.
-      newEndsNoNewline = oldNoNewline && oldReachesEof;
-    }
-  }
+  // The current-index baseline is always complete: old for stage, new for
+  // unstage. The reconstructed opposite side uses its own EOF state only when
+  // it reaches that side's original EOF; otherwise an unselected trailing
+  // change leaves the baseline side's EOF state in place.
+  const oldEndsNoNewline = lastOld !== -1 && (
+    (direction === 'stage' || oldReachesEof) ? oldNoNewline : newNoNewline
+  );
+  const newEndsNoNewline = lastNew !== -1 && (
+    (direction === 'unstage' || newReachesEof) ? newNoNewline : oldNoNewline
+  );
 
   const body: string[] = [];
   for (let i = 0; i < bodyLines.length; i++) {
@@ -638,5 +665,7 @@ export function buildForwardPatchLines(
 
   const headerLine = rewriteHunkHeader(hunk.headerLine, oldCount, newCount);
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
-  return [...finalHeader, headerLine, ...body].join('\n') + '\n';
+  const patch = [...finalHeader, headerLine, ...body].join('\n') + '\n';
+  return encodePatchBytes(rawFileDiff, patch);
 }
+/* SNIPCODE-HOOK end */
