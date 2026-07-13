@@ -14,6 +14,24 @@ afterEach(() => {
 });
 
 describe('postCommit timeout fallback', () => {
+  /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  it('tracks the checked staged-repo count sent by the host', () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'workbenchCommitState', payload: { stagedRepoCount: 2 } },
+    }));
+
+    expect(workbenchStore.stagedRepoCount).toBe(2);
+  });
+
+  it('announces readiness so the host replays the initial commit state', () => {
+    globalThis.__postedMessages = [];
+
+    listenForHostMessages();
+
+    expect(globalThis.__postedMessages).toContainEqual({ data: { type: 'workbenchReady' } });
+  });
+  /* SNIPCODE-HOOK end */
+
   it('clears committing and surfaces a soft error if no reply ever arrives', () => {
     postCommit(false);
     expect(workbenchStore.committing).toBe(true);

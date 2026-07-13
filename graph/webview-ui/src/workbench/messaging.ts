@@ -35,6 +35,11 @@ export function listenForHostMessages(): void {
   window.addEventListener('message', (e) => {
     const msg = e.data;
     switch (msg?.type) {
+      /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+      case 'workbenchCommitState':
+        workbenchStore.stagedRepoCount = Number(msg.payload?.stagedRepoCount ?? 0);
+        break;
+      /* SNIPCODE-HOOK end */
       case 'workbenchCommitResult':
         clearCommitTimer();
         workbenchStore.applyCommitResults(msg.payload.results);
@@ -47,6 +52,9 @@ export function listenForHostMessages(): void {
         break;
     }
   });
+  /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  vscode.postMessage({ type: 'workbenchReady' });
+  /* SNIPCODE-HOOK end */
 }
 
 export function postCommit(amend: boolean): void {

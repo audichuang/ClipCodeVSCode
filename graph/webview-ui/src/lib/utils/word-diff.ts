@@ -18,6 +18,9 @@ const MAX_LEN = 400;
 /* SNIPCODE-HOOK start: Batch C bound eager word-diff work. */
 const MAX_TOKEN_DP_CELLS = 20_000;
 const MAX_REWRITE_LINES = 400;
+/* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
+const MAX_LINE_ALIGNMENT_CELLS = 4_000;
+/* SNIPCODE-HOOK end */
 
 function lineLevelFallback(oldLine: string, newLine: string): WordDiffResult {
   return {
@@ -98,12 +101,76 @@ export function computeWordDiff(oldLine: string, newLine: string): WordDiffResul
   };
 }
 
+/* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
+function lineBigrams(line: string): string[] {
+  const chars = Array.from(line.toLowerCase());
+  return chars.slice(1).map((char, index) => chars[index] + char);
+}
+
+function commonItemCount(left: string[], right: string[]): number {
+  const remaining = new Map<string, number>();
+  for (const item of right) remaining.set(item, (remaining.get(item) ?? 0) + 1);
+  let common = 0;
+  for (const item of left) {
+    const count = remaining.get(item) ?? 0;
+    if (count > 0) {
+      common++;
+      remaining.set(item, count - 1);
+    }
+  }
+  return common;
+}
+
+function lineSimilarity(left: string, right: string, leftBigrams: string[], rightBigrams: string[]): number {
+  if (left === right) return 100;
+  if (leftBigrams.length + rightBigrams.length > 0) {
+    return Math.floor(200 * commonItemCount(leftBigrams, rightBigrams)
+      / (leftBigrams.length + rightBigrams.length));
+  }
+  return 0;
+}
+
+function pairRewriteLines(deletes: DiffLineLite[], adds: DiffLineLite[]): Array<[number, number]> {
+  const ordinal = () => Array.from({ length: Math.min(deletes.length, adds.length) }, (_, index) => [index, index] as [number, number]);
+  if (deletes.length * adds.length > MAX_LINE_ALIGNMENT_CELLS
+    || [...deletes, ...adds].some(line => line.content.length > MAX_LEN)) return ordinal();
+
+  const deleteBigrams = deletes.map(line => lineBigrams(line.content));
+  const addBigrams = adds.map(line => lineBigrams(line.content));
+  const scores = deletes.map((left, i) => adds.map((right, j) =>
+    lineSimilarity(left.content, right.content, deleteBigrams[i], addBigrams[j])));
+  const dp: number[][] = Array.from({ length: deletes.length + 1 }, () => new Array<number>(adds.length + 1).fill(0));
+  for (let i = deletes.length - 1; i >= 0; i--) {
+    for (let j = adds.length - 1; j >= 0; j--) {
+      const paired = scores[i][j] > 0 ? scores[i][j] + dp[i + 1][j + 1] : -1;
+      dp[i][j] = Math.max(paired, dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const pairs: Array<[number, number]> = [];
+  let i = 0;
+  let j = 0;
+  while (i < deletes.length && j < adds.length) {
+    const paired = scores[i][j] > 0 ? scores[i][j] + dp[i + 1][j + 1] : -1;
+    if (paired === dp[i][j] && paired >= dp[i + 1][j] && paired >= dp[i][j + 1]) {
+      pairs.push([i++, j++]);
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+  return pairs;
+}
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
 /**
  * For each line index in a hunk, the intraline ranges to highlight. Only lines
  * inside a delete-block immediately followed by an add-block (the classic
- * "replace" shape IntelliJ word-highlights) get ranges; the k-th deleted line is
- * paired with the k-th added line of that block. Pure/index-in.
+ * "replace" shape IntelliJ word-highlights) get ranges. Pure/index-in.
  */
+/* SNIPCODE-HOOK end */
 export function pairHunkWordDiffs(
   lines: DiffLineLite[],
 ): Map<number, { ranges: Range[]; kind: 'add' | 'delete' }> {
@@ -123,14 +190,15 @@ export function pairHunkWordDiffs(
       continue;
     }
     /* SNIPCODE-HOOK end */
-    const pairs = Math.min(dels, adds);
-    for (let k = 0; k < pairs; k++) {
-      const delIdx = i + k;
-      const addIdx = d + k;
+    /* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
+    for (const [delOffset, addOffset] of pairRewriteLines(lines.slice(i, d), lines.slice(d, a))) {
+      const delIdx = i + delOffset;
+      const addIdx = d + addOffset;
       const { delRanges, addRanges } = computeWordDiff(lines[delIdx].content, lines[addIdx].content);
       if (delRanges.length) { out.set(delIdx, { ranges: delRanges, kind: 'delete' }); }
       if (addRanges.length) { out.set(addIdx, { ranges: addRanges, kind: 'add' }); }
     }
+    /* SNIPCODE-HOOK end */
     // Advance past the whole block; guarantee forward progress.
     i = a > i ? a : i + 1;
   }

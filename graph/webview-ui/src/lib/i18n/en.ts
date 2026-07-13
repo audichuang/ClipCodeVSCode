@@ -654,6 +654,7 @@ export const en: Record<string, string> = {
   'file.open': 'Open File',
   'file.openChanges': 'Open Changes',
   /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': 'Loading changes',
   'file.noChanges': 'No changes',
   'file.stageFailed': 'Operation failed',
   'file.stageTimeout': 'Operation is taking longer than expected — buttons unlock when it completes (reopen this tab if it never does)',

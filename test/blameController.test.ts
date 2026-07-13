@@ -39,6 +39,7 @@ class BlameProcess extends EventEmitter {
 
 const processes: BlameProcess[] = [];
 let decorationId = 0;
+const decorationOptions: Array<{ before?: { color?: ThemeColor } }> = [];
 const vscode = {
   MarkdownString,
   ThemeColor,
@@ -46,7 +47,10 @@ const vscode = {
   window: {
     activeTextEditor: undefined as TestEditor | undefined,
     visibleTextEditors: [] as TestEditor[],
-    createTextEditorDecorationType: () => ({ id: decorationId++, dispose() {} }),
+    createTextEditorDecorationType: (options: { before?: { color?: ThemeColor } }) => {
+      decorationOptions.push(options);
+      return { id: decorationId++, dispose() {} };
+    },
     showInformationMessage: () => Promise.resolve(undefined),
   },
 };
@@ -132,8 +136,45 @@ async function waitForProcess(count: number): Promise<void> {
 
 beforeEach(() => {
   processes.length = 0;
+  decorationOptions.length = 0;
   vscode.window.activeTextEditor = undefined;
   vscode.window.visibleTextEditors = [];
+});
+
+test('each blame age bucket uses a distinct theme color', async () => {
+  const { BlameController } = await controllerModule;
+  const controller = new BlameController({
+    getGitPath: () => 'git',
+    resolveRepoRoot: () => undefined,
+  });
+
+  const colorIds = decorationOptions.map(options => options.before?.color?.id);
+  assert.equal(colorIds.length, 5);
+  assert.equal(new Set(colorIds).size, 5);
+  controller.dispose();
+});
+
+test('git API readiness retries blame enabled before vscode.git activation completed', async () => {
+  const { BlameController } = await controllerModule;
+  const editor = makeEditor();
+  vscode.window.activeTextEditor = editor;
+  vscode.window.visibleTextEditors = [editor];
+  let ready = false;
+  const controller = new BlameController({
+    getGitPath: () => 'git',
+    resolveRepoRoot: () => ready ? { repoRoot: '/repo', head: 'HEAD' } : undefined,
+  });
+
+  await controller.toggle();
+  assert.equal(processes.length, 0);
+  ready = true;
+  const retry = (controller as unknown as { onGitReady(): Promise<void> }).onGitReady();
+  await waitForProcess(1);
+  processes[0].succeed(blameOutput('Ready', '1111111111111111111111111111111111111111'));
+  await retry;
+
+  assert.deepEqual(authors(editor), ['Ready']);
+  controller.dispose();
 });
 
 after(() => {

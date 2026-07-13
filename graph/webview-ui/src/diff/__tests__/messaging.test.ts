@@ -35,6 +35,22 @@ describe('diff messaging', () => {
     expect(diffStore.busy).toBe(false);
   });
 
+  /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+  it('diffLoading clears the previous file body while the next file is fetched', () => {
+    listenForHostMessages();
+    diffStore.setDiffs('/r', 'old.ts', emptyDiff, emptyDiff, 1);
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffLoading', payload: { repoPath: '/r', file: 'new.ts', generation: 2 } },
+    }));
+
+    expect(diffStore.file).toBe('new.ts');
+    expect(diffStore.loading).toBe(true);
+    expect(diffStore.stagedDiff).toBeNull();
+    expect(diffStore.unstagedDiff).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
+
   it('setLocale switches the i18n locale', () => {
     listenForHostMessages();
     window.dispatchEvent(new MessageEvent('message', {

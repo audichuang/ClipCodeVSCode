@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { buildChangeTree, type GroupNode, type RepoNode, type FileNode, type RepoStatus } from './build-change-tree';
+/* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
+import { SequenceGuard } from '../utils/sequence-guard';
+/* SNIPCODE-HOOK end */
 
 export type ChangeTreeNode = GroupNode | RepoNode | FileNode;
 
@@ -20,6 +23,9 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private groups: GroupNode[] = [];
+  /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
+  private readonly refreshSequence = new SequenceGuard();
+  /* SNIPCODE-HOOK end */
 
   constructor(
     private readonly loadStatus: LoadStatus,
@@ -29,9 +35,25 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
 
   /** Re-read status and repaint the tree. */
   async refresh(): Promise<void> {
-    this.groups = buildChangeTree(await this.loadStatus());
+    /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
+    const ticket = this.refreshSequence.issue();
+    const groups = buildChangeTree(await this.loadStatus());
+    if (!this.refreshSequence.isCurrent(ticket)) return;
+    this.groups = groups;
+    /* SNIPCODE-HOOK end */
     this._onDidChangeTreeData.fire();
   }
+
+  /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  getStagedRepoCount(): number {
+    return (this.groups.find(group => group.group === 'staged')?.repos ?? [])
+      .filter(repo => this.isCheckedForCommit(repo.repoPath)).length;
+  }
+
+  notifyCommitSelectionChanged(): void {
+    this._onDidChangeTreeData.fire();
+  }
+  /* SNIPCODE-HOOK end */
 
   getChildren(node?: ChangeTreeNode): ChangeTreeNode[] {
     if (!node) return this.groups;

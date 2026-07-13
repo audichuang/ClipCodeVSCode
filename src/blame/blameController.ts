@@ -10,6 +10,13 @@ const MAX_LINES = 20_000;
 // Coalesce the burst of onDidChangeTextDocument events fired per keystroke
 // into a single render, instead of spawning `git blame` on every character.
 const DOC_CHANGE_DEBOUNCE_MS = 300;
+const AGE_BUCKET_COLOR_IDS = [
+  'editorLineNumber.activeForeground',
+  'charts.blue',
+  'charts.green',
+  'charts.yellow',
+  'editorLineNumber.foreground',
+] as const;
 
 export interface BlameDeps {
   getGitPath: () => string;
@@ -43,9 +50,7 @@ export class BlameController {
       this.types.push(vscode.window.createTextEditorDecorationType({
         before: {
           margin: '0 1.5em 0 0',
-          color: new vscode.ThemeColor(
-            i === 0 ? 'editorLineNumber.activeForeground' : 'editorLineNumber.foreground'
-          )
+          color: new vscode.ThemeColor(AGE_BUCKET_COLOR_IDS[i])
         }
       }));
     }
@@ -121,6 +126,12 @@ export class BlameController {
       if (!this.enabled.has(editorKey(editor))) continue;
       if (this.deps.resolveRepoRoot(editor.document.uri)?.repoRoot !== repoRoot.fsPath) continue;
       await this.render(editor);
+    }
+  }
+
+  async onGitReady(): Promise<void> {
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (this.enabled.has(editorKey(editor))) await this.render(editor);
     }
   }
 

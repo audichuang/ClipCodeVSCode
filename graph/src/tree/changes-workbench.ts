@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { GitService } from '../git/git-service';
-import { RepoDiscoveryService } from '../services/repo-discovery';
+/* SNIPCODE-HOOK start: Batch D retain disambiguated repo names */
+import { RepoDiscoveryService, type RepoInfo } from '../services/repo-discovery';
+/* SNIPCODE-HOOK end */
 import { runExclusive } from '../services/mutation-coordinator';
 import { triggerVSCodeGitAuth } from '../git/vscode-git-bridge';
 import { readTimeoutMs } from '../utils/config';
@@ -52,6 +54,9 @@ export class ChangesWorkbench implements vscode.Disposable {
       if (state === vscode.TreeItemCheckboxState.Unchecked) this.uncheckedForCommit.add(node.repoPath);
       else this.uncheckedForCommit.delete(node.repoPath);
     }
+    /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+    this.tree.notifyCommitSelectionChanged();
+    /* SNIPCODE-HOOK end */
   }
 
   /** Built-in vscode.git askpass env (same source MainPanel uses); set from
@@ -77,39 +82,53 @@ export class ChangesWorkbench implements vscode.Disposable {
     return svc;
   }
 
-  private async discoverUnfiltered(): Promise<{ path: string }[]> {
+  /* SNIPCODE-HOOK start: Batch D retain disambiguated repo names */
+  private async discoverUnfiltered(): Promise<RepoInfo[]> {
     const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
     return RepoDiscoveryService.discoverRepos(folders).catch(() => []);
   }
 
-  private async discover(): Promise<{ path: string }[]> {
+  private async discover(): Promise<RepoInfo[]> {
     const found = await this.discoverUnfiltered();
     return this.repoFilter ? found.filter(r => this.repoFilter!.has(r.path)) : found;
   }
+  /* SNIPCODE-HOOK end */
 
   /** Discover repos (respecting the filter) and read each one's status + branch. */
-  private async loadStatus(): Promise<RepoStatus[]> {
+  /* SNIPCODE-HOOK start: Batch D commit status-read guard */
+  private async loadStatus(strict = false): Promise<RepoStatus[]> {
     const found = await this.discover();
     const out: RepoStatus[] = [];
     for (const r of found) {
       const svc = this.svcFor(r.path);
       const [diff, branches, aheadBehind] = await Promise.all([
-        svc.getUncommittedDiff().catch(() => ({ staged: [], unstaged: [] })),
+        svc.getUncommittedDiff().catch(err => {
+          if (strict) {
+            throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          return { staged: [], unstaged: [] };
+        }),
         svc.branches().catch(() => []),
         svc.aheadBehind(), // never throws; null when no upstream
       ]);
       const current = branches.find(b => b.current);
       const branch = current?.detached ? 'HEAD (detached)' : (current?.name ?? '(no branch)');
       out.push({
-        repoName: path.basename(r.path), repoPath: r.path, branch,
+        repoName: r.name, repoPath: r.path, branch,
         ahead: aheadBehind?.ahead, behind: aheadBehind?.behind,
         staged: diff.staged, unstaged: diff.unstaged,
       });
     }
     return out;
   }
+  /* SNIPCODE-HOOK end */
 
-  async refresh(): Promise<void> { await this.tree.refresh(); }
+  /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+  async refresh(): Promise<void> {
+    await this.tree.refresh();
+    this.diffPanel?.invalidateIndexDocuments();
+  }
+  /* SNIPCODE-HOOK end */
 
   /** Toolbar one-click ops across ALL repos (IntelliJ 更新專案 style): run `op`
    *  per repo sequentially with progress; ONE repo failing must not stop the
@@ -130,7 +149,9 @@ export class ChangesWorkbench implements vscode.Disposable {
       { location: vscode.ProgressLocation.Notification, title: verb },
       async (progress) => {
         for (const [i, r] of repos.entries()) {
-          const name = path.basename(r.path);
+          /* SNIPCODE-HOOK start: Batch D retain disambiguated repo names */
+          const name = r.name;
+          /* SNIPCODE-HOOK end */
           progress.report({ message: `${name} (${i + 1}/${repos.length})`, increment: 100 / repos.length });
           try {
             const res = await runExclusive(r.path, () => op(this.svcFor(r.path)));
@@ -214,14 +235,16 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  de-duplicated. Reuses the root extension's copy command. Copy-the-diff is B-2b. */
   private async copyAsClipCode(nodes: ChangeTreeNode[]): Promise<void> {
     const seen = new Set<string>();
-    const uris: vscode.Uri[] = [];
+    /* SNIPCODE-HOOK start: Batch D staged copy uses the index snapshot */
+    const resources: Array<{ resourceUri: vscode.Uri; group: ChangeGroup }> = [];
     for (const n of nodes.flatMap(x => this.nodeFiles(x))) {
       const fsPath = path.join(n.repoPath, n.path);
       if (seen.has(fsPath)) continue;
       seen.add(fsPath);
-      uris.push(vscode.Uri.file(fsPath));
+      resources.push({ resourceUri: vscode.Uri.file(fsPath), group: n.group });
     }
-    if (uris.length) await vscode.commands.executeCommand('clipcode.copyToClipboard', uris[0], uris);
+    if (resources.length) await vscode.commands.executeCommand('clipcode.copyGitChanges', resources);
+    /* SNIPCODE-HOOK end */
   }
 
   /** Stage every currently-unstaged file across all repos (re-reads live status
@@ -247,7 +270,9 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  only allowed when exactly one repo has staged work (rewrites that HEAD). */
   async commit(message: string, amend: boolean): Promise<CommitResult[]> {
     // Only repos with staged work AND left checked in the tree are committed.
-    const status = (await this.loadStatus())
+    /* SNIPCODE-HOOK start: Batch D commit status-read guard */
+    const status = (await this.loadStatus(true))
+    /* SNIPCODE-HOOK end */
       .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath));
     if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
@@ -344,7 +369,9 @@ export class ChangesWorkbench implements vscode.Disposable {
       return;
     }
     const items = all.map(r => ({
-      label: path.basename(r.path),
+      /* SNIPCODE-HOOK start: Batch D retain disambiguated repo names */
+      label: r.name,
+      /* SNIPCODE-HOOK end */
       description: r.path,
       repoPath: r.path,
       picked: this.repoFilter ? this.repoFilter.has(r.path) : true,

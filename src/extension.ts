@@ -50,6 +50,7 @@ interface GitChange {
 interface GitSelection {
   uriKey: string;
   status?: unknown;
+  staged?: boolean;
 }
 
 export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCommit: (payload: GraphCopyPayload) => Promise<void> } {
@@ -88,11 +89,14 @@ export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCo
 
   // Warm the cached vscode.git API so the (synchronous) blame deps below can
   // use it once it resolves; reuses the existing getGitApi() accessor.
-  void getGitApi().then(api => { cachedGitApi = api; });
-  registerBlame(context, {
+  const gitApiReady = getGitApi().then(api => { cachedGitApi = api; return api; });
+  const blameController = registerBlame(context, {
     getGitPath: () => runtimeGitPath(),
     resolveRepoRoot: (uri) => resolveRepoRootFor(uri)
   });
+  void gitApiReady.then(api => {
+    if (api) void blameController.onGitReady();
+  }).catch(() => {});
 
   // VSCode exports — Task 7 E2E drives copyFullSourceAtCommit through this API.
   return { copyFullSourceAtCommit };
@@ -513,7 +517,7 @@ interface GitChangeCandidate {
   forceIndexContent: boolean;
 }
 
-async function collectGitPayloadFiles(
+export async function collectGitPayloadFiles(
   repositories: GitRepository[],
   workspaceRoots: string[],
   selected: GitSelection[],
@@ -560,7 +564,8 @@ async function collectGitPayloadFiles(
 
       const changeType = mapGitStatusToChangeType(change.status);
       const forceIndexContent = selected.some(item =>
-        item.uriKey === key && item.status !== undefined && sameStatus(item.status, change.status) && isStagedGitStatus(change.status)
+        item.uriKey === key && isStagedGitStatus(change.status) &&
+          (item.staged === true || (item.staged === undefined && item.status !== undefined && sameStatus(item.status, change.status)))
       );
       candidates.push({ repository, change, clipboardPath, changeType, forceIndexContent });
     }
@@ -647,11 +652,12 @@ async function readGitChangeContent(
   }
 
   if (forceIndexContent) {
-    return await readRefContent(repository, '', change.uri.fsPath) ??
-      await readWorkspaceText(change.uri);
+    const targetUri = change.renameUri ?? change.uri;
+    return await readRefContent(repository, '', targetUri.fsPath) ??
+      await readWorkspaceText(targetUri);
   }
 
-  return readWorkspaceText(change.uri);
+  return readWorkspaceText(change.renameUri ?? change.uri);
 }
 
 async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
@@ -673,6 +679,7 @@ function gitChangeMatchesSelection(change: GitChange, selected: GitSelection[]):
 
   return selected.some(item =>
     keys.includes(item.uriKey) &&
+    (item.staged === undefined || item.staged === isStagedGitStatus(change.status)) &&
     (item.status === undefined || sameStatus(item.status, change.status))
   );
 }
@@ -693,9 +700,10 @@ function extractResourceSelections(value: unknown): GitSelection[] {
 
   const record = value as Record<string, unknown>;
   const status = record.type ?? record.status;
+  const staged = record.group === 'staged' ? true : record.group === 'unstaged' ? false : undefined;
   const direct = [record.resourceUri, record.uri]
     .filter((uri): uri is vscode.Uri => uri instanceof vscode.Uri)
-    .map(uri => ({ uriKey: uriKey(uri), status }));
+    .map(uri => ({ uriKey: uriKey(uri), status, staged }));
   const nested = [record.resourceStates, record.resources]
     .flatMap(extractResourceSelections);
   return [...direct, ...nested];

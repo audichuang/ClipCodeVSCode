@@ -15,7 +15,7 @@ interface GitExtension {
   getAPI(version: 1): GitApi;
 }
 
-export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps): void {
+export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps): BlameController {
   const controller = new BlameController(deps);
   context.subscriptions.push(
     controller,
@@ -32,7 +32,7 @@ export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps)
   );
 
   const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git');
-  if (!gitExtension) return;
+  if (!gitExtension) return controller;
   const ready = gitExtension.isActive
     ? Promise.resolve(gitExtension.exports)
     : gitExtension.activate();
@@ -46,4 +46,5 @@ export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps)
     for (const repo of api.repositories) watch(repo);
     context.subscriptions.push(api.onDidOpenRepository(watch));
   }).catch(() => {});
+  return controller;
 }
