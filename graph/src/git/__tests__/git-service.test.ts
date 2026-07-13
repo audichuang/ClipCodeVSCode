@@ -739,6 +739,19 @@ describe('GitService', () => {
     });
   });
 
+  /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */
+  describe('selective staging raw diff failures', () => {
+    it('surfaces the git failure instead of reporting no unstaged changes', async () => {
+      mockExec(service, async (args) => {
+        if (args[0] === 'ls-files') return 'src/foo.ts';
+        throw new GitError('timed out while reading diff', null, args);
+      });
+
+      await expect(service.stageHunks('src/foo.ts', [0], '')).rejects.toThrow('timed out while reading diff');
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   describe('auth retry (execWithAuthRetry / isAuthError)', () => {
     // The auth retry plumbing was added in dfd8af6 to drive VS Code's askpass
     // when the credential helper has nothing cached. Regression coverage for

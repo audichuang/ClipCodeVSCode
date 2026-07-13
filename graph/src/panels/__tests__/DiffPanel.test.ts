@@ -65,7 +65,9 @@ describe('DiffPanel', () => {
     expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'staged');
     expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'unstaged');
     expect(diffShows()).toEqual([
-      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff, unstagedDiff, fetchError: null } },
+      /* SNIPCODE-HOOK start: Batch B image request identity */
+      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', generation: expect.any(Number), stagedDiff, unstagedDiff, fetchError: null } },
+      /* SNIPCODE-HOOK end */
     ]);
   });
 
@@ -74,7 +76,9 @@ describe('DiffPanel', () => {
     wb.fileDiffData.mockRejectedValue(new Error('index.lock exists'));
     await shownPanel(wb);
     expect(diffShows()).toEqual([
-      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff: null, unstagedDiff: null, fetchError: 'index.lock exists' } },
+      /* SNIPCODE-HOOK start: Batch B image request identity */
+      { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', generation: expect.any(Number), stagedDiff: null, unstagedDiff: null, fetchError: 'index.lock exists' } },
+      /* SNIPCODE-HOOK end */
     ]);
   });
 
@@ -120,19 +124,23 @@ describe('DiffPanel', () => {
   it('routes diffStageHunk by side: unstaged→stageHunks, staged→unstageHunks', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
-    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 2 } });
-    expect(wb.stageHunks).toHaveBeenCalledWith('/r', 'a.ts', [2]);
-    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 0 } });
-    expect(wb.unstageHunks).toHaveBeenCalledWith('/r', 'a.ts', [0]);
+    /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 2, fingerprint: 'unstaged-fp', operationId: 'op-1' } });
+    expect(wb.stageHunks).toHaveBeenCalledWith('/r', 'a.ts', [2], 'unstaged-fp', 'op-1');
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 0, fingerprint: 'staged-fp', operationId: 'op-2' } });
+    expect(wb.unstageHunks).toHaveBeenCalledWith('/r', 'a.ts', [0], 'staged-fp', 'op-2');
+    /* SNIPCODE-HOOK end */
   });
 
   it('routes diffStageLines by side with the selected line indices', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
-    await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 1, lineIndices: [0, 2] } });
-    expect(wb.stageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [0, 2]);
-    await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 1, lineIndices: [1] } });
-    expect(wb.unstageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [1]);
+    /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+    await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 1, lineIndices: [0, 2], fingerprint: 'unstaged-fp', operationId: 'op-1' } });
+    expect(wb.stageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [0, 2], 'unstaged-fp', 'op-1');
+    await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 1, lineIndices: [1], fingerprint: 'staged-fp', operationId: 'op-2' } });
+    expect(wb.unstageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [1], 'staged-fp', 'op-2');
+    /* SNIPCODE-HOOK end */
   });
 
   it('rejects a stage request whose repoPath/file is not the shown file', async () => {
@@ -146,6 +154,19 @@ describe('DiffPanel', () => {
     const errors = posted().filter((m) => m.type === 'error');
     expect(errors.map((m) => m.payload.source)).toEqual(['diffStageHunk', 'diffStageLines']);
   });
+
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  it('rejects a current stage request without a rendered diff fingerprint', async () => {
+    const wb = makeWorkbench();
+    await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, operationId: 'op-1' } });
+    expect(wb.stageHunks).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === 'error')).toEqual([
+      { type: 'error', payload: { source: 'diffStageHunk', message: 'Missing diff fingerprint — refresh before staging', operationId: 'op-1' } },
+    ]);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('diffOpenSide opens the native diff editor with our snipcode-diff pair for that side', async () => {
     const wb = makeWorkbench();
@@ -177,20 +198,27 @@ describe('DiffPanel', () => {
     expect(wb.fileAtRef).toHaveBeenCalledWith('/r', '', 'a.ts');
     wb.fileAtRef.mockRejectedValueOnce(new Error('does not exist at HEAD'));
     await expect(provider.provideTextDocumentContent(uri)).resolves.toBe(''); // new file → empty side
+    /* SNIPCODE-HOOK start: Batch B surface git content failures */
+    wb.fileAtRef.mockRejectedValueOnce(new Error('spawn failed'));
+    await expect(provider.provideTextDocumentContent(uri)).rejects.toThrow('spawn failed');
+    /* SNIPCODE-HOOK end */
   });
 
   it('serves getImageAtRef from git for a real ref, and empty base64 on failure', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    const generation = diffShows()[0].payload.generation;
     H.panel!.webview.postMessage.mockClear();
-    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'HEAD', path: 'a.ts' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: '/r', generation, ref: 'HEAD', path: 'a.ts' } });
     expect(wb.imageBase64).toHaveBeenCalledWith('/r', 'HEAD', 'a.ts');
     wb.imageBase64.mockRejectedValueOnce(new Error('bad object'));
-    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: ':0', path: 'a.ts' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: '/r', generation, ref: ':0', path: 'a.ts' } });
     expect(posted().filter((m) => m.type === 'imageData')).toEqual([
-      { type: 'imageData', payload: { ref: 'HEAD', path: 'a.ts', base64: 'QUJD', mimeType: 'image/png' } },
-      { type: 'imageData', payload: { ref: ':0', path: 'a.ts', base64: '', mimeType: 'image/png' } },
+      { type: 'imageData', payload: { repoPath: '/r', generation, ref: 'HEAD', path: 'a.ts', base64: 'QUJD', mimeType: 'image/png' } },
+      { type: 'imageData', payload: { repoPath: '/r', generation, ref: ':0', path: 'a.ts', base64: '', mimeType: 'image/png' } },
     ]);
+    /* SNIPCODE-HOOK end */
   });
 
   it('serves getImageAtRef ref:working from the working tree, dropping requests for any other file', async () => {
@@ -201,14 +229,17 @@ describe('DiffPanel', () => {
     dp.show(repo, 'img.png');
     await H.messageHandler!({ type: 'diffReady' });
     await flush();
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    const generation = diffShows()[0].payload.generation;
     H.panel!.webview.postMessage.mockClear();
-    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: 'img.png' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: repo, generation, ref: 'working', path: 'img.png' } });
     // Not the shown file (traversal or just a different path) → dropped entirely.
-    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'working', path: '../escape.png' } });
-    await H.messageHandler!({ type: 'getImageAtRef', payload: { ref: 'HEAD', path: 'other.png' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: repo, generation, ref: 'working', path: '../escape.png' } });
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: repo, generation, ref: 'HEAD', path: 'other.png' } });
     expect(posted().filter((m) => m.type === 'imageData')).toEqual([
-      { type: 'imageData', payload: { ref: 'working', path: 'img.png', base64: 'YWJj', mimeType: 'image/png' } },
+      { type: 'imageData', payload: { repoPath: repo, generation, ref: 'working', path: 'img.png', base64: 'YWJj', mimeType: 'image/png' } },
     ]);
+    /* SNIPCODE-HOOK end */
     expect(wb.imageBase64).not.toHaveBeenCalled();
   });
 
@@ -219,7 +250,7 @@ describe('DiffPanel', () => {
     const dp = await shownPanel(wb);
     H.panel!.webview.postMessage.mockClear();
     H.panel!.webview.postMessage.mockImplementation(() => { throw new Error('Webview is disposed'); });
-    const pending = H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0 } });
+    const pending = H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp' } });
     dp.dispose();
     reject(new Error('patch does not apply'));
     await expect(pending).resolves.toBeUndefined(); // no unhandled throw
@@ -232,10 +263,12 @@ describe('DiffPanel', () => {
     wb.stageHunks.mockRejectedValueOnce(new Error('patch does not apply'));
     await shownPanel(wb);
     H.panel!.webview.postMessage.mockClear();
-    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0 } });
+    /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+    await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp', operationId: 'op-1' } });
     const errors = posted().filter((m) => m.type === 'error');
     expect(errors).toEqual([
-      { type: 'error', payload: { source: 'diffStageHunk', message: 'patch does not apply' } },
+      { type: 'error', payload: { source: 'diffStageHunk', message: 'patch does not apply', operationId: 'op-1' } },
     ]);
+    /* SNIPCODE-HOOK end */
   });
 });

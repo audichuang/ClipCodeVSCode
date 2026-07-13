@@ -3,7 +3,7 @@ import { diffStore } from '../diff-store.svelte';
 import { listenForHostMessages, postStageHunk, postStageLines, postOpenSide } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
 
-const emptyDiff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [] };
+const emptyDiff = { file: 'src/a.ts', isBinary: false, isImage: false, hunks: [], fingerprint: 'rendered-fp' };
 
 beforeEach(() => {
   diffStore.reset();
@@ -44,20 +44,32 @@ describe('diff messaging', () => {
   });
 
   it('postStageHunk posts diffStageHunk with the given side', () => {
-    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+    diffStore.setDiffs('/r', 'src/a.ts', null, { ...emptyDiff, fingerprint: 'rendered-fp' });
     postStageHunk('unstaged', 2);
     expect(globalThis.__postedMessages).toContainEqual({
-      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 2 } },
+      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 2, operationId: expect.any(String), fingerprint: 'rendered-fp' } },
     });
+    /* SNIPCODE-HOOK end */
   });
 
   it('postStageHunk on the staged side posts side:staged', () => {
     diffStore.setDiffs('/r', 'src/a.ts', emptyDiff, null);
     postStageHunk('staged', 0);
     expect(globalThis.__postedMessages).toContainEqual({
-      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'staged', hunkIndex: 0 } },
+      /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+      data: { type: 'diffStageHunk', payload: { repoPath: '/r', file: 'src/a.ts', side: 'staged', hunkIndex: 0, operationId: expect.any(String), fingerprint: 'rendered-fp' } },
+      /* SNIPCODE-HOOK end */
     });
   });
+
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  it('postStageHunk is dropped when the rendered diff has no fingerprint', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, { ...emptyDiff, fingerprint: undefined });
+    postStageHunk('unstaged', 0);
+    expect(globalThis.__postedMessages).toHaveLength(0);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('postStageHunk is dropped when the requested side has no diff', () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff); // staged is null
@@ -97,18 +109,50 @@ describe('diff messaging', () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
     postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
+    /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+    const operationId = (globalThis.__postedMessages[0].data as { payload: { operationId: string } }).payload.operationId;
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'error', payload: { source: 'diffStageHunk', message: 'nope' } },
+      data: { type: 'error', payload: { source: 'diffStageHunk', operationId, message: 'nope' } },
     }));
+    /* SNIPCODE-HOOK end */
     expect(diffStore.busy).toBe(false);
   });
 
+  /* SNIPCODE-HOOK start: Batch B stage operation correlation regression */
+  it('a stale operation reply does not unlock the newer file operation', () => {
+    listenForHostMessages();
+    diffStore.setDiffs('/r', 'a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
+    const first = globalThis.__postedMessages[0].data as { payload: { operationId?: string } };
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'b.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+    }));
+    postStageHunk('unstaged', 0);
+    const second = globalThis.__postedMessages[1].data as { payload: { operationId?: string } };
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'error', payload: { source: 'diffStageHunk', operationId: first.payload.operationId, message: 'late A failure' } },
+    }));
+    expect(diffStore.busy).toBe(true);
+    postStageHunk('unstaged', 1);
+    expect(globalThis.__postedMessages).toHaveLength(2);
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'error', payload: { source: 'diffStageHunk', operationId: second.payload.operationId, message: 'B failure' } },
+    }));
+    expect(diffStore.busy).toBe(false);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('postStageLines posts diffStageLines with side + indices', () => {
-    diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
+    /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+    diffStore.setDiffs('/r', 'src/a.ts', null, { ...emptyDiff, fingerprint: 'rendered-fp' });
     postStageLines('unstaged', 0, [1, 2]);
     expect(globalThis.__postedMessages).toContainEqual({
-      data: { type: 'diffStageLines', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2] } },
+      data: { type: 'diffStageLines', payload: { repoPath: '/r', file: 'src/a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [1, 2], operationId: expect.any(String), fingerprint: 'rendered-fp' } },
     });
+    /* SNIPCODE-HOOK end */
   });
 
   it('postOpenSide posts diffOpenSide for a present side and drops a missing one', () => {

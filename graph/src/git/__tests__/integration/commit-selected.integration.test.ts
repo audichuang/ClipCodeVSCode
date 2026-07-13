@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+/* SNIPCODE-HOOK start: Batch B commitSelected mode guard regression */
+import { chmodSync } from 'node:fs';
+import { join } from 'node:path';
+/* SNIPCODE-HOOK end */
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, head, runGit, writeFile } from './helpers';
 
@@ -59,6 +63,21 @@ describe('GitService integration — commitSelected', () => {
     // Index is clean (== HEAD): `git diff --cached --quiet` exits 0.
     expect(() => runGit(repo.path, ['diff', '--cached', '--quiet'])).not.toThrow();
   });
+
+  /* SNIPCODE-HOOK start: Batch B commitSelected mode guard regression */
+  it('refuses selected content hunks when the file also has a mode change', async () => {
+    chmodSync(join(repo.path, 'f.txt'), 0o755);
+    expect(runGit(repo.path, ['diff', 'f.txt'])).toMatch(/^new mode 100755$/m);
+    const before = head(repo.path);
+
+    await expect(
+      svc.commitSelected('content only', [{ path: 'f.txt', hunkIndices: [0] }]),
+    ).rejects.toThrow(/mode or rename/);
+
+    expect(head(repo.path)).toBe(before);
+    expect(runGit(repo.path, ['ls-tree', 'HEAD', 'f.txt'])).toContain('100644');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('stages and commits a whole new (untracked) file via its single whole-file hunk', async () => {
     writeFile(repo.path, 'new.txt', 'hello\nworld\n');
