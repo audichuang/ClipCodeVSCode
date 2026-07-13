@@ -655,6 +655,7 @@ export const zh: Record<string, string> = {
   'file.open': '打开文件',
   'file.openChanges': '打开更改',
   /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': '正在加载更改',
   'file.noChanges': '无变更',
   'file.stageFailed': '操作失败',
   'file.stageTimeout': '操作耗时超出预期 — 完成后按钮会解锁（若一直无响应请重开此分页）',

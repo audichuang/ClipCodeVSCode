@@ -16,6 +16,15 @@ export function makeVscodeModule(
   H: PanelHarness,
   opts: { workspaceFolders?: Array<{ uri: { fsPath: string } }> } = {},
 ) {
+  class EventEmitter<T> {
+    readonly listeners: Array<(value: T) => void> = [];
+    event = (listener: (value: T) => void) => {
+      this.listeners.push(listener);
+      return { dispose: () => this.listeners.splice(this.listeners.indexOf(listener), 1) };
+    };
+    fire(value: T): void { for (const listener of this.listeners) listener(value); }
+    dispose(): void { this.listeners.length = 0; }
+  }
   const workspaceFolders = opts.workspaceFolders ?? [];
   const makePanel = () => {
     const panel = {
@@ -36,6 +45,7 @@ export function makeVscodeModule(
     return panel;
   };
   return {
+    EventEmitter,
     window: {
       createWebviewPanel: vi.fn(makePanel),
       activeTextEditor: undefined,

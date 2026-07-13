@@ -36,6 +36,10 @@
 <div class="diff-app-root">
   {#if !store.loaded}
     <p class="empty">{t('file.openChanges')}</p>
+  <!-- SNIPCODE-HOOK start: Batch D clear stale body during navigation -->
+  {:else if store.loading}
+    <p class="empty">{t('file.loadingChanges')}</p>
+  <!-- SNIPCODE-HOOK end -->
   {:else}
     <!-- The banner renders in the empty state too: a failed fetch (null sides +
          error) must not read as an affirmative "No changes". -->

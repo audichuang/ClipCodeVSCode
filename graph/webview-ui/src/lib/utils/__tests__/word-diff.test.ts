@@ -94,6 +94,50 @@ describe('pairHunkWordDiffs', () => {
     expect(map.has(2)).toBe(false);  // extra add unpaired
   });
 
+  /* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing */
+  it('uses sequence alignment when an added line shifts the replacement pairs', () => {
+    const lines: DiffLineLite[] = [
+      { type: 'delete', content: 'foo' },
+      { type: 'delete', content: 'bar' },
+      { type: 'add', content: 'header' },
+      { type: 'add', content: 'foo!' },
+      { type: 'add', content: 'bar!' },
+    ];
+
+    const map = pairHunkWordDiffs(lines);
+    expect(map.has(2)).toBe(false);
+    expect(map.get(3)).toEqual({ ranges: [{ start: 3, end: 4 }], kind: 'add' });
+    expect(map.get(4)).toEqual({ ranges: [{ start: 3, end: 4 }], kind: 'add' });
+  });
+
+  it('aligns an equal-sized block when one line was inserted and another deleted', () => {
+    const lines: DiffLineLite[] = [
+      { type: 'delete', content: 'foo' },
+      { type: 'delete', content: 'bar' },
+      { type: 'add', content: 'header' },
+      { type: 'add', content: 'foo!' },
+    ];
+
+    const map = pairHunkWordDiffs(lines);
+    expect(map.has(2)).toBe(false);
+    expect(map.get(3)).toEqual({ ranges: [{ start: 3, end: 4 }], kind: 'add' });
+  });
+
+  it('does not let a shared prefix hide shifted replacement pairs', () => {
+    const map = pairHunkWordDiffs([
+      { type: 'delete', content: 'return foo' },
+      { type: 'delete', content: 'return bar' },
+      { type: 'add', content: 'return header' },
+      { type: 'add', content: 'return foo2' },
+      { type: 'add', content: 'return bar2' },
+    ]);
+
+    expect(map.has(2)).toBe(false);
+    expect(map.has(3)).toBe(true);
+    expect(map.has(4)).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: Batch C word-diff performance regression. */
   it('falls back to line-level highlighting for a 1500-line rewrite block', () => {
     const lines: DiffLineLite[] = [];

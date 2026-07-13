@@ -31,6 +31,15 @@ describe('Diff.svelte unified view', () => {
     expect(getByText('Open Changes')).toBeTruthy();
   });
 
+  /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+  it('shows a loading state instead of the previous diff during navigation', () => {
+    diffStore.beginLoad('/r', 'src/b.ts', 2);
+    const { getByText, queryByText } = render(Diff);
+    expect(getByText('Loading changes')).toBeTruthy();
+    expect(queryByText('No changes')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
+
   it('renders two sections when both sides have a diff', () => {
     diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff());
     const { container, getByText } = render(Diff);

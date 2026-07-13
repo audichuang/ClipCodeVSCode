@@ -12,6 +12,18 @@ describe('CommitBoxStore', () => {
     expect(workbenchStore.canCommit).toBe(false);
   });
 
+  /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  it('canAmend requires exactly one checked repo with staged changes', () => {
+    workbenchStore.message = '修正手續費';
+    workbenchStore.stagedRepoCount = 2;
+    expect(workbenchStore.canCommit).toBe(true);
+    expect(workbenchStore.canAmend).toBe(false);
+
+    workbenchStore.stagedRepoCount = 1;
+    expect(workbenchStore.canAmend).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('clears the message and committing when every repo committed cleanly', () => {
     workbenchStore.message = 'msg';
     workbenchStore.committing = true;

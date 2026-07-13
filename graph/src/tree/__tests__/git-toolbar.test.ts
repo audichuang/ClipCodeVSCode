@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const H = vi.hoisted(() => ({
-  repos: [] as Array<{ path: string }>,
+  repos: [] as Array<{ path: string; name?: string }>,
   svcs: new Map<string, unknown>(),
   /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
   commands: new Map<string, (...args: unknown[]) => unknown>(),
@@ -73,6 +73,7 @@ function mkSvc(over: Record<string, unknown> = {}) {
     /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
     stagePaths: vi.fn(async () => {}),
     unstagePaths: vi.fn(async () => {}),
+    commitIndex: vi.fn(async () => {}),
     /* SNIPCODE-HOOK end */
     setExtraEnv: vi.fn(),
     setAuthRetryHandler: vi.fn(),
@@ -82,7 +83,7 @@ function mkSvc(over: Record<string, unknown> = {}) {
 }
 
 function setRepos(paths: string[], svcByPath: Record<string, ReturnType<typeof mkSvc>>) {
-  H.repos = paths.map((p) => ({ path: p }));
+  H.repos = paths.map((p) => ({ path: p, name: p.split('/').pop()! }));
   H.svcs = new Map(Object.entries(svcByPath));
 }
 
@@ -121,6 +122,55 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     expect(a.unstagePaths).toHaveBeenCalledWith([aStaged]);
     expect(b.unstagePaths).not.toHaveBeenCalled();
   });
+
+  it('routes staged copies through Git change copy with the index side preserved', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    const modified = file('/a', 'same.ts', 'staged');
+    const deleted = { ...file('/a', 'gone.ts', 'staged'), status: 'D' };
+    const renamed = { ...file('/a', 'new.ts', 'staged'), status: 'R', oldPath: 'old.ts' };
+
+    await H.commands.get('snipcode.git.copyAsClipCode')!(modified, [modified, deleted, renamed]);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('clipcode.copyGitChanges', [
+      { resourceUri: expect.objectContaining({ fsPath: '/a/same.ts' }), group: 'staged' },
+      { resourceUri: expect.objectContaining({ fsPath: '/a/gone.ts' }), group: 'staged' },
+      { resourceUri: expect.objectContaining({ fsPath: '/a/new.ts' }), group: 'staged' },
+    ]);
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: Batch D commit status-read guard */
+describe('ChangesWorkbench commit status guard', () => {
+  it('rejects before committing when any selected repo status cannot be read', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a.ts', status: 'M' }], unstaged: [] })),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => { throw new Error('index.lock exists'); }),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+
+    await expect(new ChangesWorkbench().commit('fix', true)).rejects.toThrow('b: index.lock exists');
+    expect(a.commitIndex).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+describe('ChangesWorkbench index document invalidation', () => {
+  it('invalidates open index documents on a status refresh', async () => {
+    const wb = new ChangesWorkbench();
+    const invalidateIndexDocuments = vi.fn();
+    wb.setDiffPanel({ invalidateIndexDocuments } as never);
+
+    await wb.refresh();
+
+    expect(invalidateIndexDocuments).toHaveBeenCalledTimes(1);
+  });
 });
 /* SNIPCODE-HOOK end */
 
@@ -144,6 +194,21 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
     const msg = vi.mocked(vscode.window.showErrorMessage).mock.calls[0][0] as string;
     expect(msg).toContain('1/2 成功');
     expect(msg).toContain('a: auth denied');
+  });
+
+  it('keeps RepoDiscoveryService disambiguation in an all-repo failure', async () => {
+    const first = mkSvc({ fetch: vi.fn(async () => { throw new Error('auth denied'); }) });
+    const second = mkSvc();
+    H.repos = [
+      { path: '/clients/acme/api', name: 'acme/api' },
+      { path: '/clients/beta/api', name: 'beta/api' },
+    ];
+    H.svcs = new Map([['/clients/acme/api', first], ['/clients/beta/api', second]]);
+
+    await new ChangesWorkbench().fetchAll();
+
+    const msg = vi.mocked(vscode.window.showErrorMessage).mock.calls[0][0] as string;
+    expect(msg).toContain('acme/api: auth denied');
   });
 
   it('pullAll pulls with no args so each repo keeps its own pull.rebase config', async () => {
@@ -211,5 +276,40 @@ describe('Changes tree repo badges', () => {
     await expect(repoDescription(1, 0)).resolves.toBe('main ↑1');
     await expect(repoDescription(0, 0)).resolves.toBe('main');
     await expect(repoDescription(undefined, undefined)).resolves.toBe('main'); // no upstream
+  });
+
+  it('keeps the newest refresh when an older status read finishes last', async () => {
+    let releaseOld!: (value: RepoStatus[]) => void;
+    const oldStatus = new Promise<RepoStatus[]>(resolve => { releaseOld = resolve; });
+    const provider = new ChangesTreeProvider(vi.fn()
+      .mockImplementationOnce(() => oldStatus)
+      .mockResolvedValueOnce(status()));
+
+    const older = provider.refresh();
+    await provider.refresh();
+    releaseOld([{ ...status()[0], repoName: 'stale', repoPath: '/stale' }]);
+    await older;
+
+    const unstaged = provider.getChildren()[1];
+    const repo = provider.getChildren(unstaged)[0];
+    expect(repo.kind).toBe('repo');
+    if (repo.kind !== 'repo') throw new Error('expected repo node');
+    expect(repo.repoName).toBe('r');
+  });
+
+  it('reports only checked staged repos for the amend UI guard', async () => {
+    const checked = new Set(['/a']);
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], repoName: 'a', repoPath: '/a', staged: [{ path: 'a.ts', status: 'M' }], unstaged: [] },
+      { ...status()[0], repoName: 'b', repoPath: '/b', staged: [{ path: 'b.ts', status: 'M' }], unstaged: [] },
+    ], repoPath => checked.has(repoPath));
+    await provider.refresh();
+
+    expect(provider.getStagedRepoCount()).toBe(1);
+    const counts: number[] = [];
+    provider.onDidChangeTreeData(() => counts.push(provider.getStagedRepoCount()));
+    checked.add('/b');
+    provider.notifyCommitSelectionChanged();
+    expect(counts).toEqual([2]);
   });
 });

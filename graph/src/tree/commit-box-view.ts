@@ -21,7 +21,25 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: [assetRoot] };
     view.webview.html = this.getHtml(view.webview, assetRoot);
 
+    /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+    const postCommitState = () => {
+      void view.webview.postMessage({
+        type: 'workbenchCommitState',
+        payload: { stagedRepoCount: this.workbench.tree.getStagedRepoCount() },
+      });
+    };
+    const treeSubscription = this.workbench.tree.onDidChangeTreeData(postCommitState);
+    view.onDidDispose(() => treeSubscription.dispose());
+    postCommitState();
+    /* SNIPCODE-HOOK end */
+
     view.webview.onDidReceiveMessage(async (msg) => {
+      /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+      if (msg?.type === 'workbenchReady') {
+        postCommitState();
+        return;
+      }
+      /* SNIPCODE-HOOK end */
       if (msg?.type !== 'workbenchCommit') return;
       const { message, amend } = msg.payload ?? {};
       try {

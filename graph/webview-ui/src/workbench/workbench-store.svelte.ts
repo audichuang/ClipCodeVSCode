@@ -12,12 +12,18 @@ class CommitBoxStore {
   commitError = $state<string | null>(null);
   /** Per-repo outcome of the last commit (for a small summary line). */
   results = $state<WbCommitResult[]>([]);
+  /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  stagedRepoCount = $state(0);
+  /* SNIPCODE-HOOK end */
 
   reset(): void {
     this.message = '';
     this.committing = false;
     this.commitError = null;
     this.results = [];
+    /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+    this.stagedRepoCount = 0;
+    /* SNIPCODE-HOOK end */
   }
 
   applyCommitResults(results: WbCommitResult[]): void {
@@ -32,7 +38,9 @@ class CommitBoxStore {
     return this.message.trim() !== '' && !this.committing;
   }
   get canAmend(): boolean {
-    return this.message.trim() !== '' && !this.committing;
+    /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+    return this.canCommit && this.stagedRepoCount === 1;
+    /* SNIPCODE-HOOK end */
   }
 }
 

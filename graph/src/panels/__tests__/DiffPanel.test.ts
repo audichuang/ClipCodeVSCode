@@ -6,10 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const H = vi.hoisted(() => ({
   messageHandler: null as null | ((m: unknown) => unknown),
   panel: null as null | { webview: { postMessage: ReturnType<typeof vi.fn> } },
+  fsOpen: vi.fn(),
 }));
 
 /* shared vscode mock (see vscode-mock.ts) */
 vi.mock('vscode', async () => (await import('./vscode-mock')).makeVscodeModule(H));
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  H.fsOpen.mockImplementation((...args: Parameters<typeof actual.open>) => actual.open(...args));
+  return { ...actual, open: H.fsOpen };
+});
 // Only DiffPanel is under test — MainPanel is imported solely for assetRootUri.
 vi.mock('../MainPanel', () => ({ MainPanel: { assetRootUri: undefined } }));
 
@@ -56,6 +62,7 @@ const diffShows = () => posted().filter((m) => m.type === 'diffShow');
 beforeEach(() => {
   H.messageHandler = null;
   H.panel = null;
+  H.fsOpen.mockClear();
 });
 
 describe('DiffPanel', () => {
@@ -119,6 +126,23 @@ describe('DiffPanel', () => {
     await flush();
     const files = diffShows().map((m) => m.payload.file);
     expect(files).toEqual(['b.ts']); // the superseded a.ts push was dropped
+  });
+
+  it('clears the old body with a loading message as soon as navigation starts', async () => {
+    const wb = makeWorkbench();
+    const dp = await shownPanel(wb);
+    H.panel!.webview.postMessage.mockClear();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    wb.fileDiffData.mockImplementation(async () => { await gate; return stagedDiff; });
+
+    dp.show('/r', 'b.ts');
+
+    expect(posted()[0]).toMatchObject({
+      type: 'diffLoading', payload: { repoPath: '/r', file: 'b.ts', generation: expect.any(Number) },
+    });
+    release();
+    await flush();
   });
 
   it('routes diffStageHunk by side: unstaged→stageHunks, staged→unstageHunks', async () => {
@@ -204,6 +228,25 @@ describe('DiffPanel', () => {
     /* SNIPCODE-HOOK end */
   });
 
+  it('invalidates index virtual documents opened before panel navigation', async () => {
+    const wb = makeWorkbench();
+    const dp = await shownPanel(wb);
+    const reg = vi.mocked(vscode.workspace.registerTextDocumentContentProvider);
+    const provider = reg.mock.calls[reg.mock.calls.length - 1][1] as any;
+    const changed: any[] = [];
+    provider.onDidChange((uri: unknown) => changed.push(uri));
+
+    await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/r', file: 'a.ts', side: 'staged' } });
+    dp.show('/r', 'b.ts');
+    await H.messageHandler!({ type: 'diffOpenSide', payload: { repoPath: '/r', file: 'b.ts', side: 'staged' } });
+    (dp as unknown as { invalidateIndexDocuments(): void }).invalidateIndexDocuments();
+
+    expect(changed.map(uri => JSON.parse(uri.query))).toEqual([
+      { repoPath: '/r', file: 'a.ts', ref: '' },
+      { repoPath: '/r', file: 'b.ts', ref: '' },
+    ]);
+  });
+
   it('serves getImageAtRef from git for a real ref, and empty base64 on failure', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
@@ -219,6 +262,24 @@ describe('DiffPanel', () => {
       { type: 'imageData', payload: { repoPath: '/r', generation, ref: ':0', path: 'a.ts', base64: '', mimeType: 'image/png' } },
     ]);
     /* SNIPCODE-HOOK end */
+  });
+
+  it('deduplicates concurrent reads of the same image ref across both diff sections', async () => {
+    const wb = makeWorkbench();
+    let release!: (base64: string) => void;
+    wb.imageBase64.mockImplementation(() => new Promise<string>(resolve => { release = resolve; }));
+    await shownPanel(wb);
+    const generation = diffShows()[0].payload.generation;
+    const request = { type: 'getImageAtRef', payload: { repoPath: '/r', generation, ref: ':0', path: 'a.ts' } };
+
+    const first = H.messageHandler!(request);
+    const second = H.messageHandler!(request);
+    await flush();
+
+    expect(wb.imageBase64).toHaveBeenCalledTimes(1);
+    release('QUJD');
+    await Promise.all([first, second]);
+    expect(posted().filter((message) => message.type === 'imageData')).toHaveLength(1);
   });
 
   it('serves getImageAtRef ref:working from the working tree, dropping requests for any other file', async () => {
@@ -241,6 +302,24 @@ describe('DiffPanel', () => {
     ]);
     /* SNIPCODE-HOOK end */
     expect(wb.imageBase64).not.toHaveBeenCalled();
+  });
+
+  it('bounds a working-tree image read to the 50MB cap plus one byte', async () => {
+    const maxRead = 50 * 1024 * 1024 + 1;
+    const read = vi.fn(async (_buffer: Buffer, _offset: number, length: number) => ({ bytesRead: length }));
+    const close = vi.fn(async () => {});
+    H.fsOpen.mockResolvedValueOnce({ read, close });
+    const wb = makeWorkbench();
+    await shownPanel(wb);
+    const generation = diffShows()[0].payload.generation;
+
+    await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: '/r', generation, ref: 'working', path: 'a.ts' } });
+
+    expect(H.fsOpen).toHaveBeenCalledWith('/r/a.ts', 'r');
+    expect(read.mock.calls[0][2]).toBeLessThanOrEqual(64 * 1024);
+    expect(Math.max(...read.mock.calls.map(call => call[2]))).toBeLessThanOrEqual(maxRead);
+    expect(close).toHaveBeenCalled();
+    expect(posted().at(-1)).toMatchObject({ type: 'imageData', payload: { base64: '' } });
   });
 
   it('a stage failure after the panel is closed still notifies, without posting to the dead webview', async () => {

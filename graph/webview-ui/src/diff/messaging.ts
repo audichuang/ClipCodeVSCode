@@ -35,6 +35,17 @@ export function listenForHostMessages(): void {
   window.addEventListener('message', (e) => {
     const msg = (e as MessageEvent).data;
     switch (msg?.type) {
+      /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+      case 'diffLoading':
+        if (msg.payload.operationId !== undefined && msg.payload.operationId !== diffStore.operationId) break;
+        diffStore.beginLoad(
+          String(msg.payload.repoPath),
+          String(msg.payload.file),
+          Number(msg.payload.generation ?? 0),
+          msg.payload.operationId === undefined ? undefined : String(msg.payload.operationId),
+        );
+        break;
+      /* SNIPCODE-HOOK end */
       case 'diffShow':
         /* SNIPCODE-HOOK start: Batch B stage operation correlation */
         if (msg.payload.operationId !== undefined && msg.payload.operationId !== diffStore.operationId) break;

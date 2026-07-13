@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { readFile, stat } from 'fs/promises';
+/* SNIPCODE-HOOK start: Batch D bound working-tree image reads */
+import { open } from 'fs/promises';
+/* SNIPCODE-HOOK end */
 import { MainPanel } from './MainPanel';
 import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
@@ -26,6 +28,9 @@ const MIME_BY_EXT: Record<string, string> = {
   '.gif': 'image/gif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
   '.webp': 'image/webp', '.ico': 'image/x-icon',
 };
+/* SNIPCODE-HOOK start: Batch D bound working-tree image reads */
+const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
+/* SNIPCODE-HOOK end */
 
 export class DiffPanel {
   static readonly viewType = 'snipcode.diffPanel';
@@ -45,6 +50,9 @@ export class DiffPanel {
   /** Drops a late fileDiffData reply for a file the user already navigated away
    *  from (rapid clicks / post-apply refresh racing a navigation). */
   private readonly seq = new SequenceGuard();
+  /* SNIPCODE-HOOK start: Batch D deduplicate image reads */
+  private readonly imageResponses = new Map<string, Promise<void>>();
+  /* SNIPCODE-HOOK end */
 
   private constructor(
     private readonly extensionUri: vscode.Uri,
@@ -55,12 +63,22 @@ export class DiffPanel {
    *  own GitService so it works without the built-in git extension. */
   static readonly contentScheme = 'snipcode-diff';
   private contentProvider: vscode.Disposable | undefined;
+  /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+  private readonly contentChanged = new vscode.EventEmitter<vscode.Uri>();
+  private readonly indexContentUris = new Map<string, vscode.Uri>();
+  /* SNIPCODE-HOOK end */
 
   static register(extensionUri: vscode.Uri, workbench: ChangesWorkbench): DiffPanel {
     const panel = new DiffPanel(extensionUri, workbench);
     panel.contentProvider = vscode.workspace.registerTextDocumentContentProvider(DiffPanel.contentScheme, {
+      /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+      onDidChange: panel.contentChanged.event,
+      /* SNIPCODE-HOOK end */
       async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
         const { repoPath, file, ref } = JSON.parse(uri.query);
+        /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+        if (ref === '') panel.indexContentUris.set(uri.query, uri);
+        /* SNIPCODE-HOOK end */
         // Absent at the ref (e.g. a new file at HEAD) → empty side, whole file
         // reads as added.
         /* SNIPCODE-HOOK start: Batch B surface git content failures */
@@ -90,7 +108,15 @@ export class DiffPanel {
     // Before the handshake lands, the webview's listener isn't installed yet and
     // this postMessage would be silently dropped; the `diffReady` handler below
     // re-pushes `this.current` once it does.
-    if (this.ready) { void this.push(this.current, ticket, operationId); }
+    if (this.ready) {
+      /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+      this.panel!.webview.postMessage({
+        type: 'diffLoading',
+        payload: { repoPath, file, generation: ticket, ...(operationId ? { operationId } : {}) },
+      });
+      /* SNIPCODE-HOOK end */
+      void this.push(this.current, ticket, operationId);
+    }
   }
   /* SNIPCODE-HOOK end */
 
@@ -107,6 +133,12 @@ export class DiffPanel {
     if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
       this.show(repoPath, file, operationId);
     }
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+  invalidateIndexDocuments(): void {
+    for (const uri of this.indexContentUris.values()) this.contentChanged.fire(uri);
   }
   /* SNIPCODE-HOOK end */
 
@@ -162,10 +194,9 @@ export class DiffPanel {
         const { repoPath, file, side } = msg.payload ?? {};
         if (!this.isCurrentTarget(repoPath, file)) { return; }
         const fileUri = vscode.Uri.file(path.join(String(repoPath), String(file)));
-        const refUri = (ref: string) => fileUri.with({
-          scheme: DiffPanel.contentScheme,
-          query: JSON.stringify({ repoPath, file, ref }),
-        });
+        /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+        const refUri = (ref: string) => this.contentUri(String(repoPath), String(file), ref);
+        /* SNIPCODE-HOOK end */
         if (side === 'staged') {
           await vscode.commands.executeCommand('vscode.diff', refUri('HEAD'), refUri(''), `${file} (Staged)`);
         } else {
@@ -289,29 +320,65 @@ export class DiffPanel {
     // the file this panel is showing.
     if (!this.current || this.current.repoPath !== repoPath
       || this.current.file !== filePath || this.current.generation !== generation) { return; }
+    /* SNIPCODE-HOOK start: Batch D deduplicate image reads */
+    const readKey = `${repoPath}\0${generation}\0${ref}\0${filePath}`;
+    let pending = this.imageResponses.get(readKey);
+    if (!pending) {
+      pending = this.postImage(panel, repoPath, generation, ref, filePath);
+      this.imageResponses.set(readKey, pending);
+      const clear = () => {
+        if (this.imageResponses.get(readKey) === pending) this.imageResponses.delete(readKey);
+      };
+      void pending.then(clear, clear);
+    }
+    await pending;
+    /* SNIPCODE-HOOK end */
+  }
+
+  /* SNIPCODE-HOOK start: Batch D deduplicate image reads */
+  private async postImage(panel: vscode.WebviewPanel, repoPath: string, generation: number, ref: string, filePath: string): Promise<void> {
     const ext = '.' + (filePath.split('.').pop()?.toLowerCase() ?? '');
     const mimeType = MIME_BY_EXT[ext] ?? 'image/png';
     let base64 = '';
     try {
-      if (ref === 'working') {
-        const fullPath = path.join(repoPath, filePath);
-        const relative = path.relative(repoPath, fullPath);
-        if (relative.startsWith('..') || path.isAbsolute(relative)) {
-          throw new Error('Invalid file path');
-        }
-        // Same 50MB cap GitService.getImageBase64 applies on the ref path.
-        if ((await stat(fullPath)).size > 50 * 1024 * 1024) {
-          throw new Error('Image too large');
-        }
-        base64 = (await readFile(fullPath)).toString('base64');
-      } else {
-        base64 = await this.workbench.imageBase64(repoPath, ref, filePath);
-      }
+      base64 = await this.readImageBase64(repoPath, ref, filePath);
     } catch { /* empty base64 → ImageDiff renders its missing-side state */ }
     if (this.panel === panel && this.current?.repoPath === repoPath
       && this.current.file === filePath && this.current.generation === generation) {
       panel.webview.postMessage({ type: 'imageData', payload: { repoPath, generation, ref, path: filePath, base64, mimeType } });
     }
+  }
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: Batch D deduplicate image reads */
+  private async readImageBase64(repoPath: string, ref: string, filePath: string): Promise<string> {
+    if (ref !== 'working') return this.workbench.imageBase64(repoPath, ref, filePath);
+    const fullPath = path.join(repoPath, filePath);
+    const relative = path.relative(repoPath, fullPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid file path');
+    /* SNIPCODE-HOOK start: Batch D bound working-tree image reads */
+    const handle = await open(fullPath, 'r');
+    try {
+      const readLimit = MAX_IMAGE_SIZE + 1;
+      let buffer = Buffer.allocUnsafe(Math.min(64 * 1024, readLimit));
+      let offset = 0;
+      while (offset < readLimit) {
+        if (offset === buffer.length) {
+          const grown = Buffer.allocUnsafe(Math.min(buffer.length * 2, readLimit));
+          buffer.copy(grown, 0, 0, offset);
+          buffer = grown;
+        }
+        const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset > MAX_IMAGE_SIZE) throw new Error('Image too large');
+      return buffer.subarray(0, offset).toString('base64');
+    } finally {
+      await handle.close();
+    }
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
 
@@ -320,6 +387,17 @@ export class DiffPanel {
     const locale = setting === 'auto' ? (vscode.env.language || 'en') : setting;
     panel.webview.postMessage({ type: 'setLocale', payload: { locale } });
   }
+
+  /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+  private contentUri(repoPath: string, file: string, ref: string): vscode.Uri {
+    const uri = vscode.Uri.file(path.join(repoPath, file)).with({
+      scheme: DiffPanel.contentScheme,
+      query: JSON.stringify({ repoPath, file, ref }),
+    });
+    if (ref === '') this.indexContentUris.set(uri.query, uri);
+    return uri;
+  }
+  /* SNIPCODE-HOOK end */
 
   private getHtml(webview: vscode.Webview, assetRoot: vscode.Uri): string {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.js'));
@@ -344,10 +422,17 @@ export class DiffPanel {
   dispose(): void {
     this.contentProvider?.dispose();
     this.contentProvider = undefined;
+    /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
+    this.contentChanged.dispose();
+    this.indexContentUris.clear();
+    /* SNIPCODE-HOOK end */
     this.panel?.dispose();
     this.panel = undefined;
     this.current = undefined;
     this.ready = false;
+    /* SNIPCODE-HOOK start: Batch D deduplicate image reads */
+    this.imageResponses.clear();
+    /* SNIPCODE-HOOK end */
   }
 }
 

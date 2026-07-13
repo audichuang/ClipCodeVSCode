@@ -17,6 +17,9 @@ class DiffStore {
   unstagedDiff = $state<DiffData | null>(null);
   /** Soft error surfaced when a stage/unstage round-trip fails. */
   error = $state<string | null>(null);
+  /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+  loading = $state(false);
+  /* SNIPCODE-HOOK end */
   /** True while a stage/unstage request is in flight. Gates further clicks on
    *  BOTH sections so a second click can't race the first: applying re-parses the
    *  diff and shifts every later hunk/line index, so a click before the fresh
@@ -42,6 +45,9 @@ class DiffStore {
     this.stagedDiff = null;
     this.unstagedDiff = null;
     this.error = null;
+    /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+    this.loading = false;
+    /* SNIPCODE-HOOK end */
     this.busy = false;
     /* SNIPCODE-HOOK start: Batch B stage operation correlation */
     this.operationId = null;
@@ -49,6 +55,22 @@ class DiffStore {
   }
 
   /* SNIPCODE-HOOK start: Batch B image request identity */
+  /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+  beginLoad(repoPath: string, file: string, generation: number, operationId?: string): void {
+    this.repoPath = repoPath;
+    this.file = file;
+    this.generation = generation;
+    this.stagedDiff = null;
+    this.unstagedDiff = null;
+    this.error = null;
+    this.loading = true;
+    if (operationId === undefined) {
+      this.busy = false;
+      this.operationId = null;
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
   setDiffs(repoPath: string, file: string, stagedDiff: DiffData | null, unstagedDiff: DiffData | null, generation = 0): void {
     this.repoPath = repoPath;
     this.file = file;
@@ -56,6 +78,9 @@ class DiffStore {
     this.stagedDiff = stagedDiff;
     this.unstagedDiff = unstagedDiff;
     this.error = null;
+    /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
+    this.loading = false;
+    /* SNIPCODE-HOOK end */
     this.busy = false;
     /* SNIPCODE-HOOK start: Batch B stage operation correlation */
     this.operationId = null;

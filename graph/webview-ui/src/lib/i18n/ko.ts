@@ -655,6 +655,7 @@ export const ko: Record<string, string> = {
   'file.open': '파일 열기',
   'file.openChanges': '변경 내용 열기',
   /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': '변경 내용 불러오는 중',
   'file.noChanges': '변경 없음',
   'file.stageFailed': '작업 실패',
   'file.stageTimeout': '작업이 예상보다 오래 걸립니다 — 완료되면 버튼이 다시 활성화됩니다 (계속 멈춰 있으면 이 탭을 다시 여세요)',
