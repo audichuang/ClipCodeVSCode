@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.39
+
+Hotfix for the 0.3.38 Git features: 26 findings from four independent
+adversarial reviews, hardened through three further cross-model review rounds.
+
+- **Staging safety.** Partially staging a file whose path Git C-quotes can no
+  longer corrupt the index entry; staging, unstaging, and commit-reverse now
+  round-trip non-UTF-8 file bytes exactly; mixed line-ending files keep each
+  side's end-of-file state. Every hunk/line mutation is guarded by a content
+  fingerprint of the rendered diff — a stale view is rejected and the panel
+  re-renders itself instead of dead-ending.
+- **Multi-repo commit.** Mixed tree selections mutate only the clicked repo
+  and side, with a notice for skipped items; an unreadable repo you unchecked
+  no longer blocks committing the others; the commit honours the checkbox
+  state as of the click; amend stays gated to exactly one staged repo.
+- **Diff tab.** Side-by-side view aligns replaced lines face-to-face instead
+  of diagonally; switching files can no longer show the previous file's
+  highlighted source; word-level diff of huge rewrite blocks degrades
+  gracefully instead of freezing the panel; navigation shows a loading state
+  while same-file refreshes keep the current body; stage/unstage replies are
+  strictly correlated, so a late or duplicate reply cannot unlock or
+  overwrite a newer operation.
+- **Inline blame.** Hover links are restricted to the reveal-commit command;
+  the per-editor toggle survives tab switches and resets on tab close (even
+  when the document stays open in another split); superseded `git blame`
+  processes are cancelled; the five age buckets use five distinct colors;
+  blame re-renders on HEAD changes, in every split pane, and retries once the
+  built-in Git extension activates.
+
 ## 0.3.38
 
 - **Snipcode Git commit workbench.** A dedicated Activity Bar view for multi-repo
