@@ -1,111 +1,132 @@
-# AGENTS.md — git-graph-plus (vendored)
+# AGENTS.md — git-graph-plus (vendored inside Snipcode)
 
-> **Vendored sub-project.** This is a copy of git-graph-plus bundled inside the
-> Snipcode (`clipcode-vscode`) extension. For the host extension and how this
-> folder is bundled, see `../AGENTS.md`. This file documents the graph webview
-> itself. Single source of truth for this folder — `CLAUDE.md` here is just an
-> `@AGENTS.md` import; edit this file only. (Upstream ships these notes as
-> `CLAUDE.md`; on an upstream re-sync, port doc changes into this file.)
+> **Vendored sub-project**, not a standalone install. Bundled into Snipcode
+> (`clipcode-vscode`); host wiring and marketplace release live in `../AGENTS.md`.
+> This file is the single source of truth for **this folder** — `CLAUDE.md` is
+> just `@AGENTS.md`. (Upstream ships notes as `CLAUDE.md`; on re-sync, port doc
+> changes **into this file**.)
 
-## Project Overview
+## What this folder is
 
-Git Graph Plus is a VS Code extension that provides a full-featured Git GUI — commit graph visualization, branch/tag/stash/worktree management, diff viewer, and more. It uses a **two-process architecture**: a Node.js extension host (backend) and a Svelte 5 webview (frontend).
+Upstream **Git Graph Plus**: commit graph, branch/tag/stash/worktree management,
+and related git GUI — Node extension host + **Svelte 5** webview.
 
-## Build & Development Commands
+**Snipcode adds on top of that** (do **not** re-delegate these to built-in SCM;
+do **not** reintroduce `CommitWorkbenchViewProvider` / native `SnipcodeScmManager`
+without a design decision — those are dead paths that only remain in old plans):
+
+| Feature | Live path |
+|---|---|
+| Multi-repo **Changes** tree (real stage/unstage/commit) | **Owner:** `src/tree/changes-workbench.ts` (+ `build-change-tree.ts`, `changes-tree.ts`). Ops: `GitService.stagePaths` / `unstagePaths` / `commitIndex` / `stageHunks` / `unstageHunks` / `stageLines` / `unstageLines` |
+| **Commit** message box (one shared message across repos) | `src/tree/commit-box-view.ts` (`CommitBoxViewProvider`) → `workbench.js` → `ChangesWorkbench.commit()` |
+| Full-width **Diff** tab (unified staged+unstaged, hunk/line stage, word-diff) | `src/panels/DiffPanel.ts` → `diff.js` |
+| Fetch / Pull / Push all repos + ↓↑ badges | `ChangesWorkbench.fetchAll` / `pullAll` / `pushAll` + root `package.json` `view/title` menus when `view == snipcode.changes`; badges from `GitService.aheadBehind` on tree repo nodes — **not** the graph webview `Toolbar.svelte` |
+| PR compare tab | `webview-ui/.../pr/PrView.svelte` + `GitService.commitsBetween` |
+| **Inline blame** | Host `../src/blame/` (not this folder) |
+
+Fence every Snipcode-only edit with `/* SNIPCODE-HOOK start/end */` for upstream re-sync.
+
+## Build & test (from this folder)
+
+Prefer **root** `npm run build` when shipping with Snipcode. Inside `graph/`:
 
 ```bash
-# Install dependencies (both root and webview-ui)
-npm install && cd webview-ui && npm install && cd ..
-
-# Build everything (extension + webview)
-npm run build
-
-# Development mode (watches both extension and webview)
-npm run dev
-
-# Build individually
-npm run build:extension    # esbuild bundles src/extension.ts → dist/extension.js
-npm run build:webview      # vite builds webview-ui → webview-ui/dist
-
-# Type checking (no emit)
-npm run lint               # runs tsc --noEmit on the extension
-
-# Webview type checking
-cd webview-ui && npm run check   # runs svelte-check
-
-# Tests
-npm test                   # vitest run (all: backend + webview projects)
-npm run test:watch         # vitest in watch mode
-npx vitest run --project backend   # only extension-host tests
-npx vitest run --project webview   # only Svelte/webview tests
-npx vitest run src/git/__tests__/git-service.test.ts  # single test file
-
-# Package for marketplace
-npm run package            # vsce package → .vsix file
+npm test                                      # vitest: backend + webview
+npx vitest run --project backend              # extension-host only
+npx vitest run --project webview              # Svelte/webview only
+npx vitest run src/git/__tests__/git-service.test.ts   # single file
+cd webview-ui && npm run check                # svelte-check
 ```
 
-## Architecture
+Standalone `npm run build` / `npm run package` still exist for upstream-style
+dev; Snipcode packaging is always from the **repo root**.
 
-### Extension Host (Backend) — `src/`
-- **`extension.ts`** — Entry point. Registers commands, tree views, file watcher, auto-fetch timer.
-- **`git/git-service.ts`** — Core Git operations (wraps `git` CLI via child_process). This is the central hub; nearly all git commands go through it.
-- **`git/git-parser.ts`** — Parses raw git output (log, diff, branch list, etc.) into typed structures.
-- **`git/git-graph-builder.ts`** — Builds the visual graph layout (rail assignment, merge lines) from parsed commits.
-- **`git/patch-builder.ts`** — Builds patches for reverse-changes (undo file/hunk/line against working tree) and `.patch` export.
-- **`git/git-error-formatter.ts`** — Normalizes raw git stderr into user-facing error messages.
-- **`git/git-binary.ts`** — Holds the resolved path to the `git` executable (module-level, defaults to `'git'` on PATH). `extension.ts` resolves VS Code's `git.path` setting at activation and calls `setGitBinaryPath` so all spawn sites pick it up (matters on Windows portable/MSYS2 installs).
-- **`git/vscode-git-bridge.ts`** — Bridges to the built-in `vscode.git` extension API (only the bits we use) to delegate credential auth on fetch/push.
-- **`git/types.ts`** — Shared TypeScript types for git data structures.
-- **`panels/MainPanel.ts`** — VS Code WebviewPanel host. Routes messages between the webview and GitService.
-- **`utils/message-bus.ts`** — Typed message definitions for Extension ↔ Webview communication (discriminated union types).
-- **`services/file-watcher.ts`** — Watches `.git/` directory for changes and triggers auto-refresh (`file-watcher-helpers.ts` resolves git dirs / classifies paths).
-- **`services/repo-discovery.ts`** — Discovers git repos and submodules in the workspace.
-- **`services/avatar-cache.ts`** — Caches Gravatar avatars for commit authors.
-- **`views/`** — TreeDataProviders for the Activity Bar sidebar (branches, remotes, tags, stashes, worktrees).
+## Roles (not a file tree)
 
-### Webview (Frontend) — `webview-ui/`
-- **Svelte 5** (runes) with Vite, outputs to `webview-ui/dist/`.
-- **`src/App.svelte`** — Root component; routes between Graph, Reflog, and Stats views.
-- **`src/components/graph/`** — CommitGraph, CommitNode, BranchLine — canvas-based graph rendering.
-- **`src/components/commit/`** — CommitDetails panel with diff viewer (uses Shiki for syntax highlighting).
-- **`src/components/modals/`** — Modal dialogs for git operations (create branch, merge, rebase, etc.).
-- **`src/components/layout/`** — Toolbar and BottomPanel layout components.
-- **`src/components/common/`** — Shared UI: context menus, search bar, image diff, stats view, bisect banner.
-- **`src/components/rebase/`** — Interactive rebase UI with drag-to-reorder.
-- **`src/lib/stores/`** — Svelte stores for shared state management.
-- **`src/lib/actions/`** — Svelte `use:` actions (e.g. drag-to-rebase/merge interactions).
-- **`src/lib/i18n/`** — Frontend internationalization (`en.ts`, `ko.ts`, `zh.ts`).
-- **`src/lib/vscode-api.ts`** — Typed wrapper for `acquireVsCodeApi()` messaging.
+| Area | Role |
+|---|---|
+| `src/git/git-service.ts` | Central git CLI hub; almost all ops go through it |
+| `src/git/patch-builder.ts` | Patches for reverse-changes and forward stage/unstage hunks/lines |
+| `src/utils/message-bus.ts` | Graph webview ↔ host message types + **live** `MESSAGE_EFFECTS` gate |
+| `src/panels/MainPanel.ts` | Commit-graph WebviewPanel; message router + mutation transactions |
+| `src/panels/DiffPanel.ts` | Snipcode Diff tab (classic `diff.js` bundle) |
+| `src/tree/*` | **Live** Snipcode Git: Changes TreeView + `CommitBoxViewProvider` |
+| `src/workbench/*` | **Mostly orphaned B-2a leftovers** (`getWorkbenchStatus` / `commitAcrossRepos` / `WORKBENCH_MESSAGE_EFFECTS`) — only used by their own tests. Live multi-repo commit is `ChangesWorkbench.commit()`. Do not wire new features through these helpers unless resurrecting that protocol. |
+| `webview-ui/` | Svelte 5 UI: graph, modals, PR view, commit-box + diff entries |
+| `l10n/` + `webview-ui/src/lib/i18n/` | Host vs webview strings (`en`/`ko`/`zh`) |
 
-### Extension ↔ Webview Communication
-All communication is via `postMessage` / `onDidReceiveMessage`. Message types are defined in `src/utils/message-bus.ts` (`WebviewMessage` for webview→extension, `ExtensionMessage` for extension→webview). `MainPanel.ts` is the message router that dispatches webview requests to `GitService`.
+Full structure: read the tree or search the code — do not maintain a hand-written inventory here.
 
-> ⚠️ Svelte 5 `$state` values are reactive proxies. Passing one directly to `postMessage` throws `DataCloneError` (silently failing). Spread/snapshot the value (`$state.snapshot(...)` or `{ ...value }`) before posting.
+## Three webview bundles (hard constraint)
 
-> ⚠️ **Repo switch posts only `repoList`** (updating `active`), NOT `repoChanged` — that's file-watcher-only. A view that must re-fetch on repo change should react to `uiStore.activeRepo` (e.g. `$effect`), not listen for `repoChanged`.
+Each bundle **must be self-contained** (no shared chunk, no top-level `import`).
+Hosts load them as **classic** `<script nonce src>` (CSP `script-src 'nonce-…'`,
+**not** `type="module"`). A top-level `import` → parse fail → blank panel →
+handshake timeout (`sent no message within 15000ms`).
 
-> ⚠️ **Mutating-op refresh order:** handlers post `operationComplete` BEFORE `await refreshAll()`; the graph repaints only on `fullRefresh` (full scope) / `logData` (status scope). Webview state meaning "op done + graph updated" must key off `fullRefresh`/`logData` (+ `error`/`operationPaused`/`conflictData`), never the premature `operationComplete`.
+| Bundle | Vite config | Loaded by |
+|---|---|---|
+| `main.js` | `webview-ui/vite.config.ts` | `MainPanel` (graph) |
+| `workbench.js` | `vite.workbench.config.ts` (`inlineDynamicImports`) | `CommitBoxViewProvider` |
+| `diff.js` | `vite.diff.config.ts` | `DiffPanel` |
 
-> ⚠️ **Request→response waits can fail or vanish.** On handler error the host posts `{type:'error', payload:{message, source:<request type>}}` — and some read handlers silently drop the response when the active repo switched mid-request. Any webview code that posts a request and waits for a specific reply MUST also handle the matching `error` (check `payload.source`) and bound the wait with a timeout, or its spinner/disabled button hangs forever (the squash-modal stuck-forever bug family). Correlate reused reply types by echoing a key (`base`, `requestId`) — a late reply from a previously open modal must not populate the wrong consumer.
+`webview-ui`'s `build` runs these **three single-entry** builds back-to-back.
+**Do not** merge into one multi-entry Vite build (shared Svelte runtime chunk →
+all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
+`.js`/`.css` pairs exist.
 
-### Internationalization
-- Extension strings: `l10n/bundle.l10n.json` (English), `l10n/bundle.l10n.ko.json` (Korean), `l10n/bundle.l10n.zh-cn.json` (Chinese Simplified), using VS Code's `vscode.l10n.t()`.
-- Webview strings: `webview-ui/src/lib/i18n/` — `en.ts`, `ko.ts`, `zh.ts`.
-- Git terms (commit, merge, rebase, push, pull, fetch) are intentionally left untranslated.
+## Key conventions (踩雷)
 
-## Key Conventions
+- **`git/` modules stay free of `vscode` imports** so GitService/parsers stay
+  unit-testable against real git. VS Code-aware bits live in `extension.ts` /
+  `panels/` / bridges (`vscode-git-bridge.ts`, `setGitBinaryPath`).
+- **`SequenceGuard`** (`utils/sequence-guard.ts`): `issue()` before async work;
+  apply results only if `isCurrent()` — stops late clicks overwriting newer UI.
+- **Two lock layers (do not confuse them):**
+  1. **`GitService.withMutationLock`** — per-command **and** per-`GitService`
+     instance. `exec()` routes worktree/index mutations through it;
+     network-only `fetch`/`push` stay unlocked (`pull` is locked — it can
+     merge/rebase). Raw `spawn` that mutates (e.g. interactive rebase) must
+     take the lock and `clearReadCache()` itself.
+  2. **`runExclusive(repoPath)`** (`services/mutation-coordinator.ts`) —
+     module-level, path-keyed. Used by **Changes/Diff** staging so two
+     panels cannot race the same repo via different `GitService` instances.
+     **MainPanel graph mutations do not call `runExclusive`** — they rely on
+     instance lock + the MESSAGE_EFFECTS transaction below.
+- **Repo-switch transaction:** `MainPanel.handleMessage` runs mutating graph
+  messages as one transaction — a repo switch waits until the transaction
+  (including terminal refresh/error handling) finishes, or later steps hit the
+  wrong `gitService`. Classification is **`MESSAGE_EFFECTS`** in
+  `message-bus.ts`, exhaustive over `WebviewMessage['type']` — **a new type
+  without a class is a compile error**. That is the **live** gate.
+  `WORKBENCH_MESSAGE_EFFECTS` in `src/workbench/workbench-messages.ts` is the
+  same technique for a **legacy** workbench protocol; the live commit box does
+  **not** consult it (it only handles `workbenchCommit` → `ChangesWorkbench.commit`).
+- **Svelte 5 `$state` is a proxy** — never `postMessage` it raw (`DataCloneError`,
+  often silent). Use `$state.snapshot(...)` or a plain copy.
+- **Repo switch posts only `repoList`** (updates `active`), **not** `repoChanged`
+  (file-watcher-only). Views that re-fetch on repo change should watch
+  `uiStore.activeRepo`, not listen for `repoChanged`.
+- **Mutating-op refresh order:** handlers post `operationComplete` **before**
+  `await refreshAll()`; the graph repaints on `fullRefresh` / `logData`. UI that
+  means “op done **and** graph updated” must key off those (plus
+  `error`/`operationPaused`/`conflictData`), never bare `operationComplete`.
+- **Request→response can fail or vanish.** On handler error the host posts
+  `{type:'error', payload:{message, source:<request type>}}`; some reads drop
+  the reply if the active repo switched mid-request. Waiters must handle
+  matching `error` (`payload.source`) **and** a timeout, or spinners hang
+  forever (squash-modal family). Correlate reused reply types with a key
+  (`base`, `requestId`).
+- Settings namespace: `gitGraphPlus.*` via `utils/config.ts`. Git terms
+  (commit/merge/rebase/push/pull/fetch) stay untranslated by design.
+- **Vitest** (`vitest.config.mts`): `backend` (real git CLI; integration under
+  `src/git/__tests__/integration/`, 30s timeout) + `webview` (happy-dom).
+  Deterministic race tests use `git-shim.ts` via `setGitBinaryPath()` — restore
+  in `afterEach`; POSIX-only; don't run shim suites concurrent with other
+  real-git suites.
 
-- Extension is bundled with **esbuild** (CJS, Node target). Webview is bundled with **Vite** (ESM, browser target).
-- **Each webview bundle MUST be self-contained (no shared chunk, no top-level `import`).** Both `MainPanel` and `CommitWorkbenchViewProvider` load their bundle as a **classic** `<script nonce src>` (CSP `script-src 'nonce-…'`, NOT `type="module"`) — a top-level `import` from a shared chunk makes the classic script fail to parse, so the webview boots blank and the handshake times out (`sent no message within 15000ms`). This is why the graph (`vite.config.ts`) and the Commit Workbench (`vite.workbench.config.ts`, `inlineDynamicImports`) have **separate single-entry builds** run back-to-back by `webview-ui`'s `build` script — do NOT merge them into one multi-entry vite build (multi-entry splits shared Svelte runtime into a chunk both entries statically import → both boot blank).
-- `vscode` is an external dependency (not bundled) — provided by the VS Code runtime.
-- **`git/` modules stay free of any `vscode` import** so GitService and parsers remain unit-testable against the real git CLI. Anything vscode-aware (settings, the built-in git extension API) lives in `extension.ts`/`panels/` or a dedicated bridge (`vscode-git-bridge.ts`) and is injected in (e.g. `setGitBinaryPath`).
-- **Guard rapid async with `utils/sequence-guard.ts`** (`SequenceGuard`): `issue()` a ticket before a request, and only apply the result if the ticket `isCurrent()` after the await — prevents a late-finishing older request (rapid clicks on different commits/files) from overwriting a newer one.
-- **Mutating git commands are serialized** through `GitService.withMutationLock` — `exec()` routes worktree/index mutations through it (network-only `fetch`/`push` stay unlocked so a slow auto-fetch never queues a user action). A raw `spawn` that mutates the repo (e.g. `interactiveRebase`) must join the lock itself and `clearReadCache()` when done — bypassing `exec()` otherwise leaves stale read caches and `.git/index.lock` races. The lock is per-command AND per-GitService-instance; on top of it, `MainPanel.handleMessage` runs every mutating webview message as a handler-level **transaction** — a repo switch defers until the transaction (terminal refresh and error handling included) completes, otherwise its later steps would run against the newly-swapped `this.gitService`. The mutation/read classification lives in `MESSAGE_EFFECTS` (`utils/message-bus.ts`), typed exhaustively over `WebviewMessage['type']` — **a new message type without a classification is a compile error**, so it cannot silently skip the gate.
-- User-facing settings live under the `gitGraphPlus.*` namespace and are read via `utils/config.ts` (e.g. `timeout` seconds → `GitService.setDefaultTimeout`, initial/load-more commit counts). Add new settings to `package.json` `contributes.configuration` and read them through there.
-- The extension activates on `onStartupFinished`; on activation it discovers repos in the workspace and is a no-op when none exist.
-- Tests use **Vitest**, split into two projects in `vitest.config.mts`:
-  - `backend` — extension-host code (`src/**/*.test.ts`), node env, runs against the **real `git` CLI**. Integration tests in `src/git/__tests__/integration/` spawn real git/git-flow/git-lfs and use a 30s timeout.
-  - Deterministic real-git **race** tests: inject `src/git/__tests__/integration/git-shim.ts` via `setGitBinaryPath()` — it blocks one matching git subcommand until released, so an interleaving (e.g. repo switch mid-stash) reproduces exactly instead of by luck. POSIX-only; the binary path is module-global, so restore it in `afterEach` and don't run shim suites concurrently with other real-git suites.
-  - `webview` — Svelte components/stores (`webview-ui/src/**/*.test.ts`), happy-dom env.
-  - `npm test` runs both. Coverage is uploaded to Codecov; vscode-bound modules (`extension.ts`, `panels/`, canvas/shiki webview code) are excluded from the % — see the comments in `vitest.config.mts`.
-- Staging, committing, and inline blame are intentionally delegated to VS Code's built-in Source Control; Git Graph+ focuses on everything else.
+## Permissions
+
+Release / marketplace / workflow edits: follow **`../AGENTS.md`**. Visual
+changes under `webview-ui/**` should go through the work-root
+`verify-webview-ui` skill before claiming the UI is done.

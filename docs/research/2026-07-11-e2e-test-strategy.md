@@ -1,18 +1,25 @@
 # 端到端測試策略：發現真實問題的完整驗證
 
 Date: 2026-07-11
-Status: Strategy agreed（Claude 與 Codex/GPT-5.6 兩輪辯論收斂）; not implemented
+Status: Strategy agreed（Claude 與 Codex/GPT-5.6 兩輪辯論收斂）. **§3 matrix is still the
+aspirational plan; §1 inventory below is a historical snapshot and is NOT
+authoritative for “what green means today”** (boot handshake shipped in 0.3.36;
+e2e now also covers graph copy-full-source + UNCOMMITTED + blame smoke — see
+repo `AGENTS.md` “Build / test”).
 Companion: [2026-07-10-vscode-git-operations-audit.md](2026-07-10-vscode-git-operations-audit.md)（風險與驗收來源）
 
 ## 1. 現有四層閘門實際保證了什麼
 
-`npm run build` + `npm test` + graph vitest + `npm run test:e2e` 全綠，目前保證：
+> ⚠ **Stale inventory (2026-07-11).** Treat as historical baseline only. Live
+> guarantees: repo-root `AGENTS.md`. Live e2e sources: `test-e2e/suite/`.
+
+`npm run build` + `npm test` + graph vitest + `npm run test:e2e` 全綠，**當時**保證：
 
 - host 與 vendored graph 能 bundle、webview assets 能產出並複製到 `dist/`。
 - root unit（135）與 graph backend（真 Git fixture）／webview（happy-dom）測試通過。
 - extension 能在真實 VS Code Electron 中 activation、建立 graph panel，且 selected-file copy → 真實 clipboard → restore 到磁碟的**單一 happy path**成立。
 
-**不**保證：graph webview 真正 boot（JS 404／CSP／bundle error 仍全綠）、使用者操作到 host 的 message bridge、任何 Git mutation、multi-repo／repo switch、packaged VSIX、以及 audit P1-1～P1-7 的驗收。現有 e2e 本質是 smoke test 加一條 copy/restore round-trip。
+**當時不**保證：graph webview 真正 boot（JS 404／CSP／bundle error 仍全綠）、使用者操作到 host 的 message bridge、任何 Git mutation、multi-repo／repo switch、packaged VSIX、以及 audit P1-1～P1-7 的驗收。現有 e2e 本質是 smoke test 加一條 copy/restore round-trip。
 
 已知兩個「測試鎖住錯誤行為」案例（詳見 audit 文件 P1-2／P1-3 驗收註記）：`MainPanel.test.ts#L337` 期待 pull 後無條件 pop、`PrView.test.ts#L125/L204` 期待 open/copy 送 symbolic ref——實作對應票時必須同步反轉。
 
