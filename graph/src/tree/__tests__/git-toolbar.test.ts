@@ -6,6 +6,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const H = vi.hoisted(() => ({
   repos: [] as Array<{ path: string }>,
   svcs: new Map<string, unknown>(),
+  /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
+  commands: new Map<string, (...args: unknown[]) => unknown>(),
+  /* SNIPCODE-HOOK end */
 }));
 
 vi.mock('vscode', () => {
@@ -35,7 +38,15 @@ vi.mock('vscode', () => {
       showTextDocument: vi.fn(),
     },
     workspace: { workspaceFolders: [{ uri: { fsPath: '/ws' } }] },
-    commands: { executeCommand: vi.fn(), registerCommand: vi.fn(() => ({ dispose() {} })) },
+    commands: {
+      executeCommand: vi.fn(),
+      /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
+      registerCommand: vi.fn((id: string, fn: (...args: unknown[]) => unknown) => {
+        H.commands.set(id, fn);
+        return { dispose() {} };
+      }),
+      /* SNIPCODE-HOOK end */
+    },
     l10n: { t: (s: string) => s },
   };
 });
@@ -49,7 +60,7 @@ vi.mock('../../utils/config', () => ({ readTimeoutMs: () => 30_000 }));
 import * as vscode from 'vscode';
 import { ChangesWorkbench } from '../changes-workbench';
 import { ChangesTreeProvider } from '../changes-tree';
-import type { RepoStatus } from '../build-change-tree';
+import type { FileNode, RepoStatus } from '../build-change-tree';
 
 function mkSvc(over: Record<string, unknown> = {}) {
   return {
@@ -59,6 +70,10 @@ function mkSvc(over: Record<string, unknown> = {}) {
     fetch: vi.fn(async () => ''),
     pull: vi.fn(async () => ''),
     pushCurrentBranch: vi.fn(async () => ({ pushed: true })),
+    /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
+    stagePaths: vi.fn(async () => {}),
+    unstagePaths: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK end */
     setExtraEnv: vi.fn(),
     setAuthRetryHandler: vi.fn(),
     setDefaultTimeout: vi.fn(),
@@ -75,7 +90,39 @@ beforeEach(() => {
   vi.clearAllMocks();
   H.repos = [];
   H.svcs = new Map();
+  /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
+  H.commands.clear();
+  /* SNIPCODE-HOOK end */
 });
+
+/* SNIPCODE-HOOK start: Batch B command-selection routing regression */
+describe('ChangesWorkbench stage/unstage selection routing', () => {
+  const file = (repoPath: string, path: string, group: 'staged' | 'unstaged'): FileNode => ({
+    kind: 'file', repoPath, path, status: 'M', group,
+  });
+
+  it('mutates only the clicked repo and side from a mixed tree selection', async () => {
+    const a = mkSvc(); const b = mkSvc();
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const aUnstaged = file('/a', 'a-worktree.ts', 'unstaged');
+    const aStaged = file('/a', 'a-index.ts', 'staged');
+    const bStaged = file('/b', 'b-index.ts', 'staged');
+    await H.commands.get('snipcode.git.stage')!(aUnstaged, [aUnstaged, aStaged, bStaged]);
+
+    expect(a.stagePaths).toHaveBeenCalledWith([aUnstaged]);
+    expect(b.stagePaths).not.toHaveBeenCalled();
+
+    const bUnstaged = file('/b', 'b-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.unstage')!(aStaged, [aStaged, aUnstaged, bUnstaged]);
+
+    expect(a.unstagePaths).toHaveBeenCalledWith([aStaged]);
+    expect(b.unstagePaths).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */
 
 describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
   it('fetchAll fetches every repo with prune and reports success in the status bar', async () => {

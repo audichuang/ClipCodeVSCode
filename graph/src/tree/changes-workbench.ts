@@ -166,36 +166,40 @@ export class ChangesWorkbench implements vscode.Disposable {
   }
 
   /** Group the selected file nodes by repo and run `fn` per repo under its lock. */
-  private async byRepo(nodes: FileNode[], fn: (svc: GitService, paths: string[]) => Promise<void>): Promise<void> {
-    const byRepo = new Map<string, string[]>();
+  /* SNIPCODE-HOOK start: Batch B retain rename source path */
+  private async byRepo(nodes: FileNode[], fn: (svc: GitService, changes: FileNode[]) => Promise<void>): Promise<void> {
+    const byRepo = new Map<string, FileNode[]>();
     for (const n of nodes) {
       const list = byRepo.get(n.repoPath) ?? [];
-      list.push(n.path);
+      list.push(n);
       byRepo.set(n.repoPath, list);
     }
-    for (const [repoPath, paths] of byRepo) {
-      await runExclusive(repoPath, () => fn(this.svcFor(repoPath), paths));
+    for (const [repoPath, changes] of byRepo) {
+      await runExclusive(repoPath, () => fn(this.svcFor(repoPath), changes));
     }
     await this.refresh();
   }
 
   private stage(nodes: FileNode[]): Promise<void> {
-    return this.byRepo(nodes, (svc, paths) => svc.stagePaths(paths));
+    return this.byRepo(nodes, (svc, changes) => svc.stagePaths(changes));
   }
   private unstage(nodes: FileNode[]): Promise<void> {
-    return this.byRepo(nodes, (svc, paths) => svc.unstagePaths(paths));
+    return this.byRepo(nodes, (svc, changes) => svc.unstagePaths(changes));
   }
+  /* SNIPCODE-HOOK end */
 
   /** Stage every file of one repo (the repo node under Unstaged). */
   private async stageRepo(node: RepoNode): Promise<void> {
-    const paths = node.files.map(f => f.path);
-    if (paths.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(paths));
+    /* SNIPCODE-HOOK start: Batch B retain rename source path */
+    if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(node.files));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
   }
   /** Unstage every file of one repo (the repo node under Staged). */
   private async unstageRepo(node: RepoNode): Promise<void> {
-    const paths = node.files.map(f => f.path);
-    if (paths.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths(paths));
+    /* SNIPCODE-HOOK start: Batch B retain rename source path */
+    if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths(node.files));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
   }
 
@@ -224,13 +228,17 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  so a file created since the last paint is not missed). */
   private async stageAll(): Promise<void> {
     for (const r of await this.loadStatus()) {
-      if (r.unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(r.unstaged.map(e => e.path)));
+      /* SNIPCODE-HOOK start: Batch B retain rename source path */
+      if (r.unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(r.unstaged));
+      /* SNIPCODE-HOOK end */
     }
     await this.refresh();
   }
   private async unstageAll(): Promise<void> {
     for (const r of await this.loadStatus()) {
-      if (r.staged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).unstagePaths(r.staged.map(e => e.path)));
+      /* SNIPCODE-HOOK start: Batch B retain rename source path */
+      if (r.staged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).unstagePaths(r.staged));
+      /* SNIPCODE-HOOK end */
     }
     await this.refresh();
   }
@@ -292,36 +300,38 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Stage the selected hunks of one unstaged file, then refresh the tree and
    *  re-render the file's (now smaller) unstaged diff in the panel. */
-  async stageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices));
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint));
     await this.refresh();
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
-    this.diffPanel?.refreshIfCurrent(repoPath, file);
+    this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
    *  file's remaining staged diff. */
-  async unstageHunks(repoPath: string, file: string, hunkIndices: number[]): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices));
+  async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file);
+    this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
   /** Stage the selected changed lines of one hunk of an unstaged file. */
-  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices));
+  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file);
+    this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /** Unstage the selected changed lines of one hunk of a staged file. */
-  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices));
+  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint));
     await this.refresh();
-    this.diffPanel?.refreshIfCurrent(repoPath, file);
+    this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   /** Multi-select which repos the Changes tree shows. Picking all (or none)
@@ -365,8 +375,15 @@ export class ChangesWorkbench implements vscode.Disposable {
     // inline button, which always acts on its single item).
     const sel = <T>(n: unknown, ns: unknown): T[] =>
       (Array.isArray(ns) && ns.length ? (ns as T[]) : [n as T]);
-    reg('snipcode.git.stage', (n, ns) => this.stage(sel<FileNode>(n, ns)));
-    reg('snipcode.git.unstage', (n, ns) => this.unstage(sel<FileNode>(n, ns)));
+    /* SNIPCODE-HOOK start: Batch B constrain mixed tree selections */
+    const sameGroup = (n: unknown, ns: unknown): FileNode[] => {
+      const clicked = n as FileNode;
+      return sel<FileNode>(n, ns).filter(item =>
+        item.repoPath === clicked.repoPath && item.group === clicked.group);
+    };
+    reg('snipcode.git.stage', (n, ns) => this.stage(sameGroup(n, ns)));
+    reg('snipcode.git.unstage', (n, ns) => this.unstage(sameGroup(n, ns)));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
     reg('snipcode.git.stageAll', () => this.stageAll());

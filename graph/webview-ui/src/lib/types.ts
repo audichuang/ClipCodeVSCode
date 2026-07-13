@@ -137,6 +137,9 @@ export interface DiffData {
   hunks: DiffHunk[];
   isBinary: boolean;
   isImage: boolean;
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  fingerprint?: string;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface DiffHunk {

@@ -54,7 +54,8 @@
       </div>
     </div>
     <div class="sections">
-      {#each sections as section (section.side)}
+      <!-- SNIPCODE-HOOK start: Batch B image component identity -->
+      {#each sections as section (`${store.repoPath}\u0000${store.generation}\u0000${section.side}`)}
         <section class="diff-section">
           <!-- A row, not one button: the open-diff action must not toggle collapse
                (and a button can't nest inside a button). -->
@@ -84,12 +85,15 @@
               diffMode={mode}
               hideModeToggle
               stageBusy={store.busy}
+              imageRepoPath={store.repoPath}
+              imageGeneration={store.generation}
               onStageHunk={({ hunkIndex }) => postStageHunk(section.side, hunkIndex)}
               onStageLines={({ hunkIndex, lineIndices }) => postStageLines(section.side, hunkIndex, lineIndices)}
             />
           {/if}
         </section>
       {/each}
+      <!-- SNIPCODE-HOOK end -->
     </div>
     {/if}
   {/if}

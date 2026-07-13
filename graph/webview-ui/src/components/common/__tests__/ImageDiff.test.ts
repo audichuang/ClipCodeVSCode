@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import ImageDiff from '../ImageDiff.svelte';
 
-interface ImagePayload { ref: string; path: string; base64: string; mimeType: string; }
+interface ImagePayload {
+  ref: string; path: string; base64: string; mimeType: string;
+  /* SNIPCODE-HOOK start: Batch B image request identity regression */
+  repoPath?: string; generation?: number;
+  /* SNIPCODE-HOOK end */
+}
 
 function deliverImage(p: ImagePayload) {
   window.dispatchEvent(new MessageEvent('message', {
@@ -105,6 +110,30 @@ describe('ImageDiff — image rendering', () => {
     await new Promise(r => setTimeout(r, 30));
     expect(container.querySelectorAll('.no-image').length).toBe(2);
   });
+
+  /* SNIPCODE-HOOK start: Batch B image request identity regression */
+  it('switching repos for the same path fetches and accepts only the new generation', async () => {
+    const view = render(ImageDiff, {
+      file: 'same.png', staged: false, repoPath: '/a', generation: 1,
+    } as any);
+    await waitFor(() => expect(globalThis.__postedMessages.length).toBeGreaterThanOrEqual(2));
+
+    await view.rerender({ file: 'same.png', staged: false, repoPath: '/b', generation: 2 } as any);
+    await waitFor(() => {
+      const requests = globalThis.__postedMessages.map(m => m.data as { type: string; payload: ImagePayload });
+      expect(requests.some(m => m.type === 'getImageAtRef'
+        && m.payload.repoPath === '/b' && m.payload.generation === 2)).toBe(true);
+    });
+
+    deliverImage({ ref: ':0', path: 'same.png', repoPath: '/a', generation: 1, base64: 'b2xk', mimeType: 'image/png' });
+    await new Promise(r => setTimeout(r, 0));
+    expect(view.container.querySelectorAll('.no-image').length).toBe(2);
+
+    deliverImage({ ref: ':0', path: 'same.png', repoPath: '/b', generation: 2, base64: 'bmV3', mimeType: 'image/png' });
+    await waitFor(() => expect(view.container.querySelectorAll('.no-image').length).toBe(1));
+    expect(view.container.querySelector<HTMLImageElement>('.diff-image')?.src).toContain('bmV3');
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('ImageDiff — swipe interaction', () => {

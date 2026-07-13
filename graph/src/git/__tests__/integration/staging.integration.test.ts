@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+/* SNIPCODE-HOOK start: Batch B rename staging regression */
+import { renameSync } from 'node:fs';
+import { join } from 'node:path';
+/* SNIPCODE-HOOK end */
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
 
@@ -41,6 +45,20 @@ describe('GitService integration — real staging (stagePaths/unstagePaths/commi
     expect(diff.staged.map(e => e.path)).not.toContain('a.txt');
     expect(diff.unstaged.map(e => e.path)).toContain('a.txt');
   });
+
+  /* SNIPCODE-HOOK start: Batch B rename staging regression */
+  it('threads both paths through stagePaths and unstagePaths for a rename', async () => {
+    renameSync(join(repo.path, 'a.txt'), join(repo.path, 'renamed.txt'));
+    const rename = { path: 'renamed.txt', oldPath: 'a.txt' };
+
+    await svc.stagePaths([rename] as unknown as string[]);
+    const staged = await svc.getUncommittedDiff();
+    expect(staged.staged).toEqual([{ path: 'renamed.txt', oldPath: 'a.txt', status: 'R' }]);
+
+    await svc.unstagePaths(staged.staged as unknown as string[]);
+    expect(runGit(repo.path, ['diff', '--cached', '--name-status'])).toBe('');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('MM: a file staged then edited again shows in BOTH groups', async () => {
     writeFile(repo.path, 'a.txt', 'a2\n');

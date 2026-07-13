@@ -70,10 +70,16 @@
        in flight (index shifts once the diff re-parses). Omitted by every other
        caller (CommitDetails, PrView), so `undefined` there never disables. */
     stageBusy?: boolean;
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    imageRepoPath?: string;
+    imageGeneration?: number;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy }: Props = $props();
+  /* SNIPCODE-HOOK start: Batch B image request identity */
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy, imageRepoPath, imageGeneration }: Props = $props();
+  /* SNIPCODE-HOOK end */
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -484,11 +490,15 @@
     {/if}
     {#if diff.isBinary && diff.isImage}
       {#if commitHash && commitHash !== 'UNCOMMITTED'}
-        <ImageDiff file={diff.file} staged={false} commitHash={commitHash} />
+        <!-- SNIPCODE-HOOK start: Batch B image request identity -->
+        <ImageDiff file={diff.file} staged={false} commitHash={commitHash} repoPath={imageRepoPath} generation={imageGeneration} />
+        <!-- SNIPCODE-HOOK end -->
       {:else}
         <!-- UNCOMMITTED: no real commit to diff against; compare index/working
              trees based on which tab (staged vs unstaged) the file is in. -->
-        <ImageDiff file={diff.file} {staged} />
+        <!-- SNIPCODE-HOOK start: Batch B image request identity -->
+        <ImageDiff file={diff.file} {staged} repoPath={imageRepoPath} generation={imageGeneration} />
+        <!-- SNIPCODE-HOOK end -->
       {/if}
     {:else if diff.isBinary}
       <div class="diff-empty">{t('details.binaryFile')}</div>

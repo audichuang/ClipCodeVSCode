@@ -2,7 +2,9 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
+/* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+import { createHash, randomUUID } from 'crypto';
+/* SNIPCODE-HOOK end */
 import { bufferStream, BufferOverflowError } from '../utils/buffer-stream';
 import { getGitBinaryPath } from './git-binary';
 import { resolveGitDirs } from '../services/file-watcher-helpers';
@@ -40,6 +42,11 @@ interface ExecOptions {
   maxBufferBytes?: number;
   encoding?: 'buffer';
 }
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: Batch B rename staging paths */
+type ChangePath = string | { path: string; oldPath?: string };
+type StatusChange = { path: string; status: string; oldPath?: string };
 /* SNIPCODE-HOOK end */
 
 /**
@@ -202,9 +209,16 @@ export class GitService {
         const x = line[0] ?? ' ';
         const y = line[1] ?? ' ';
         let path = line.slice(3);
-        if (path.includes(' -> ')) path = path.split(' -> ')[1];
+        /* SNIPCODE-HOOK start: Batch B retain rename source path */
+        let oldPath: string | undefined;
+        if (path.includes(' -> ')) {
+          const parts = path.split(' -> ');
+          oldPath = parts[0].trim();
+          path = parts[parts.length - 1];
+        }
         path = path.trim();
-        return { x, y, path };
+        return { x, y, path, ...(oldPath ? { oldPath } : {}) };
+        /* SNIPCODE-HOOK end */
       });
     }
     const fields = raw.split('\0');
@@ -924,10 +938,11 @@ export class GitService {
     return raw.trim().length > 0;
   }
 
-  async getUncommittedDiff(): Promise<{ staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> }> {
+  /* SNIPCODE-HOOK start: Batch B retain rename source path */
+  async getUncommittedDiff(): Promise<{ staged: StatusChange[]; unstaged: StatusChange[] }> {
     const raw = await this.exec(['status', '--porcelain', '-z', '-uall']);
-    const staged: Array<{ path: string; status: string }> = [];
-    const unstaged: Array<{ path: string; status: string }> = [];
+    const staged: StatusChange[] = [];
+    const unstaged: StatusChange[] = [];
     for (const entry of this.parseStatusPorcelainZ(raw)) {
       const { x, y } = entry;
       let { path } = entry;
@@ -937,12 +952,13 @@ export class GitService {
       // so the UI can show a meaningful label instead of an empty diff.
       const isNestedRepo = x === '?' && y === '?' && path.endsWith('/');
       if (isNestedRepo) path = path.slice(0, -1);
-      if (x !== ' ' && x !== '?') staged.push({ path, status: x });
-      if (y !== ' ' && y !== '?') unstaged.push({ path, status: y });
+      if (x !== ' ' && x !== '?') staged.push({ path, status: x, ...((x === 'R' || x === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
+      if (y !== ' ' && y !== '?') unstaged.push({ path, status: y, ...((y === 'R' || y === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
       if (x === '?' && y === '?') unstaged.push({ path, status: isNestedRepo ? 'N' : 'U' });
     }
     return { staged, unstaged };
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: current-branch ahead/behind vs upstream for the Changes
    *  tree's repo badges (`main ↓3 ↑1`). Read-only; ANY failure (no upstream,
@@ -976,19 +992,52 @@ export class GitService {
   async getUncommittedFileDiff(file: string, staged: boolean): Promise<DiffData | null> {
     this.assertSafePath(file, 'diff');
     if (staged) {
-      const raw = await this.exec(['diff', '--no-color', '--cached', '--', file]);
-      return parseDiff(raw, file)[0] ?? null;
+      /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
+      const raw = await this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' });
+      /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+      return this.parseFingerprintDiff(raw, file);
+      /* SNIPCODE-HOOK end */
+      /* SNIPCODE-HOOK end */
     }
-    const isTracked = await this.exec(['ls-files', '--error-unmatch', '--', file]).then(() => true).catch(() => false);
+    /* SNIPCODE-HOOK start: Batch B surface raw diff failures */
+    const isTracked = await this.isTrackedFile(file);
+    /* SNIPCODE-HOOK end */
     if (!isTracked) {
       // --no-index exits with code 1 when differences found (normal); stdout has the diff
-      const raw = await this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file])
-        .catch(err => { if (err instanceof GitError && err.exitCode === 1) { return err.stdout; } throw err; });
-      return parseDiff(raw, file)[0] ?? null;
+      /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
+      const raw = await this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file], { encoding: 'buffer' })
+        .catch(err => { if (err instanceof GitError && err.exitCode === 1) { return err.stdoutBuffer; } throw err; });
+      /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+      return this.parseFingerprintDiff(raw, file);
+      /* SNIPCODE-HOOK end */
+      /* SNIPCODE-HOOK end */
     }
-    const raw = await this.exec(['diff', '--no-color', '--', file]);
-    return parseDiff(raw, file)[0] ?? null;
+    /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
+    const raw = await this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' });
+    /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+    return this.parseFingerprintDiff(raw, file);
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK end */
   }
+
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  private diffFingerprint(raw: string | Buffer): string {
+    return createHash('sha256').update(raw).digest('hex');
+  }
+
+  private parseFingerprintDiff(raw: string | Buffer, file: string): DiffData | null {
+    const diff = parseDiff(Buffer.isBuffer(raw) ? raw.toString('utf8') : raw, file)[0] ?? null;
+    if (diff) diff.fingerprint = this.diffFingerprint(raw);
+    return diff;
+  }
+
+  private assertDiffFingerprint(raw: Buffer, expected: string): void {
+    if (!expected) throw new Error('missing diff fingerprint; refresh before staging');
+    if (this.diffFingerprint(raw) !== expected) {
+      throw new Error('stale diff; refresh before staging');
+    }
+  }
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   private parseNameStatus(raw: string): Array<{ path: string; status: string; oldPath?: string }> {
@@ -2211,7 +2260,9 @@ export class GitService {
    * Stage the given repo-relative paths into the index (`git add`). No-op on an
    * empty list. Routes through exec() → withMutationLock (add is a mutation).
    */
-  async stagePaths(paths: string[]): Promise<void> {
+  /* SNIPCODE-HOOK start: Batch B rename staging paths */
+  async stagePaths(changes: ChangePath[]): Promise<void> {
+    const paths = this.expandChangePaths(changes);
     if (paths.length === 0) return;
     for (const p of paths) this.assertSafePath(p, 'add');
     await this.exec(['add', '--', ...paths]);
@@ -2223,7 +2274,8 @@ export class GitService {
    * HEAD (no commits yet) there is no tree to reset against, so unstage by
    * dropping the index entries with `git rm --cached`.
    */
-  async unstagePaths(paths: string[]): Promise<void> {
+  async unstagePaths(changes: ChangePath[]): Promise<void> {
+    const paths = this.expandChangePaths(changes);
     if (paths.length === 0) return;
     for (const p of paths) this.assertSafePath(p, 'reset');
     const hasHead = await this.exec(['rev-parse', '--verify', 'HEAD'], { silent: true })
@@ -2235,6 +2287,13 @@ export class GitService {
       await this.exec(['rm', '--cached', '--quiet', '--', ...paths]);
     }
   }
+
+  private expandChangePaths(changes: ChangePath[]): string[] {
+    return [...new Set(changes.flatMap(change => typeof change === 'string'
+      ? [change]
+      : [change.path, ...(change.oldPath ? [change.oldPath] : [])]))];
+  }
+  /* SNIPCODE-HOOK end */
 
   /**
    * Commit whatever is currently staged (`git commit -m`). Throws with a clear
@@ -2317,14 +2376,13 @@ export class GitService {
    */
   private async workingFileDiffRaw(file: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
-    const isTracked = await this.exec(['ls-files', '--error-unmatch', '--', file])
-      .then(() => true)
-      .catch(() => false);
+    /* SNIPCODE-HOOK start: Batch B surface raw diff failures */
+    const isTracked = await this.isTrackedFile(file);
     if (!isTracked) {
       return this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file], { encoding: 'buffer' })
-        .catch(err => (err instanceof GitError && err.exitCode === 1) ? err.stdoutBuffer : Buffer.alloc(0));
+        .catch(err => { if (err instanceof GitError && err.exitCode === 1) return err.stdoutBuffer; throw err; });
     }
-    return this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' }).catch(() => Buffer.alloc(0));
+    return this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' });
   }
 
   /**
@@ -2335,22 +2393,33 @@ export class GitService {
    */
   private async stagedFileDiffRaw(file: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
-    return this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' }).catch(() => Buffer.alloc(0));
+    return this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' });
   }
+
+  private async isTrackedFile(file: string): Promise<boolean> {
+    return this.exec(['ls-files', '--error-unmatch', '--', file])
+      .then(() => true)
+      .catch(err => {
+        if (err instanceof GitError && err.exitCode === 1) return false;
+        throw err;
+      });
+  }
+  /* SNIPCODE-HOOK end */
 
   /**
    * Stage ONLY the selected hunks of a file's unstaged (index→working) diff into
    * the index, leaving the working tree and every other hunk untouched. Reuses
    * buildForwardPatch (hunk-level, v1) on the SAME diff the Diff webview rendered
    * (workingFileDiffRaw == getUncommittedFileDiff(file, false)'s command), then
-   * `git apply --cached`. `hunkIndices` index into that diff's parsed hunk list.
-   * v1 re-fetches the raw here; if the file changed since the webview rendered,
-   * the indices may not line up (accepted limitation — stale fingerprint is v2).
+   * `git apply --cached`. `hunkIndices` index into that diff's parsed hunk list;
+   * the fingerprint rejects a selection if that rendered raw diff changed.
    */
-  async stageHunks(file: string, hunkIndices: number[]): Promise<void> {
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  async stageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
     if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
     // exec routes 'apply' through withMutationLock (it is a mutation); stdin
@@ -2365,10 +2434,11 @@ export class GitService {
    * index (`git apply --cached --reverse`) — the `git reset -p` direction.
    * `hunkIndices` index into getUncommittedFileDiff(file, true)'s hunk list.
    */
-  async unstageHunks(file: string, hunkIndices: number[]): Promise<void> {
+  async unstageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
     if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
     await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
@@ -2381,10 +2451,11 @@ export class GitService {
    * webview rendered (workingFileDiffRaw) and `git apply --cached`s it.
    * `hunkIndex`/`lineIndices` index that diff's parsed hunk/DiffLine list.
    */
-  async stageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+  async stageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
     if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices);
     // exec routes 'apply' through withMutationLock; --cached stages into the index only.
@@ -2397,10 +2468,11 @@ export class GitService {
    * unstageHunks. Builds a narrowed forward patch from the STAGED diff and
    * reverse-applies it to the index (`git apply --cached --reverse`).
    */
-  async unstageLines(file: string, hunkIndex: number, lineIndices: number[]): Promise<void> {
+  async unstageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
     if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     // 'unstage': the raw diff here is HEAD→index, so the current-index baseline
     // is the ADD side, not the DELETE side — see buildForwardPatchLines's
@@ -2408,6 +2480,7 @@ export class GitService {
     const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices, 'unstage');
     await this.exec(['apply', '--cached', '--reverse'], { stdin: patch });
   }
+  /* SNIPCODE-HOOK end */
 
   /**
    * Stage and commit ONLY the selected hunks of the given files, in one atomic
@@ -2464,6 +2537,9 @@ export class GitService {
           if (raw.length === 0) {
             throw new Error(`no working-tree changes to stage for ${path}`);
           }
+          /* SNIPCODE-HOOK start: Batch B commitSelected mode guard */
+          assertHunkStageable(raw.toString('latin1'), path);
+          /* SNIPCODE-HOOK end */
           const patch = buildForwardPatch(raw, hunkIndices);
           // `git apply` reads the patch from stdin when no path argument is given
           // (same as reverseCommitChanges); --cached stages into the index only.

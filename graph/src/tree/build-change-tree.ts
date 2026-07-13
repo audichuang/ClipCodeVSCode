@@ -15,8 +15,10 @@ export interface RepoStatus {
   /** Commits ahead/behind upstream (undefined when there is no upstream). */
   ahead?: number;
   behind?: number;
-  staged: Array<{ path: string; status: string }>;
-  unstaged: Array<{ path: string; status: string }>;
+  /* SNIPCODE-HOOK start: Batch B rename staging paths */
+  staged: Array<{ path: string; status: string; oldPath?: string }>;
+  unstaged: Array<{ path: string; status: string; oldPath?: string }>;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface FileNode {
@@ -24,6 +26,9 @@ export interface FileNode {
   repoPath: string;
   /** Repo-relative path (already the new path for renames). */
   path: string;
+  /* SNIPCODE-HOOK start: Batch B rename staging paths */
+  oldPath?: string;
+  /* SNIPCODE-HOOK end */
   status: string;
   group: ChangeGroup;
 }
@@ -67,6 +72,9 @@ function groupNode(repos: RepoStatus[], group: ChangeGroup): GroupNode {
         kind: 'file',
         repoPath: repo.repoPath,
         path: e.path,
+        /* SNIPCODE-HOOK start: Batch B rename staging paths */
+        oldPath: e.oldPath,
+        /* SNIPCODE-HOOK end */
         status: e.status,
         group,
       })),

@@ -29,10 +29,18 @@ describe('GitService integration — stageLines / unstageLines', () => {
   });
   afterEach(() => repo.cleanup());
 
+  /* SNIPCODE-HOOK start: Batch B rendered fingerprint helper */
+  async function fingerprint(file: string, staged: boolean): Promise<string> {
+    const rendered = await svc.getUncommittedFileDiff(file, staged);
+    expect(rendered?.fingerprint).toBeTruthy();
+    return rendered!.fingerprint!;
+  }
+  /* SNIPCODE-HOOK end */
+
   it('stages only the A→A2 change, leaving B→B2 unstaged', async () => {
     // The hunk parses as: 0 ctx L1, 1 del A, 2 del B, 3 add A2, 4 add B2, 5 ctx L4.
     // Stage just the A→A2 lines (del A at 1, add A2 at 3).
-    await svc.stageLines('f.txt', 0, [1, 3]);
+    await svc.stageLines('f.txt', 0, [1, 3], await fingerprint('f.txt', false));
 
     // Index now has A2 but NOT B2.
     const cached = runGit(repo.path, ['diff', '--cached', 'f.txt']);
@@ -51,7 +59,7 @@ describe('GitService integration — stageLines / unstageLines', () => {
 
   it('unstages only the A→A2 change, leaving B→B2 staged', async () => {
     runGit(repo.path, ['add', 'f.txt']); // stage the whole file (both changes)
-    await svc.unstageLines('f.txt', 0, [1, 3]);
+    await svc.unstageLines('f.txt', 0, [1, 3], await fingerprint('f.txt', true));
 
     // Index keeps B2 but drops A2 back to unstaged.
     const cached = runGit(repo.path, ['diff', '--cached', 'f.txt']);
@@ -72,7 +80,7 @@ describe('GitService integration — stageLines / unstageLines', () => {
     commit(repo.path, 'noeof-base', { 'g.txt': 'P\nQ' });   // no trailing newline
     writeFile(repo.path, 'g.txt', 'P2\nQ2');                 // no trailing newline
     // Hunk: 0 del P, 1 del Q, 2 add P2, 3 add Q2. Stage P→P2 (del P at 0, add P2 at 2).
-    await svc.stageLines('g.txt', 0, [0, 2]);
+    await svc.stageLines('g.txt', 0, [0, 2], await fingerprint('g.txt', false));
     const cached = runGit(repo.path, ['diff', '--cached', 'g.txt']);
     expect(cached).toContain('+P2');
     expect(cached).not.toContain('+Q2');
@@ -89,7 +97,7 @@ describe('GitService integration — stageLines / unstageLines', () => {
     commit(repo.path, 'mixed-eof-base', { 'h.txt': 'P\nQ' }); // no trailing newline
     writeFile(repo.path, 'h.txt', 'P2\nQ2\n'); // trailing newline
     runGit(repo.path, ['add', 'h.txt']);
-    await svc.unstageLines('h.txt', 0, [0, 2]);
+    await svc.unstageLines('h.txt', 0, [0, 2], await fingerprint('h.txt', true));
     const indexBlob = runGit(repo.path, ['show', ':h.txt']);
     expect(indexBlob).toBe('P\nQ2\n'); // P reverted to HEAD; Q2 stays staged with its real trailing newline
   });
@@ -104,7 +112,7 @@ describe('GitService integration — stageLines / unstageLines', () => {
     commit(repo.path, 'split-base', { 'k.txt': 'X\n' });
     writeFile(repo.path, 'k.txt', 'X\nA\nB'); // no trailing newline
     runGit(repo.path, ['add', 'k.txt']);
-    await svc.unstageLines('k.txt', 0, [2]); // hunk: 0 ctx X, 1 add A, 2 add B(marker)
+    await svc.unstageLines('k.txt', 0, [2], await fingerprint('k.txt', true)); // hunk: 0 ctx X, 1 add A, 2 add B(marker)
     const indexBlob = runGit(repo.path, ['show', ':k.txt']);
     expect(indexBlob).toBe('X\nA'); // B unstaged; A stays, taking on the no-newline tail
   });
@@ -115,7 +123,7 @@ describe('GitService integration — stageLines / unstageLines', () => {
     commit(repo.path, 'quoted-delete-base', { [deletedFile]: 'keep\nremove\n' });
     unlinkSync(`${repo.path}/${deletedFile}`);
 
-    await svc.stageLines(deletedFile, 0, [1]);
+    await svc.stageLines(deletedFile, 0, [1], await fingerprint(deletedFile, false));
 
     expect(runGit(repo.path, ['show', `:${deletedFile}`])).toBe('keep\n');
     expect(runGit(repo.path, ['ls-files', '-z', '--', deletedFile])).toBe(`${deletedFile}\0`);
@@ -125,19 +133,22 @@ describe('GitService integration — stageLines / unstageLines', () => {
     writeFile(repo.path, newFile, 'keep\nunstage\n');
     runGit(repo.path, ['add', '--', newFile]);
 
-    await svc.unstageLines(newFile, 0, [1]);
+    await svc.unstageLines(newFile, 0, [1], await fingerprint(newFile, true));
 
     expect(runGit(repo.path, ['show', `:${newFile}`])).toBe('keep\n');
     expect(runGit(repo.path, ['ls-files', '-z', '--', newFile])).toBe(`${newFile}\0`);
     expect(runGit(repo.path, ['ls-files', '--', 'dev/null'])).toBe('');
   });
 
-  it('stages non-UTF-8 file bytes without changing the index blob', async () => {
+  it('stages non-UTF-8 file bytes with the rendered fingerprint without changing the index blob', async () => {
     const file = 'invalid-utf8.txt';
     const bytes = Buffer.from([0x61, 0x80, 0x0a]);
     writeFileSync(`${repo.path}/${file}`, bytes);
+    /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
+    const rendered = await svc.getUncommittedFileDiff(file, false);
 
-    await svc.stageLines(file, 0, [0]);
+    await svc.stageLines(file, 0, [0], rendered!.fingerprint!);
+    /* SNIPCODE-HOOK end */
 
     expect(execFileSync('git', ['show', `:${file}`], { cwd: repo.path })).toEqual(bytes);
   });
@@ -147,20 +158,20 @@ describe('GitService integration — stageLines / unstageLines', () => {
     commit(repo.path, 'mixed-eof-replacement-base', { [file]: 'old\n' });
     writeFile(repo.path, file, 'new');
 
-    await svc.stageLines(file, 0, [0, 1]);
+    await svc.stageLines(file, 0, [0, 1], await fingerprint(file, false));
     expect(runGit(repo.path, ['show', `:${file}`])).toBe('new');
 
-    await svc.unstageLines(file, 0, [0, 1]);
+    await svc.unstageLines(file, 0, [0, 1], await fingerprint(file, true));
     expect(runGit(repo.path, ['show', `:${file}`])).toBe('old\n');
   });
   /* SNIPCODE-HOOK end */
 
   it('throws when the file has no unstaged changes', async () => {
     runGit(repo.path, ['checkout', '--', 'f.txt']);
-    await expect(svc.stageLines('f.txt', 0, [1, 2])).rejects.toThrow(/no unstaged changes/);
+    await expect(svc.stageLines('f.txt', 0, [1, 2], '')).rejects.toThrow(/no unstaged changes/);
   });
 
   it('throws when the file has no staged changes', async () => {
-    await expect(svc.unstageLines('f.txt', 0, [1, 2])).rejects.toThrow(/no staged changes/);
+    await expect(svc.unstageLines('f.txt', 0, [1, 2], '')).rejects.toThrow(/no staged changes/);
   });
 });

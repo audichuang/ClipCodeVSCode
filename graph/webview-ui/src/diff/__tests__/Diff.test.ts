@@ -7,7 +7,7 @@ import type { DiffData } from '../../lib/types';
 
 // A small complete hunk so FileDiffView renders a stageable block arrow.
 function textDiff(file = 'src/a.ts'): DiffData {
-  return { file, isBinary: false, isImage: false,
+  return { file, isBinary: false, isImage: false, fingerprint: 'rendered-fp',
     hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
       lines: [{ type: 'add', content: 'x', newLineNumber: 1 }] }] };
 }

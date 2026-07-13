@@ -17,6 +17,9 @@ const vscode = getVsCodeApi();
  *  tab re-handshakes and re-pushes. */
 const STAGE_TIMEOUT_MS = 15_000;
 let stageTimer: ReturnType<typeof setTimeout> | undefined;
+/* SNIPCODE-HOOK start: Batch B stage operation correlation */
+let nextOperationId = 0;
+/* SNIPCODE-HOOK end */
 
 function clearStageTimeout(): void {
   clearTimeout(stageTimer);
@@ -33,9 +36,14 @@ export function listenForHostMessages(): void {
     const msg = (e as MessageEvent).data;
     switch (msg?.type) {
       case 'diffShow':
+        /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+        if (msg.payload.operationId !== undefined && msg.payload.operationId !== diffStore.operationId) break;
+        /* SNIPCODE-HOOK end */
         clearStageTimeout();
         // setDiffs also clears busy/error — the fresh push unlocks the buttons.
-        diffStore.setDiffs(msg.payload.repoPath, msg.payload.file, msg.payload.stagedDiff, msg.payload.unstagedDiff);
+        /* SNIPCODE-HOOK start: Batch B image request identity */
+        diffStore.setDiffs(msg.payload.repoPath, msg.payload.file, msg.payload.stagedDiff, msg.payload.unstagedDiff, Number(msg.payload.generation ?? 0));
+        /* SNIPCODE-HOOK end */
         // A failed fetch arrives as null sides + fetchError; showing it stops the
         // empty state from reading as an affirmative "No changes".
         if (msg.payload.fetchError) { diffStore.error = String(msg.payload.fetchError); }
@@ -44,11 +52,18 @@ export function listenForHostMessages(): void {
         if (msg.payload?.locale) { i18n.setLocale(String(msg.payload.locale)); }
         break;
       case 'error':
+        /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+        if (msg.payload?.operationId !== undefined && msg.payload.operationId !== diffStore.operationId) break;
+        if (msg.payload?.operationId === undefined && diffStore.operationId !== null) break;
+        /* SNIPCODE-HOOK end */
         clearStageTimeout();
         if (msg.payload?.source === 'diffStageHunk' || msg.payload?.source === 'diffStageLines') {
           diffStore.error = String(msg.payload.message ?? t('file.stageFailed'));
         }
         diffStore.busy = false;
+        /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+        diffStore.operationId = null;
+        /* SNIPCODE-HOOK end */
         break;
     }
   });
@@ -62,18 +77,22 @@ function diffFor(side: DiffSide) {
  *  applying re-parses the diff and shifts every later hunk/line index, so a second
  *  click before the fresh `diffShow` lands would target the wrong hunk — and when
  *  the requested side has no diff. On success flags busy and arms the timeout. */
-function beginStageOp(side: DiffSide): boolean {
-  if (diffStore.busy) { return false; }
-  if (!diffFor(side)) { return false; }
+/* SNIPCODE-HOOK start: Batch B stage operation correlation */
+function beginStageOp(side: DiffSide): string | null {
+  if (diffStore.busy) { return null; }
+  if (!diffFor(side)?.fingerprint) { return null; }
   diffStore.error = null;
   diffStore.busy = true;
+  const operationId = `diff-${++nextOperationId}`;
+  diffStore.operationId = operationId;
   clearTimeout(stageTimer);
   stageTimer = setTimeout(() => {
     stageTimer = undefined;
     diffStore.error = t('file.stageTimeout');
   }, STAGE_TIMEOUT_MS);
-  return true;
+  return operationId;
 }
+/* SNIPCODE-HOOK end */
 
 /** Ask the host to open this side's FULL-FILE diff in a native editor tab
  *  (staged: HEAD↔index, unstaged: index↔working). Read-only — no busy gate. */
@@ -87,19 +106,31 @@ export function postOpenSide(side: DiffSide): void {
 
 /** Post a single hunk to the host; `side` decides stage vs unstage. */
 export function postStageHunk(side: DiffSide, hunkIndex: number): void {
-  if (!beginStageOp(side)) { return; }
+  /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+  const operationId = beginStageOp(side);
+  if (!operationId) { return; }
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  const fingerprint = diffFor(side)?.fingerprint;
   vscode.postMessage({
     type: 'diffStageHunk',
-    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex },
+    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex, operationId, ...(fingerprint ? { fingerprint } : {}) },
   });
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK end */
 }
 
 /** Post the gutter-selected changed lines of one hunk to the host; `side` decides
  *  stage vs unstage. */
 export function postStageLines(side: DiffSide, hunkIndex: number, lineIndices: number[]): void {
-  if (!beginStageOp(side)) { return; }
+  /* SNIPCODE-HOOK start: Batch B stage operation correlation */
+  const operationId = beginStageOp(side);
+  if (!operationId) { return; }
+  /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
+  const fingerprint = diffFor(side)?.fingerprint;
   vscode.postMessage({
     type: 'diffStageLines',
-    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex, lineIndices },
+    payload: { repoPath: diffStore.repoPath, file: diffStore.file, side, hunkIndex, lineIndices, operationId, ...(fingerprint ? { fingerprint } : {}) },
   });
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK end */
 }
