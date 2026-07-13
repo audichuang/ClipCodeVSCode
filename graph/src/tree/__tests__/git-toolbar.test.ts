@@ -229,6 +229,37 @@ describe('ChangesWorkbench commit status guard', () => {
     expect(results).toEqual([{ repoName: 'a', ok: true }]);
     expect(b.commitIndex).not.toHaveBeenCalled();
   });
+
+  it('a mid-commit recheck cannot ADD a readable staged repo to the commit (amend stays single-target)', async () => {
+    const wb = new ChangesWorkbench();
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => {
+        wb.handleCheckboxChange([[
+          { kind: 'repo', repoPath: '/b' } as unknown as import('../changes-tree').ChangeTreeNode,
+          1 as unknown as import('vscode').TreeItemCheckboxState,
+        ]]);
+        return { staged: [{ path: 'a.ts', status: 'M' }], unstaged: [] };
+      }),
+    });
+    // /b reads FINE and has staged work — only the click-time snapshot may
+    // exclude it, not the synthetic-empty fallback.
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'b.ts', status: 'M' }], unstaged: [] })),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    wb.handleCheckboxChange([[
+      { kind: 'repo', repoPath: '/b' } as unknown as import('../changes-tree').ChangeTreeNode,
+      0 as unknown as import('vscode').TreeItemCheckboxState,
+    ]]);
+
+    // amend with two staged repos would throw — it must not, because the
+    // snapshot keeps /b out of the cardinality check too.
+    const results = await wb.commit('fix', true);
+
+    expect(results).toEqual([{ repoName: 'a', ok: true }]);
+    expect(a.commitIndex).toHaveBeenCalledWith('fix', { amend: true });
+    expect(b.commitIndex).not.toHaveBeenCalled();
+  });
 });
 /* SNIPCODE-HOOK end */
 

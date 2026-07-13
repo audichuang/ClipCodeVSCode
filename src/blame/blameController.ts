@@ -101,16 +101,24 @@ export class BlameController {
   // The document may stay open elsewhere (split, other group), so this fires
   // even when onCloseDocument doesn't.
   //
-  // `uriStillOpen` = some tab (any column) still shows this URI. When the LAST
-  // tab goes, sweep every per-column key: the tab event's column cannot
-  // address keys recorded as '::none' (TextEditor.viewColumn is undefined
-  // beyond column three) or keys stranded by an earlier group renumbering.
+  // `remaining` describes what OTHER open tabs still show after this close:
+  //  - sameKey: another tab (e.g. a native diff whose side is this same URI in
+  //    this same group) still maps to the exact URI+column key — the key is
+  //    still live, do not reset it out from under that tab.
+  //  - sameUri: some tab in any column still shows this URI. When the LAST one
+  //    goes, sweep every per-column key: the tab event's column cannot address
+  //    keys recorded as '::none' (TextEditor.viewColumn is undefined beyond
+  //    column three) or keys stranded by an earlier group renumbering.
   // Known ceiling: a stale key for a STILL-open URI (renumber, >3 columns)
   // survives until the document closes; migrate keys via
   // window.onDidChangeTextEditorViewColumn if this ever matters in practice.
-  onTabClosed(docUri: string, viewColumn: number | undefined, uriStillOpen = true): void {
-    this.resetEditor(tabKey(docUri, viewColumn));
-    if (uriStillOpen) return;
+  onTabClosed(
+    docUri: string,
+    viewColumn: number | undefined,
+    remaining: { sameKey: boolean; sameUri: boolean } = { sameKey: false, sameUri: true },
+  ): void {
+    if (!remaining.sameKey) this.resetEditor(tabKey(docUri, viewColumn));
+    if (remaining.sameUri) return;
     const prefix = `${docUri}::`;
     for (const key of this.enabled) {
       if (key.startsWith(prefix)) this.resetEditor(key);

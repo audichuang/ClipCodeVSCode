@@ -36,11 +36,25 @@ export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps)
         input instanceof vscode.TabInputText ? [input.uri]
           : input instanceof vscode.TabInputTextDiff ? [input.original, input.modified]
             : [];
-      const stillOpen = new Set(vscode.window.tabGroups.all.flatMap(
-        (g) => g.tabs.flatMap((t) => urisOf(t.input).map((u) => u.toString()))));
+      // What the surviving tabs still show — both per exact uri+column key
+      // (a text tab and a diff side can alias the same key in one group) and
+      // per bare uri (for the last-tab sweep).
+      const openKeys = new Set<string>();
+      const openUris = new Set<string>();
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          for (const uri of urisOf(tab.input)) {
+            openUris.add(uri.toString());
+            openKeys.add(`${uri.toString()}::${group.viewColumn}`);
+          }
+        }
+      }
       for (const tab of e.closed) {
         for (const uri of urisOf(tab.input)) {
-          controller.onTabClosed(uri.toString(), tab.group.viewColumn, stillOpen.has(uri.toString()));
+          controller.onTabClosed(uri.toString(), tab.group.viewColumn, {
+            sameKey: openKeys.has(`${uri.toString()}::${tab.group.viewColumn}`),
+            sameUri: openUris.has(uri.toString()),
+          });
         }
       }
     }),

@@ -19,6 +19,12 @@ const STAGE_TIMEOUT_MS = 15_000;
 let stageTimer: ReturnType<typeof setTimeout> | undefined;
 /* SNIPCODE-HOOK start: Batch B stage operation correlation */
 let nextOperationId = 0;
+// Page-unique prefix: a host mutation can outlive a webview reload, and a
+// counter restarting at diff-1 would let the OLD page's late reply correlate
+// with (and unlock) a NEW page's first operation. Known residual: a late
+// correlated reply from before the reload is dropped by the fresh page —
+// the diffReady re-push and the stale-fingerprint recovery cover that window.
+const pageId = Math.random().toString(36).slice(2, 10);
 /* SNIPCODE-HOOK end */
 
 function clearStageTimeout(): void {
@@ -102,7 +108,7 @@ function beginStageOp(side: DiffSide): string | null {
   if (!diffFor(side)?.fingerprint) { return null; }
   diffStore.error = null;
   diffStore.busy = true;
-  const operationId = `diff-${++nextOperationId}`;
+  const operationId = `diff-${pageId}-${++nextOperationId}`;
   diffStore.operationId = operationId;
   clearTimeout(stageTimer);
   stageTimer = setTimeout(() => {
