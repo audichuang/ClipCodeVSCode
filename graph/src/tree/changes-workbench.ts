@@ -96,7 +96,7 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Discover repos (respecting the filter) and read each one's status + branch. */
   /* SNIPCODE-HOOK start: Batch D commit status-read guard */
-  private async loadStatus(strict = false): Promise<RepoStatus[]> {
+  private async loadStatus(strict = false, uncheckedSnapshot: ReadonlySet<string> = this.uncheckedForCommit): Promise<RepoStatus[]> {
     const found = await this.discover();
     const out: RepoStatus[] = [];
     for (const r of found) {
@@ -105,7 +105,9 @@ export class ChangesWorkbench implements vscode.Disposable {
         svc.getUncommittedDiff().catch(err => {
           // Strict (= commit) only vetoes for repos still checked for commit:
           // an unreadable repo the user excluded must not block the others.
-          if (strict && !this.uncheckedForCommit.has(r.path)) {
+          // The caller passes a SNAPSHOT of the checkbox state so a mid-commit
+          // recheck cannot desynchronise this veto from the final filter.
+          if (strict && !uncheckedSnapshot.has(r.path)) {
             throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
           return { staged: [], unstaged: [] };
@@ -273,9 +275,13 @@ export class ChangesWorkbench implements vscode.Disposable {
   async commit(message: string, amend: boolean): Promise<CommitResult[]> {
     // Only repos with staged work AND left checked in the tree are committed.
     /* SNIPCODE-HOOK start: Batch D commit status-read guard */
-    const status = (await this.loadStatus(true))
+    // One immutable snapshot of the checkbox state for the whole commit: the
+    // strict veto and the filter below must see the same selection even if the
+    // user toggles checkboxes while status reads are in flight.
+    const unchecked = new Set(this.uncheckedForCommit);
+    const status = (await this.loadStatus(true, unchecked))
+      .filter(r => r.staged.length > 0 && !unchecked.has(r.repoPath));
     /* SNIPCODE-HOOK end */
-      .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath));
     if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
     const results: CommitResult[] = [];

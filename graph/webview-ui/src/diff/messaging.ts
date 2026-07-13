@@ -49,6 +49,14 @@ export function listenForHostMessages(): void {
       case 'diffShow':
         /* SNIPCODE-HOOK start: Batch B stage operation correlation */
         if (msg.payload.operationId !== undefined && msg.payload.operationId !== diffStore.operationId) break;
+        /* SNIPCODE-HOOK start: correlate op replies strictly */
+        // Same rule as 'error' below: while an operation is in flight, an
+        // UNCORRELATED diffShow (e.g. a stale-recovery refresh from an older
+        // failed op) must not apply — it would clear the newer op's gate and
+        // shadow that op's own correlated reply. Navigation still applies: its
+        // diffLoading (no id) resets the gate before the diffShow arrives.
+        if (msg.payload.operationId === undefined && diffStore.operationId !== null) break;
+        /* SNIPCODE-HOOK end */
         /* SNIPCODE-HOOK end */
         clearStageTimeout();
         // setDiffs also clears busy/error — the fresh push unlocks the buttons.

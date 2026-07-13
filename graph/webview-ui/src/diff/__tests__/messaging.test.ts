@@ -109,16 +109,61 @@ describe('diff messaging', () => {
     expect(globalThis.__postedMessages).toHaveLength(1);
   });
 
-  it('diffShow clears busy so the next stage click is allowed again', () => {
+  it('the operation\'s correlated diffShow clears busy so the next stage click is allowed again', () => {
     listenForHostMessages();
     diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
     postStageHunk('unstaged', 0);
     expect(diffStore.busy).toBe(true);
+    /* SNIPCODE-HOOK start: correlate op replies strictly */
+    const operationId = (globalThis.__postedMessages[0].data as { payload: { operationId: string } }).payload.operationId;
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff, operationId } },
+    }));
+    /* SNIPCODE-HOOK end */
+    expect(diffStore.busy).toBe(false);
+  });
+
+  /* SNIPCODE-HOOK start: correlate op replies strictly */
+  it('an uncorrelated diffShow does not clear an in-flight operation\'s gate', () => {
+    listenForHostMessages();
+    diffStore.setDiffs('/r', 'a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
+    const operationId = (globalThis.__postedMessages[0].data as { payload: { operationId: string } }).payload.operationId;
+
+    // A recovery/late refresh from an OLD operation arrives without an id
+    // while this newer operation is still in flight — it must not apply, or
+    // it would unlock the gate and shadow the newer op's own reply.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+    }));
+    expect(diffStore.busy).toBe(true);
+    expect(diffStore.operationId).toBe(operationId);
+
+    // The newer op's correlated reply still lands and unlocks.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', stagedDiff: null, unstagedDiff: emptyDiff, operationId } },
     }));
     expect(diffStore.busy).toBe(false);
   });
+
+  it('a navigation (diffLoading-led) uncorrelated diffShow still applies', () => {
+    listenForHostMessages();
+    diffStore.setDiffs('/r', 'a.ts', null, emptyDiff);
+    postStageHunk('unstaged', 0);
+
+    // Navigating away is an explicit cancel of the op context: diffLoading
+    // (no id) resets the gate, so the follow-up uncorrelated diffShow applies.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffLoading', payload: { repoPath: '/r', file: 'b.ts', generation: 2 } },
+    }));
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'b.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+    }));
+    expect(diffStore.file).toBe('b.ts');
+    expect(diffStore.busy).toBe(false);
+    expect(diffStore.loading).toBe(false);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('an error reply also clears busy', () => {
     listenForHostMessages();
@@ -141,6 +186,13 @@ describe('diff messaging', () => {
     postStageHunk('unstaged', 0);
     const first = globalThis.__postedMessages[0].data as { payload: { operationId?: string } };
 
+    /* SNIPCODE-HOOK start: correlate op replies strictly */
+    // Real navigation always leads with diffLoading (no id), which resets the
+    // op gate; only then does its uncorrelated diffShow apply.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'diffLoading', payload: { repoPath: '/r', file: 'b.ts', generation: 2 } },
+    }));
+    /* SNIPCODE-HOOK end */
     window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'diffShow', payload: { repoPath: '/r', file: 'b.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
     }));
@@ -203,10 +255,13 @@ describe('diff messaging', () => {
     expect(diffStore.error).toContain('longer than expected');
     postStageHunk('unstaged', 1); // must still be refused
     expect(globalThis.__postedMessages).toHaveLength(1);
-    // The late diffShow finally unlocks and clears the banner.
+    // The op's late correlated diffShow finally unlocks and clears the banner.
+    /* SNIPCODE-HOOK start: correlate op replies strictly */
+    const operationId = (globalThis.__postedMessages[0].data as { payload: { operationId: string } }).payload.operationId;
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff, operationId } },
     }));
+    /* SNIPCODE-HOOK end */
     expect(diffStore.busy).toBe(false);
     expect(diffStore.error).toBeNull();
   });
@@ -216,9 +271,12 @@ describe('diff messaging', () => {
     listenForHostMessages();
     diffStore.setDiffs('/r', 'src/a.ts', null, emptyDiff);
     postStageHunk('unstaged', 0);
+    /* SNIPCODE-HOOK start: correlate op replies strictly */
+    const operationId = (globalThis.__postedMessages[0].data as { payload: { operationId: string } }).payload.operationId;
     window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff } },
+      data: { type: 'diffShow', payload: { repoPath: '/r', file: 'src/a.ts', stagedDiff: null, unstagedDiff: emptyDiff, operationId } },
     }));
+    /* SNIPCODE-HOOK end */
     vi.advanceTimersByTime(60_000);
     expect(diffStore.busy).toBe(false);
     expect(diffStore.error).toBeNull();

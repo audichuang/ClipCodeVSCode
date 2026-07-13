@@ -2440,7 +2440,10 @@ export class GitService {
   async stageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
-    if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    // An empty raw diff under a rendered fingerprint means the shown diff is
+    // obsolete (e.g. fully staged elsewhere) — recoverable, so the panel
+    // re-renders instead of leaving a dead clickable body.
+    if (raw.length === 0) { throw new StaleDiffError(`no unstaged changes to stage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
@@ -2459,7 +2462,7 @@ export class GitService {
   async unstageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
-    if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    if (raw.length === 0) { throw new StaleDiffError(`no staged changes to unstage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatch(raw, hunkIndices);
@@ -2476,7 +2479,7 @@ export class GitService {
   async stageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.workingFileDiffRaw(file);
-    if (raw.length === 0) { throw new Error(`no unstaged changes to stage for ${file}`); }
+    if (raw.length === 0) { throw new StaleDiffError(`no unstaged changes to stage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     const patch = buildForwardPatchLines(raw, hunkIndex, lineIndices);
@@ -2493,7 +2496,7 @@ export class GitService {
   async unstageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
     this.assertSafePath(file, 'apply');
     const raw = await this.stagedFileDiffRaw(file);
-    if (raw.length === 0) { throw new Error(`no staged changes to unstage for ${file}`); }
+    if (raw.length === 0) { throw new StaleDiffError(`no staged changes to unstage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
     // 'unstage': the raw diff here is HEAD→index, so the current-index baseline

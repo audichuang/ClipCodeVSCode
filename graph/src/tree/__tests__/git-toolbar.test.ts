@@ -201,6 +201,34 @@ describe('ChangesWorkbench commit status guard', () => {
     expect(a.commitIndex).toHaveBeenCalledWith('fix', { amend: false });
     expect(b.commitIndex).not.toHaveBeenCalled();
   });
+
+  it('commit uses one checkbox snapshot — a mid-commit recheck cannot flip the outcome', async () => {
+    const wb = new ChangesWorkbench();
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => {
+        // The user re-checks /b while /a's status read is still in flight;
+        // the commit must keep honouring the selection as of the click.
+        wb.handleCheckboxChange([[
+          { kind: 'repo', repoPath: '/b' } as unknown as import('../changes-tree').ChangeTreeNode,
+          1 as unknown as import('vscode').TreeItemCheckboxState,
+        ]]);
+        return { staged: [{ path: 'a.ts', status: 'M' }], unstaged: [] };
+      }),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => { throw new Error('index.lock exists'); }),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    wb.handleCheckboxChange([[
+      { kind: 'repo', repoPath: '/b' } as unknown as import('../changes-tree').ChangeTreeNode,
+      0 as unknown as import('vscode').TreeItemCheckboxState,
+    ]]);
+
+    const results = await wb.commit('fix', false);
+
+    expect(results).toEqual([{ repoName: 'a', ok: true }]);
+    expect(b.commitIndex).not.toHaveBeenCalled();
+  });
 });
 /* SNIPCODE-HOOK end */
 

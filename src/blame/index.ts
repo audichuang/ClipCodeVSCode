@@ -29,10 +29,18 @@ export function registerBlame(context: vscode.ExtensionContext, deps: BlameDeps)
     // Tab close (not visibility loss) is the reset signal: switching tabs must
     // keep the blame toggle; closing the tab must drop it even when the
     // document stays open in another split (no onDidCloseTextDocument then).
+    // Diff tabs count too — blame can be toggled on a diff editor's sides.
     vscode.window.tabGroups.onDidChangeTabs((e) => {
+      if (e.closed.length === 0) return;
+      const urisOf = (input: unknown): vscode.Uri[] =>
+        input instanceof vscode.TabInputText ? [input.uri]
+          : input instanceof vscode.TabInputTextDiff ? [input.original, input.modified]
+            : [];
+      const stillOpen = new Set(vscode.window.tabGroups.all.flatMap(
+        (g) => g.tabs.flatMap((t) => urisOf(t.input).map((u) => u.toString()))));
       for (const tab of e.closed) {
-        if (tab.input instanceof vscode.TabInputText) {
-          controller.onTabClosed(tab.input.uri.toString(), tab.group.viewColumn);
+        for (const uri of urisOf(tab.input)) {
+          controller.onTabClosed(uri.toString(), tab.group.viewColumn, stillOpen.has(uri.toString()));
         }
       }
     }),

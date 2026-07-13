@@ -166,6 +166,19 @@ describe('GitService integration — stageLines / unstageLines', () => {
   });
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: stale fingerprint recovery */
+  it('a target fully staged elsewhere fails as a recoverable StaleDiffError, not a dead end', async () => {
+    // The webview rendered a diff (fingerprint exists), then the whole file was
+    // staged externally — the raw diff is now empty. That is a stale rendered
+    // diff, so it must surface as StaleDiffError (auto-refresh), not a generic
+    // error that leaves the obsolete body clickable forever.
+    const rendered = await svc.getUncommittedFileDiff('f.txt', false);
+    runGit(repo.path, ['add', '--', 'f.txt']);
+    await expect(svc.stageLines('f.txt', 0, [1], rendered!.fingerprint!))
+      .rejects.toMatchObject({ name: 'StaleDiffError' });
+  });
+  /* SNIPCODE-HOOK end */
+
   it('throws when the file has no unstaged changes', async () => {
     runGit(repo.path, ['checkout', '--', 'f.txt']);
     await expect(svc.stageLines('f.txt', 0, [1, 2], '')).rejects.toThrow(/no unstaged changes/);
