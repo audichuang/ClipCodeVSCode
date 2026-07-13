@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.38
+
+- **Snipcode Git commit workbench.** A dedicated Activity Bar view for multi-repo
+  staging and commit: Staged / Unstaged trees, multi-select, per-repo stage or
+  unstage all, right-click copy in ClipCode format, and commit (including
+  amend when only one repo is selected).
+- **Full-width Diff tab** with a unified Staged + Unstaged view, per-hunk and
+  per-line stage/unstage (IntelliJ-style arrows), word-level diff highlighting,
+  syntax coloring, and an “open full file diff” action. Git failures show an
+  error banner instead of a false “no changes” empty state; image diffs and
+  several race conditions around panel close / side switching are fixed.
+- **Inline blame** on the active editor (toggle command + title-bar button),
+  with relative timestamps and age-colored decorations.
+- **One-click Fetch / Pull / Push across all repos** from the Snipcode Git
+  toolbar, with ↓↑ ahead/behind badges on the tree.
+
 ## 0.3.37
 
 - **Internal hardening of the repository-switch transaction** shipped in
