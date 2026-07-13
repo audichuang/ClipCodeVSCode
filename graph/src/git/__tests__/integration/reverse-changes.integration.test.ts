@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, head, runGit, writeFile } from './helpers';
@@ -262,6 +262,51 @@ describe('GitService integration — reverseCommitChanges on a merge commit', ()
     expect(read(repo, 'm.txt')).toBe('y\n');
   });
 });
+
+/* SNIPCODE-HOOK start: byte-preserving commit reverse */
+// Non-UTF-8 content exercises the raw-bytes path: a lossy utf8 decode of the
+// commit diff would rewrite invalid sequences as U+FFFD before `git apply
+// --reverse`, silently corrupting the working tree (whole-file reverse) or
+// failing to apply (hunk-level reverse).
+describe('GitService integration — reverseCommitChanges byte fidelity', () => {
+  let repo: TempRepo;
+  let svc: GitService;
+
+  beforeEach(() => {
+    repo = createTempRepo();
+    svc = new GitService(repo.path);
+  });
+  afterEach(() => repo.cleanup());
+
+  const bytes = Buffer.from([0x61, 0x80, 0x0a, 0x62, 0x81, 0x0a]); // a<inv>\nb<inv>\n
+
+  it('restores byte-identical content when reversing a commit that deleted a non-UTF-8 file', async () => {
+    writeFileSync(join(repo.path, 'bin.txt'), bytes);
+    runGit(repo.path, ['add', '--', 'bin.txt']);
+    commit(repo.path, 'add bin');
+    runGit(repo.path, ['rm', 'bin.txt']);
+    const del = commit(repo.path, 'remove bin');
+
+    await svc.reverseCommitChanges(del, 'bin.txt');
+
+    expect(readFileSync(join(repo.path, 'bin.txt'))).toEqual(bytes);
+  });
+
+  it('reverses one hunk of a non-UTF-8 modification byte-identically', async () => {
+    writeFileSync(join(repo.path, 'bin.txt'), bytes);
+    runGit(repo.path, ['add', '--', 'bin.txt']);
+    commit(repo.path, 'base bin');
+    const changed = Buffer.from([0x61, 0x80, 0x0a, 0x63, 0x82, 0x0a]);
+    writeFileSync(join(repo.path, 'bin.txt'), changed);
+    runGit(repo.path, ['add', '--', 'bin.txt']);
+    const mod = commit(repo.path, 'change bin');
+
+    await svc.reverseCommitChanges(mod, 'bin.txt', { hunkIndex: 0 });
+
+    expect(readFileSync(join(repo.path, 'bin.txt'))).toEqual(bytes);
+  });
+});
+/* SNIPCODE-HOOK end */
 
 // Files WITHOUT a trailing newline exercise the "\ No newline at end of file"
 // marker handling in the patch builder. These read raw bytes so the assertions

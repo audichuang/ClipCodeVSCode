@@ -123,6 +123,27 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     expect(b.unstagePaths).not.toHaveBeenCalled();
   });
 
+  it('warns about dropped selection items instead of silently ignoring them', async () => {
+    const a = mkSvc(); const b = mkSvc();
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const aUnstaged = file('/a', 'a-worktree.ts', 'unstaged');
+    const aStaged = file('/a', 'a-index.ts', 'staged');
+    const bStaged = file('/b', 'b-index.ts', 'staged');
+    await H.commands.get('snipcode.git.stage')!(aUnstaged, [aUnstaged, aStaged, bStaged]);
+
+    // Two items (a-index, b-index) were outside the clicked repo+side — the
+    // user must be told they were skipped, not left believing they staged.
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0])).toContain('2');
+
+    // A homogeneous selection stays silent.
+    await H.commands.get('snipcode.git.stage')!(aUnstaged, [aUnstaged]);
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('routes staged copies through Git change copy with the index side preserved', async () => {
     const a = mkSvc();
     setRepos(['/a'], { '/a': a });
@@ -156,6 +177,29 @@ describe('ChangesWorkbench commit status guard', () => {
 
     await expect(new ChangesWorkbench().commit('fix', true)).rejects.toThrow('b: index.lock exists');
     expect(a.commitIndex).not.toHaveBeenCalled();
+  });
+
+  it('an unchecked repo whose status read fails does not block committing the checked repo', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a.ts', status: 'M' }], unstaged: [] })),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => { throw new Error('index.lock exists'); }),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    // The user excluded /b from the commit; its transient read failure must
+    // not veto committing /a.
+    wb.handleCheckboxChange([[
+      { kind: 'repo', repoPath: '/b' } as unknown as import('../changes-tree').ChangeTreeNode,
+      0 as unknown as import('vscode').TreeItemCheckboxState,
+    ]]);
+
+    const results = await wb.commit('fix', false);
+
+    expect(results).toEqual([{ repoName: 'a', ok: true }]);
+    expect(a.commitIndex).toHaveBeenCalledWith('fix', { amend: false });
+    expect(b.commitIndex).not.toHaveBeenCalled();
   });
 });
 /* SNIPCODE-HOOK end */

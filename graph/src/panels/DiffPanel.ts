@@ -5,6 +5,9 @@ import { randomBytes } from 'crypto';
 import { open } from 'fs/promises';
 /* SNIPCODE-HOOK end */
 import { MainPanel } from './MainPanel';
+/* SNIPCODE-HOOK start: stale fingerprint recovery */
+import { StaleDiffError } from '../git/git-service';
+/* SNIPCODE-HOOK end */
 import { SequenceGuard } from '../utils/sequence-guard';
 import type { ChangesWorkbench } from '../tree/changes-workbench';
 
@@ -98,6 +101,12 @@ export class DiffPanel {
   /* SNIPCODE-HOOK start: Batch B stage operation correlation */
   show(repoPath: string, file: string, operationId?: string): void {
     const ticket = this.seq.issue();
+    /* SNIPCODE-HOOK start: loading state only on navigation */
+    // A same-file refresh (post-stage / post-error) keeps the current body
+    // until the fresh diffShow lands; only real navigation clears it with a
+    // loading state — otherwise every hunk stage flashes "Loading changes".
+    const sameTarget = this.current?.repoPath === repoPath && this.current?.file === file;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B image request identity */
     this.current = { repoPath, file, generation: ticket };
     /* SNIPCODE-HOOK end */
@@ -110,10 +119,12 @@ export class DiffPanel {
     // re-pushes `this.current` once it does.
     if (this.ready) {
       /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */
-      this.panel!.webview.postMessage({
-        type: 'diffLoading',
-        payload: { repoPath, file, generation: ticket, ...(operationId ? { operationId } : {}) },
-      });
+      if (!sameTarget) {
+        this.panel!.webview.postMessage({
+          type: 'diffLoading',
+          payload: { repoPath, file, generation: ticket, ...(operationId ? { operationId } : {}) },
+        });
+      }
       /* SNIPCODE-HOOK end */
       void this.push(this.current, ticket, operationId);
     }
@@ -235,6 +246,11 @@ export class DiffPanel {
           void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
           if (this.panel === panel) {
             panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message, ...(operationId === undefined ? {} : { operationId }) } });
+            /* SNIPCODE-HOOK start: stale fingerprint recovery */
+            // The webview is rendering an outdated diff — re-push the fresh one
+            // (the error above already released the busy gate).
+            if (err instanceof StaleDiffError) { this.refreshIfCurrent(String(repoPath), String(file)); }
+            /* SNIPCODE-HOOK end */
           }
         }
         return;
@@ -263,6 +279,9 @@ export class DiffPanel {
         void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
         if (this.panel === panel) {
           panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message, ...(operationId === undefined ? {} : { operationId }) } });
+          /* SNIPCODE-HOOK start: stale fingerprint recovery */
+          if (err instanceof StaleDiffError) { this.refreshIfCurrent(String(repoPath), String(file)); }
+          /* SNIPCODE-HOOK end */
         }
       }
       /* SNIPCODE-HOOK end */

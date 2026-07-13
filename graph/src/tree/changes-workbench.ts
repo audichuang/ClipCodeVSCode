@@ -103,7 +103,9 @@ export class ChangesWorkbench implements vscode.Disposable {
       const svc = this.svcFor(r.path);
       const [diff, branches, aheadBehind] = await Promise.all([
         svc.getUncommittedDiff().catch(err => {
-          if (strict) {
+          // Strict (= commit) only vetoes for repos still checked for commit:
+          // an unreadable repo the user excluded must not block the others.
+          if (strict && !this.uncheckedForCommit.has(r.path)) {
             throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
           return { staged: [], unstaged: [] };
@@ -405,8 +407,16 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK start: Batch B constrain mixed tree selections */
     const sameGroup = (n: unknown, ns: unknown): FileNode[] => {
       const clicked = n as FileNode;
-      return sel<FileNode>(n, ns).filter(item =>
+      const all = sel<FileNode>(n, ns);
+      const kept = all.filter(item =>
         item.repoPath === clicked.repoPath && item.group === clicked.group);
+      // Tell the user what a mixed selection dropped — silently ignoring the
+      // other repo/side's items reads as "everything was staged".
+      if (kept.length < all.length) {
+        void vscode.window.showWarningMessage(
+          `已略過 ${all.length - kept.length} 個屬於其他 repo 或另一側的選取項目`);
+      }
+      return kept;
     };
     reg('snipcode.git.stage', (n, ns) => this.stage(sameGroup(n, ns)));
     reg('snipcode.git.unstage', (n, ns) => this.unstage(sameGroup(n, ns)));

@@ -184,8 +184,12 @@ function normalizeWholeFileHeader(header: string[], oldCount: number, newCount: 
  *
  * @throws if the hunk index is out of range or nothing reversible is selected.
  */
-export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIndices?: number[]): string {
-  const { header, hunks } = parseFileDiff(rawFileDiff);
+/* SNIPCODE-HOOK start: byte-preserving commit reverse */
+export function buildReversePatch(rawFileDiff: Buffer, hunkIndex: number, lineIndices?: number[]): Buffer;
+export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIndices?: number[]): string;
+export function buildReversePatch(rawFileDiff: string | Buffer, hunkIndex: number, lineIndices?: number[]): string | Buffer {
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
+/* SNIPCODE-HOOK end */
   const hunk = hunks[hunkIndex];
   if (!hunk) {
     throw new Error(`Hunk ${hunkIndex} not found in diff`);
@@ -331,7 +335,9 @@ export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIn
 
   const headerLine = rewriteHunkHeader(hunk.headerLine, oldCount, newCount);
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
-  return [...finalHeader, headerLine, ...body].join('\n') + '\n';
+  /* SNIPCODE-HOOK start: byte-preserving commit reverse */
+  return encodePatchBytes(rawFileDiff, [...finalHeader, headerLine, ...body].join('\n') + '\n');
+  /* SNIPCODE-HOOK end */
 }
 
 /**
