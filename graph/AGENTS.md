@@ -46,7 +46,7 @@ dev; Snipcode packaging is always from the **repo root**.
 | Area | Role |
 |---|---|
 | `src/git/git-service.ts` | Central git CLI hub; almost all ops go through it |
-| `src/git/patch-builder.ts` | Patches for reverse-changes and forward stage/unstage hunks/lines |
+| `src/git/patch-builder.ts` | Patches for reverse-changes and forward stage/unstage hunks/lines. **Byte-safe:** patch reconstruction + fingerprints read raw `Buffer` stdout (`exec(..., {encoding:'buffer'})`), never a decoded string — quoted-path/UTF-8/mixed-EOF fidelity |
 | `src/utils/message-bus.ts` | Graph webview ↔ host message types + **live** `MESSAGE_EFFECTS` gate |
 | `src/panels/MainPanel.ts` | Commit-graph WebviewPanel; message router + mutation transactions |
 | `src/panels/DiffPanel.ts` | Snipcode Diff tab (classic `diff.js` bundle) |
@@ -77,9 +77,10 @@ all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
 
 ## Key conventions (踩雷)
 
-- **`git/` modules stay free of `vscode` imports** so GitService/parsers stay
-  unit-testable against real git. VS Code-aware bits live in `extension.ts` /
-  `panels/` / bridges (`vscode-git-bridge.ts`, `setGitBinaryPath`).
+- **`git/` modules stay free of `vscode` imports** — sole exception
+  `git/vscode-git-bridge.ts` — so GitService/parsers stay unit-testable
+  against real git. Other VS Code-aware bits live in `extension.ts` /
+  `panels/`.
 - **`SequenceGuard`** (`utils/sequence-guard.ts`): `issue()` before async work;
   apply results only if `isCurrent()` — stops late clicks overwriting newer UI.
 - **Two lock layers (do not confuse them):**
@@ -116,9 +117,13 @@ all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
   the reply if the active repo switched mid-request. Waiters must handle
   matching `error` (`payload.source`) **and** a timeout, or spinners hang
   forever (squash-modal family). Correlate reused reply types with a key
-  (`base`, `requestId`).
-- Settings namespace: `gitGraphPlus.*` via `utils/config.ts`. Git terms
-  (commit/merge/rebase/push/pull/fetch) stay untranslated by design.
+  (`base`, `requestId`; the Diff stage/unstage family threads an
+  `operationId` — `diff-${pageId}-${n}`, unique across pages, inherited when
+  the same file is re-pushed — and drops non-matching `diffData`/replies).
+- Settings namespace: `gitGraphPlus.*` via `utils/config.ts`. Locales differ
+  on git terms: `zh` translates them (拉取/推送/变基), `ko` is mixed
+  (당겨오기 alongside English "Push"), `en` is source — match the existing
+  style of the locale file you touch, don't impose a blanket rule.
 - **Vitest** (`vitest.config.mts`): `backend` (real git CLI; integration under
   `src/git/__tests__/integration/`, 30s timeout) + `webview` (happy-dom).
   Deterministic race tests use `git-shim.ts` via `setGitBinaryPath()` — restore
