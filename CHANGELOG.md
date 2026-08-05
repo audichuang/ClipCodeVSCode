@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.40
+
+Token estimate accuracy and size warnings.
+
+- **The `~N tokens` figure now matches ClipCode (the IntelliJ sibling) exactly.**
+  Two causes: the IntelliJ side summed each file's raw content while this side
+  counted the whole assembled payload, and the two whitespace definitions differed
+  (JS `\s` is Unicode-wide, Kotlin's is ASCII-only), so CJK content split into a
+  different number of words on each side. Both are fixed on both sides, and the
+  equality is now pinned by 16 cases in the shared cross-tool golden fixture —
+  covering U+3000, NBSP, BOM, U+2028/29 and U+001C–1F.
+- **Oversized copies are colour-coded.** The copy toast becomes a warning past
+  1,000,000 estimated tokens and an error past 2,000,000, so a payload too large
+  for an AI assistant gets noticed before it is pasted. The graph copy's "Show
+  skipped" toast previously bypassed the threshold check and stayed neutral no
+  matter how large the payload was; it now goes through the same path.
+- Thousands separators pinned to `en-US` so they cannot diverge from the IntelliJ
+  side's `Locale.ROOT` rendering.
+
 ## 0.3.39
 
 Hotfix for the 0.3.38 Git features: 26 findings from four independent
