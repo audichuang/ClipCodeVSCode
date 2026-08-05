@@ -300,6 +300,29 @@ describe('GitService', () => {
       await expect(service.reset('-foo', 'hard')).rejects.toThrow("must not start with '-'");
     });
 
+    /* SNIPCODE-HOOK start: the network trio + worktree paths take
+       webview-controlled values too — "--upload-pack=<cmd>" as a remote/branch
+       is git-level RCE, so they must reject like every sibling op. */
+    it('fetch rejects remote starting with -', async () => {
+      await expect(service.fetch('--upload-pack=attacker')).rejects.toThrow("must not start with '-'");
+    });
+
+    it('pull rejects remote and branch starting with -', async () => {
+      await expect(service.pull('--upload-pack=attacker')).rejects.toThrow("must not start with '-'");
+      await expect(service.pull('origin', '--upload-pack=attacker')).rejects.toThrow("must not start with '-'");
+    });
+
+    it('push rejects remote and branch starting with -', async () => {
+      await expect(service.push('--receive-pack=attacker')).rejects.toThrow("must not start with '-'");
+      await expect(service.push('origin', '-x')).rejects.toThrow("must not start with '-'");
+    });
+
+    it('worktreeAdd and worktreeRemove reject a path starting with -', async () => {
+      await expect(service.worktreeAdd('--force')).rejects.toThrow("must not start with '-'");
+      await expect(service.worktreeRemove('--force')).rejects.toThrow("must not start with '-'");
+    });
+    /* SNIPCODE-HOOK end */
+
     it('interactiveRebase rejects base starting with -', async () => {
       await expect(service.interactiveRebase('-foo', [])).rejects.toThrow("must not start with '-'");
     });
@@ -715,6 +738,19 @@ describe('GitService', () => {
       ]);
     });
   });
+
+  /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */
+  describe('selective staging raw diff failures', () => {
+    it('surfaces the git failure instead of reporting no unstaged changes', async () => {
+      mockExec(service, async (args) => {
+        if (args[0] === 'ls-files') return 'src/foo.ts';
+        throw new GitError('timed out while reading diff', null, args);
+      });
+
+      await expect(service.stageHunks('src/foo.ts', [0], '')).rejects.toThrow('timed out while reading diff');
+    });
+  });
+  /* SNIPCODE-HOOK end */
 
   describe('auth retry (execWithAuthRetry / isAuthError)', () => {
     // The auth retry plumbing was added in dfd8af6 to drive VS Code's askpass
@@ -1170,6 +1206,14 @@ describe('GitService', () => {
       expect(invalidates(['tag', 'v1.0'])).toBe(true);
       expect(invalidates(['worktree', 'add', '/tmp/wt'])).toBe(true);
       expect(invalidates(['remote', 'add', 'origin', 'url'])).toBe(true);
+      /* SNIPCODE-HOOK start: newly classified commands */
+      expect(invalidates(['restore', '--source=stash@{0}', '--', 'a.txt'])).toBe(true);
+      expect(invalidates(['switch', 'main'])).toBe(true);
+      expect(invalidates(['am', 'patch.mbox'])).toBe(true);
+      expect(invalidates(['config', 'gitflow.branch.master', 'main'])).toBe(true);
+      expect(invalidates(['config', '--get', 'gitflow.branch.master'])).toBe(false);
+      expect(invalidates(['config', '--list'])).toBe(false);
+      /* SNIPCODE-HOOK end */
     });
   });
 

@@ -256,6 +256,11 @@ export const ko: Record<string, string> = {
   'squash.message': '커밋 메시지',
   'squash.squash': 'Squash 병합',
   'squash.loading': 'Commit 로딩 중',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': 'Commit 범위를 불러오지 못했습니다. 닫고 다시 시도하세요.',
+  'squash.notOnHead': '선택한 commit이 현재 branch(HEAD)에 없습니다. 해당 branch를 먼저 checkout 하세요.',
+  'squash.mergeInRange': '선택 영역과 HEAD 사이에 merge commit이 있어 squash 시 merge history가 평탄화됩니다.',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': '이미 push된 commit이 포함되어 있습니다. Squash는 history를 재작성하므로 <span class="modal-emph modal-emph--danger">force push</span>가 필요합니다.',
 
   // Commit details
@@ -649,6 +654,13 @@ export const ko: Record<string, string> = {
   'lfs.locked': '{owner}가 잠금',
   'file.open': '파일 열기',
   'file.openChanges': '변경 내용 열기',
+  /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': '변경 내용 불러오는 중',
+  'file.noChanges': '변경 없음',
+  'file.stageFailed': '작업 실패',
+  'file.stageTimeout': '작업이 예상보다 오래 걸립니다 — 완료되면 버튼이 다시 활성화됩니다 (계속 멈춰 있으면 이 탭을 다시 여세요)',
+  'file.openFullDiff': '에디터에서 전체 파일 diff 열기',
+  /* SNIPCODE-HOOK end */
   'file.createPatch': 'Patch 생성',
   'file.createPatchFromSelected': '선택한 {count}개 파일로 Patch 생성',
   'file.createPatchFromFolder': '이 폴더를 Patch로 생성',
@@ -658,6 +670,12 @@ export const ko: Record<string, string> = {
   'file.reverseFile': '파일 변경 되돌리기',
   'file.reverseHunk': 'Hunk 변경 되돌리기',
   'file.reverseLines': '선택한 줄 되돌리기',
+  'file.stageHunk': 'Hunk 스테이지',
+  'file.unstageHunk': 'Hunk 스테이지 해제',
+  'file.stageLines': '선택한 줄 스테이지',
+  'file.unstageLines': '선택한 줄 스테이지 해제',
+  'file.stageBlock': '변경 블록 스테이지',
+  'file.unstageBlock': '변경 블록 스테이지 해제',
   'file.lines': '줄',
   'file.copySelection': '복사',
   'file.copyLines': '줄 복사',

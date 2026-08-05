@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReversePatch } from '../patch-builder';
+import { buildReversePatch, buildForwardPatch, buildForwardPatchLines } from '../patch-builder';
 import { parseDiff } from '../git-parser';
 
 // A replace hunk (delete + two adds) plus surrounding context, the shape the
@@ -391,5 +391,374 @@ index 1234567..0000000 100644
     const hunk = parseDiff(SAMPLE)[0].hunks[0];
     const ctxIdx = hunk.lines.findIndex((l) => l.type === 'context');
     expect(() => buildReversePatch(SAMPLE, 0, [ctxIdx])).toThrow(/No changed lines/);
+  });
+});
+
+// Two well-separated hunks (line 2 and line 14) — the shape a HEAD→working
+// diff hands to the forward builder for per-hunk staging.
+const TWO_HUNK = [
+  'diff --git a/f.txt b/f.txt',
+  'index 1111111..2222222 100644',
+  '--- a/f.txt',
+  '+++ b/f.txt',
+  '@@ -1,3 +1,3 @@',
+  ' alpha',
+  '-beta',
+  '+beta2',
+  ' gamma',
+  '@@ -13,3 +13,3 @@',
+  ' nu',
+  '-xi',
+  '+xi2',
+  ' omicron',
+  '',
+].join('\n');
+
+// A whole-new-file diff: `--- /dev/null` side, one pure-addition hunk.
+const NEW_FILE = [
+  'diff --git a/new.txt b/new.txt',
+  'new file mode 100644',
+  'index 0000000..abc1234',
+  '--- /dev/null',
+  '+++ b/new.txt',
+  '@@ -0,0 +1,2 @@',
+  '+hello',
+  '+world',
+  '',
+].join('\n');
+
+describe('buildForwardPatch', () => {
+  it('emits only the selected hunk, dropping the others', () => {
+    const patch = buildForwardPatch(TWO_HUNK, [0]);
+    expect(patch).toBe([
+      'diff --git a/f.txt b/f.txt',
+      'index 1111111..2222222 100644',
+      '--- a/f.txt',
+      '+++ b/f.txt',
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '-beta',
+      '+beta2',
+      ' gamma',
+      '',
+    ].join('\n'));
+  });
+
+  it('emits multiple selected hunks in ascending file order', () => {
+    // Pass them out of order to prove the builder sorts to file order for apply.
+    const patch = buildForwardPatch(TWO_HUNK, [1, 0]);
+    expect(patch).toBe([
+      'diff --git a/f.txt b/f.txt',
+      'index 1111111..2222222 100644',
+      '--- a/f.txt',
+      '+++ b/f.txt',
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '-beta',
+      '+beta2',
+      ' gamma',
+      '@@ -13,3 +13,3 @@',
+      ' nu',
+      '-xi',
+      '+xi2',
+      ' omicron',
+      '',
+    ].join('\n'));
+  });
+
+  it('reconstructs the whole diff verbatim when every hunk is selected', () => {
+    expect(buildForwardPatch(TWO_HUNK, [0, 1])).toBe(TWO_HUNK);
+  });
+
+  it('stages a whole new file (keeps the /dev/null side) when its only hunk is selected', () => {
+    expect(buildForwardPatch(NEW_FILE, [0])).toBe(NEW_FILE);
+  });
+
+  it('throws when the selection is empty', () => {
+    expect(() => buildForwardPatch(TWO_HUNK, [])).toThrow('No hunks selected');
+  });
+
+  it('throws when a selected hunk index is out of range', () => {
+    expect(() => buildForwardPatch(TWO_HUNK, [5])).toThrow('Hunk 5 not found');
+  });
+});
+
+describe('buildForwardPatchLines', () => {
+  // SAMPLE (declared at the top of this file):
+  //   @@ -1,4 +1,5 @@
+  //    line1        (ctx, idx 0)
+  //   -line2        (del, idx 1)
+  //   +line2-changed(add, idx 2)
+  //   +line2b       (add, idx 3)
+  //    line3        (ctx, idx 4)
+  //    line4        (ctx, idx 5)
+
+  it('stages the whole hunk verbatim (recounted) when no lines are given', () => {
+    // Selecting every changed line reproduces the hunk with a recounted header.
+    const patch = buildForwardPatchLines(SAMPLE, 0);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,5 @@',
+        ' line1',
+        '-line2',
+        '+line2-changed',
+        '+line2b',
+        ' line3',
+        ' line4',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('omits unselected additions (does NOT demote them to context)', () => {
+    // Stage only the deletion (idx 1) and the first addition (idx 2); the second
+    // addition (idx 3, line2b) is UNSELECTED → dropped entirely, not demoted.
+    const patch = buildForwardPatchLines(SAMPLE, 0, [1, 2]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,4 @@', // old 4 (ctx+ctx+ctx+del), new 4 (ctx+add+ctx+ctx)
+        ' line1',
+        '-line2',
+        '+line2-changed',
+        // line2b omitted — neither `+` nor context
+        ' line3',
+        ' line4',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('demotes unselected deletions to context', () => {
+    // Stage only the two additions (idx 2,3); the deletion (idx 1) is UNSELECTED
+    // → demoted to context so it stays in the index.
+    const patch = buildForwardPatchLines(SAMPLE, 0, [2, 3]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,6 @@', // old: line1,line2(ctx),line3,line4 = 4; new: +2 adds = 6
+        ' line1',
+        ' line2', // unselected delete → context
+        '+line2-changed',
+        '+line2b',
+        ' line3',
+        ' line4',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps a whole-new-file /dev/null header when staging a subset of its adds', () => {
+    // A brand-new file's additions never create context on the old side, so the
+    // old side stays empty and the `--- /dev/null` header remains valid.
+    const NEW_FILE = [
+      'diff --git a/new.txt b/new.txt',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      '--- /dev/null',
+      '+++ b/new.txt',
+      '@@ -0,0 +1,3 @@',
+      '+a',
+      '+b',
+      '+c',
+      '',
+    ].join('\n');
+    // Stage only the first and third additions (idx 0 and 2).
+    const patch = buildForwardPatchLines(NEW_FILE, 0, [0, 2]);
+    expect(patch).toBe(
+      [
+        'diff --git a/new.txt b/new.txt',
+        'new file mode 100644',
+        'index 0000000..abc1234',
+        '--- /dev/null',
+        '+++ b/new.txt',
+        '@@ -0,0 +1,2 @@',
+        '+a',
+        '+c', // b omitted; still a pure /dev/null add of two lines
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('preserves no-newline markers on both sides when staging the whole hunk', () => {
+    const noEof = `diff --git a/f b/f
+index 1..2 100644
+--- a/f
++++ b/f
+@@ -1 +1 @@
+-old
+\\ No newline at end of file
++new
+\\ No newline at end of file
+`;
+    const patch = buildForwardPatchLines(noEof, 0);
+    expect(patch).toContain('-old\n\\ No newline at end of file');
+    expect(patch).toContain('+new\n\\ No newline at end of file');
+  });
+
+  it('throws for an out-of-range hunk index', () => {
+    expect(() => buildForwardPatchLines(SAMPLE, 5)).toThrow(/not found/);
+  });
+
+  it('throws when the selection contains no changed lines', () => {
+    const hunk = parseDiff(SAMPLE)[0].hunks[0];
+    const ctxIdx = hunk.lines.findIndex((l) => l.type === 'context');
+    expect(() => buildForwardPatchLines(SAMPLE, 0, [ctxIdx])).toThrow(/No changed lines/);
+  });
+
+  it('pairs the k-th delete with the k-th add in a 2-del/2-add run, keeping the staged add in its delete\'s slot', () => {
+    // Two independent replacements in one run: A→A2 (idx 1,3) and B→B2 (idx 2,4).
+    //  0 ctx line1, 1 del A, 2 del B, 3 add A2, 4 add B2, 5 ctx line3
+    // Stage ONLY the A→A2 pair. Without the reorder fix, the raw-order body
+    // would emit the demoted B context BEFORE the staged A2 add, which flips
+    // the resulting index content to line1/B/A2/line3 (B and A2 swapped).
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,4 +1,4 @@
+ line1
+-A
+-B
++A2
++B2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [1, 3]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,4 @@',
+        ' line1',
+        '-A',
+        '+A2', // kept add sits right after its own delete, not after B's context
+        ' B', // unselected delete demoted to context (stage direction)
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('pairs a NON-ADJACENT (middle) del/add pair in a 3-del/3-add run, keeping the staged add in its own slot', () => {
+    // Three independent replacements in one run: A→A2, B→B2, C→C2 (idx 1-3 del,
+    // 4-6 add). Stage ONLY the MIDDLE pair (B→B2); A and C are unselected on
+    // BOTH sides. Raw git-diff order is ALL deletes then ALL adds, so without
+    // the reorder fix, processing in raw order would emit the demoted A and C
+    // context lines BEFORE B2's add (since A2/C2 are omitted, not demoted, so
+    // nothing after B on the delete side stops B2 from landing after them) —
+    // giving new-side content line1/A/C/B2/line3 (B2 pushed to the end, past
+    // C) instead of B2 staying in its own slot between A and C.
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,5 +1,5 @@
+ line1
+-A
+-B
+-C
++A2
++B2
++C2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [2, 5]);
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,5 +1,5 @@',
+        ' line1',
+        ' A', // unselected delete demoted to context (stage direction)
+        '-B',
+        '+B2', // kept add sits right after its own delete, not after C's context
+        ' C', // unselected delete demoted to context (stage direction)
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it("direction:'unstage' reorders the same middle pair, demoting unselected adds to context and omitting unselected deletes", () => {
+    // Same 3-replacement run, but as a HEAD→index (staged) diff being partially
+    // unstaged: unstage ONLY B→B2. A and C are unselected on both sides — for
+    // 'unstage' an unselected add (A2/C2, the index baseline) demotes to
+    // context while an unselected delete (A/C, HEAD content) is OMITTED
+    // entirely. The reconstructed OLD side (the result after reverse-apply)
+    // must read line1,A2,B,C2,line3 — B reverted, A2/C2 left staged, in their
+    // ORIGINAL slots — which requires the same reorder fix on the opposite side.
+    const runHunk = `diff --git a/file.txt b/file.txt
+index 1111111..2222222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,5 +1,5 @@
+ line1
+-A
+-B
+-C
++A2
++B2
++C2
+ line3
+`;
+    const patch = buildForwardPatchLines(runHunk, 0, [2, 5], 'unstage');
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,5 +1,5 @@',
+        ' line1',
+        // -A omitted — unselected delete in 'unstage' direction
+        ' A2', // unselected add demoted to context — index keeps it staged
+        '-B',
+        '+B2',
+        // -C omitted — unselected delete in 'unstage' direction
+        ' C2', // unselected add demoted to context — index keeps it staged
+        ' line3',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it("direction:'unstage' demotes an unselected add to context and omits an unselected delete", () => {
+    // Staged (HEAD→index) diff: reuse SAMPLE's shape. Unstage only the
+    // line2-changed add (idx 2); the delete (idx 1, HEAD content) is not the
+    // unstage baseline so it must be OMITTED, and the other add (idx 3,
+    // line2b) IS the baseline so an unselected one must be DEMOTED to context
+    // (unlike 'stage' direction, which would omit it).
+    const patch = buildForwardPatchLines(SAMPLE, 0, [2], 'unstage');
+    expect(patch).toBe(
+      [
+        'diff --git a/file.txt b/file.txt',
+        'index 1111111..2222222 100644',
+        '--- a/file.txt',
+        '+++ b/file.txt',
+        '@@ -1,4 +1,5 @@',
+        ' line1',
+        // -line2 omitted — unselected delete in 'unstage' direction
+        '+line2-changed',
+        ' line2b', // unselected add demoted to context — index keeps it
+        ' line3',
+        ' line4',
+        '',
+      ].join('\n'),
+    );
   });
 });

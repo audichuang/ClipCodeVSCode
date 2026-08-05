@@ -1,5 +1,13 @@
 # Git Graph+
 
+> **Vendored into Snipcode** (`clipcode-vscode`) — this folder is **not** a
+> separate install target for that product. The text below is **upstream**
+> Git Graph+ marketing (standalone extension). Snipcode **does not** delegate
+> staging / commit / inline blame to VS Code SCM: it ships a real Changes tree,
+> Diff tab, and host-side blame. For current Snipcode behavior and build rules,
+> read `AGENTS.md` in this folder and `../AGENTS.md`. **Do not** install the
+> standalone Marketplace package alongside Snipcode (command/view id clash).
+
 [![VS Code Marketplace](https://img.shields.io/badge/Install-VS%20Code%20Marketplace-007ACC?logo=visual-studio-code&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=the0807.git-graph-plus)
 [![Open VSX](https://img.shields.io/badge/Install-Open%20VSX-a60ee5?logo=eclipse-ide&logoColor=white)](https://open-vsx.org/extension/the0807/git-graph-plus)
 

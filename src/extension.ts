@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
@@ -8,12 +9,14 @@ import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './cop
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
+import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
+import { registerBlame } from './blame/index.js';
 
 interface GitExtension {
   getAPI(version: 1): GitAPI;
@@ -31,6 +34,7 @@ interface GitRepository {
     workingTreeChanges?: GitChange[];
     untrackedChanges?: GitChange[];
     mergeChanges?: GitChange[];
+    HEAD?: { commit?: string; name?: string };
   };
   show?: (ref: string, path: string) => Promise<string>;
   buffer?: (ref: string, path: string) => Promise<Uint8Array>;
@@ -46,6 +50,7 @@ interface GitChange {
 interface GitSelection {
   uriKey: string;
   status?: unknown;
+  staged?: boolean;
 }
 
 export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCommit: (payload: GraphCopyPayload) => Promise<void> } {
@@ -81,6 +86,18 @@ export function activate(context: vscode.ExtensionContext): { copyFullSourceAtCo
   // Webview assets ship under dist/graph-webview (see esbuild build script).
   const assetRootUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'graph-webview');
   activateGraph(context, { assetRootUri, copyFullSourceAtCommit });
+
+  // Warm the cached vscode.git API so the (synchronous) blame deps below can
+  // use it once it resolves; reuses the existing getGitApi() accessor.
+  const gitApiReady = getGitApi().then(api => { cachedGitApi = api; return api; });
+  const blameController = registerBlame(context, {
+    getGitPath: () => runtimeGitPath(),
+    resolveRepoRoot: (uri) => resolveRepoRootFor(uri)
+  });
+  void gitApiReady.then(api => {
+    if (api) void blameController.onGitReady();
+  }).catch(() => {});
+
   // VSCode exports — Task 7 E2E drives copyFullSourceAtCommit through this API.
   return { copyFullSourceAtCommit };
 }
@@ -161,12 +178,10 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
     const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
     // Offer the actual skipped paths/sizes behind a button so the toast stays short.
-    // Fire-and-forget: do NOT await — an action-button notification never
-    // auto-dismisses, so awaiting it would block the copy from returning (hangs
-    // headless e2e and leaves the caller waiting on a toast).
-    const actions = result.skippedFiles.length > 0 ? ['Show skipped'] : [];
-    void vscode.window.showInformationMessage(message, ...actions).then(picked => {
-      if (picked === 'Show skipped') {
+    // Goes through notifyCopied so an oversized copy still gets its warning/error colour.
+    notifyCopied(message, result.text, result.skippedFiles.length > 0 ? {
+      label: 'Show skipped',
+      run: () => {
         const list = result.skippedFiles
           .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
           .join('\n');
@@ -175,8 +190,38 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
           { modal: true, detail: list }
         );
       }
-    });
+    } : undefined);
   }
+}
+
+// Cached vscode.git API for the blame controller's synchronous deps (Task 6).
+// Populated once by activate() via the existing getGitApi() accessor below;
+// blame silently no-ops until it resolves (git extension may still be
+// activating), which matches the "fail silently" contract for blame.
+let cachedGitApi: GitAPI | undefined;
+
+function runtimeGitPath(): string {
+  return cachedGitApi?.git?.path ?? 'git';
+}
+
+// True when `targetFsPath` is `rootFsPath` itself or a path underneath it.
+// Uses path.relative instead of a bare startsWith so a repo at `/repo` never
+// matches a sibling like `/repo-other` (no separator boundary with startsWith).
+function isWithinRoot(rootFsPath: string, targetFsPath: string): boolean {
+  const rel = path.relative(rootFsPath, targetFsPath);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function resolveRepoRootFor(uri: vscode.Uri): { repoRoot: string; head: string } | undefined {
+  const matches = (cachedGitApi?.repositories ?? []).filter(r => isWithinRoot(r.rootUri.fsPath, uri.fsPath));
+  if (matches.length === 0) return undefined;
+  // Nested repos: prefer the deepest (longest) root so a file inside a
+  // nested repo is attributed to that repo, not its parent.
+  const repo = matches.reduce((deepest, r) =>
+    r.rootUri.fsPath.length > deepest.rootUri.fsPath.length ? r : deepest
+  );
+  const head = repo.state.HEAD?.commit ?? repo.state.HEAD?.name ?? 'HEAD';
+  return { repoRoot: repo.rootUri.fsPath, head };
 }
 
 export function deactivate(): void {}
@@ -199,7 +244,7 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} file(s) copied${suffix}.`);
+    notifyCopied(`${result.copiedFileCount} file(s) copied${suffix}.`, result.payload);
   }
 }
 
@@ -238,7 +283,7 @@ async function copyAllOpenEditors(): Promise<void> {
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} open editor file(s) copied${suffix}.`);
+    notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.`, result.payload);
   }
 }
 
@@ -282,7 +327,7 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    vscode.window.showInformationMessage(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`);
+    notifyCopied(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`, payload);
   }
 }
 
@@ -461,7 +506,7 @@ interface GitChangeCandidate {
   forceIndexContent: boolean;
 }
 
-async function collectGitPayloadFiles(
+export async function collectGitPayloadFiles(
   repositories: GitRepository[],
   workspaceRoots: string[],
   selected: GitSelection[],
@@ -508,7 +553,8 @@ async function collectGitPayloadFiles(
 
       const changeType = mapGitStatusToChangeType(change.status);
       const forceIndexContent = selected.some(item =>
-        item.uriKey === key && item.status !== undefined && sameStatus(item.status, change.status) && isStagedGitStatus(change.status)
+        item.uriKey === key && isStagedGitStatus(change.status) &&
+          (item.staged === true || (item.staged === undefined && item.status !== undefined && sameStatus(item.status, change.status)))
       );
       candidates.push({ repository, change, clipboardPath, changeType, forceIndexContent });
     }
@@ -595,11 +641,12 @@ async function readGitChangeContent(
   }
 
   if (forceIndexContent) {
-    return await readRefContent(repository, '', change.uri.fsPath) ??
-      await readWorkspaceText(change.uri);
+    const targetUri = change.renameUri ?? change.uri;
+    return await readRefContent(repository, '', targetUri.fsPath) ??
+      await readWorkspaceText(targetUri);
   }
 
-  return readWorkspaceText(change.uri);
+  return readWorkspaceText(change.renameUri ?? change.uri);
 }
 
 async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
@@ -621,6 +668,7 @@ function gitChangeMatchesSelection(change: GitChange, selected: GitSelection[]):
 
   return selected.some(item =>
     keys.includes(item.uriKey) &&
+    (item.staged === undefined || item.staged === isStagedGitStatus(change.status)) &&
     (item.status === undefined || sameStatus(item.status, change.status))
   );
 }
@@ -641,9 +689,10 @@ function extractResourceSelections(value: unknown): GitSelection[] {
 
   const record = value as Record<string, unknown>;
   const status = record.type ?? record.status;
+  const staged = record.group === 'staged' ? true : record.group === 'unstaged' ? false : undefined;
   const direct = [record.resourceUri, record.uri]
     .filter((uri): uri is vscode.Uri => uri instanceof vscode.Uri)
-    .map(uri => ({ uriKey: uriKey(uri), status }));
+    .map(uri => ({ uriKey: uriKey(uri), status, staged }));
   const nested = [record.resourceStates, record.resources]
     .flatMap(extractResourceSelections);
   return [...direct, ...nested];

@@ -29,6 +29,9 @@
       if (event.data.type === 'lsTreeData') {
         entries = event.data.payload.entries;
         loading = false;
+      } else if (event.data.type === 'error' && event.data.payload?.source === 'lsTree') {
+        // SNIPCODE-HOOK: a failed fetch must not leave the spinner forever.
+        loading = false;
       }
     }
     window.addEventListener('message', handleMessage);

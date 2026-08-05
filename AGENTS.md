@@ -1,47 +1,59 @@
 # AGENTS.md — ClipCodeVSCode (Snipcode)
 
-Single source of truth for AI agents (Codex, Claude Code, Gemini) in this repo.
-`CLAUDE.md` imports this file — edit here only.
+Single source of truth for AI agents in this repo. `CLAUDE.md` imports this file
+— edit here only.
 
 **Snipcode** (`clipcode-vscode`) — VS Code extension that copies and restores
-files using the **IntelliJ ClipCode clipboard format**, plus a bundled commit
-graph view. It is the VS Code port of the sibling IntelliJ plugin ClipCode.
+files using the **IntelliJ ClipCode clipboard format**, plus a bundled Git graph
+and a **Snipcode Git** commit workbench. It is the VS Code port of the sibling
+IntelliJ plugin ClipCode.
 
-## Sibling: ClipCode (shared clipboard format — keep compatible)
+## Clipboard format — this side is the format authority
 
-ClipCode (IntelliJ plugin, Kotlin) is the original. **The clipboard text format
-is a cross-tool contract** — files copied here restore in ClipCode and vice versa.
-Both sides must agree on:
+The format itself, its byte-for-byte invariants, and the fixture-regeneration flow
+are **shared** with the IntelliJ sibling and live in the work-root `AGENTS.md`.
+Read that before changing anything about the wire format — and note the fixtures
+are generated from **this** implementation, so a format change starts here. From a
+lone clone, the executable copy of the contract is
+`test/fixtures/clipboard-contract.json` + `test/contract.test.ts`.
 
-- a per-file header built from a `headerFormat` with a `$FILE_PATH` placeholder
-- change labels `[NEW] [MODIFIED] [DELETED] [MOVED]` prefixed onto the path
-- pre/post text wrapping + the blank-line-between-files option
-- the `//clipcode-esc: ` escape prefix (`ESCAPE_MARKER`): a content line that
-  itself parses as a header is escaped on copy and unescaped on paste, so a file
-  containing a literal `// file: …` line round-trips instead of splitting into a
-  phantom file. The marker MUST be byte-identical on both sides.
+Implementation: `src/clipboardFormat.ts` — `buildPayloadInternal` + `escapeContent`
+(build), `parseClipboard` + `unescapeContent` + `joinContent` (parse). The Kotlin
+mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ClipboardPayloadFormatter.kt`
+(build) + `ChangeTypeLabel.kt` / `ClipboardRestoreParser.kt` (labels + parse).
 
-Format authority on this side: `src/clipboardFormat.ts` — `buildPayloadInternal`
-+ `escapeContent` (build), `parseClipboard` + `unescapeContent` + `joinContent`
-(parse). The IntelliJ mirror is `ClipCode/src/main/kotlin/com/github/audichuang/clipcode/ChangeTypeLabel.kt`
-(+ `GitClipboardFormatter.kt` / `CopyFileContentAction.kt` / `ClipboardRestoreParser.kt`).
-**Change labels, bracket syntax, header rules, or the escape marker on one side →
-update the other, or cross-tool restore silently breaks.** Round-trip is guarded
-by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
-`test-e2e/suite/roundtrip.test.ts`.
+TS-side pins for the shared invariants:
 
-## Two parts of this repo
+- Header and label regexes use the explicit `ASCII_WS` class, **not** JS Unicode
+  `\s` (which would treat a full-width-space-indented line as a header when Kotlin
+  does not, splitting a phantom file cross-tool).
+- `formatHeader` substitutes via `split('$FILE_PATH').join(...)`, never
+  `replaceAll(str, str)` — a string replacement expands `$&`/`$$` and corrupts
+  paths containing them, even in this tool's own round-trip.
+- The `// clipcode-root:` line is emitted only for a **single-root copy context**
+  (one workspace / source root, or a single-repo graph copy) — not merely "one
+  VS Code window".
 
-- **root `src/`** — the Snipcode extension host, the part you usually edit:
-  copy/restore, git-aware copy, path filtering, the git history view.
-- **`graph/`** — a *vendored* copy of git-graph-plus (its own Svelte webview and
-  build). It has its own context — see `graph/CLAUDE.md`. The host bundles its
-  webview assets via `scripts/copy-graph-assets.mjs`; its **extension-host** code
-  (`graph/src/*.ts`) ships because root `src/extension.ts` does
-  `require('../graph/src/extension')`, so `build:host` (esbuild) pulls it into
-  `dist/extension.js`. To confirm a graph change shipped, grep `dist/extension.js`
-  (host) or `dist/graph-webview/main.js` (webview). Don't install the standalone
-  git-graph-plus extension alongside Snipcode (command/view id clash).
+Beyond the frozen fixtures, round-trip is guarded by `test/clipboardFormat.test.ts`
+and the e2e `test-e2e/suite/roundtrip.test.ts`.
+
+## Roles in this repo
+
+| Area | Role |
+|---|---|
+| root `src/` | Extension host: copy/restore, git-aware copy, path filters, History view, **inline blame** (`src/blame/`) |
+| `graph/` | Vendored git-graph-plus **plus Snipcode Git**: commit graph webview, multi-repo **Changes** tree + commit box, full-width **Diff** tab (staged/unstaged, hunk/line stage). Own context: `graph/AGENTS.md` |
+
+**Bundling (non-obvious):** webview assets ship via `scripts/copy-graph-assets.mjs`
+into `dist/graph-webview/`. Extension-host code under `graph/src/` ships because
+root `src/extension.ts` does `require('../graph/src/extension')`, so `build:host`
+(esbuild) pulls it into `dist/extension.js`. To confirm a graph change shipped, grep
+`dist/extension.js` (host) and/or `dist/graph-webview/{main,workbench,diff}.js`
+(three classic webview bundles — see `graph/AGENTS.md`). **Do not** install the
+standalone git-graph-plus extension alongside Snipcode (command/view id clash).
+
+Snipcode-only edits inside `graph/` must be fenced with
+`/* SNIPCODE-HOOK start/end */` so upstream re-syncs stay mergeable.
 
 ## Build / test
 
@@ -50,35 +62,51 @@ by the unit tests in `test/clipboardFormat.test.ts` and the e2e test
     npm run test:e2e     # headless VS Code integration tests
     npx vsce package     # → clipcode-vscode-<version>.vsix
 
-Note: `npm test` runs **host** tests only — the graph webview has a separate
-vitest suite (`cd graph && npx vitest run`). Run it if you touch `graph/`.
+- `npm test` = **host** tests only. If you touch `graph/`, also run
+  `cd graph && npx vitest run` (and prefer a single file when iterating).
+- Judge pass/fail by the `pass N, fail 0` / `Tests …` text.
 
-Gotcha: piping a build/test command (`| tail`/`| grep`) gives the pipe's exit code, not
-npm/vitest/vsce's — judge pass/fail by the `pass N, fail 0` / `Tests …` / `BUILD SUCCESSFUL`
-TEXT in the output, not `$?`.
+**A green test is not a spec.** Suites here have repeatedly locked the CURRENT
+(buggy) behavior into their expectations — e.g. PR open/copy asserting symbolic
+refs, pull asserting an unconditional stash pop — so a correct fix turns them
+red. When a fix flips a test, first ask whether the assertion encoded intent or
+just the status quo; invert status-quo tests in the SAME change, don't weaken
+the fix to keep them green.
+
+What `test:e2e` covers is whatever lives in `test-e2e/suite/`. What it still does
+**not** exercise: git mutations (stage/commit/push), multi-repo staging, and
+overwrite-conflict restore. The aspirational coverage matrix is
+`docs/research/2026-07-11-e2e-test-strategy.md` §3 — **do not trust that doc's §1
+"current guarantees" inventory**, it predates the boot handshake. Risk audit behind
+it: `docs/research/2026-07-10-vscode-git-operations-audit.md`.
 
 ## Release
 
 Pushing a `v<version>` tag runs `.github/workflows/publish.yml` (test → build →
-e2e → `vsce publish`). **A release is not done when CI goes green** — the new
-version becomes live on the Marketplace minutes later. Use the
-`vscode-extension-release` skill: it drives the full bump → tag → watch-CI →
-poll-marketplace-until-live flow. Open VSX is not set up yet (namespace
-unclaimed) — VS Code Marketplace only for now.
+e2e → `vsce publish`). Use the `vscode-extension-release` skill — it owns the
+"not done until the version is verified live" discipline. Open VSX is not set up
+yet (namespace unclaimed) — VS Code Marketplace only for now.
 
 ## Where to start in the code
 
-`src/clipboardFormat.ts` (the shared format), `src/copy.ts` + `src/restore.ts`
-(copy/restore), `src/gitCopy.ts` + `src/gitContent.ts` (git-aware copy),
-`src/graphCopy.ts` (Copy Full Source from the graph view), and
-`src/pathResolver.ts` + `src/filterMatcher.ts` + `src/settings.ts` (mirror
-ClipCode's resolver / filter / settings). For full structure read `src/` — don't
-trust a hand-written tree.
+**Copy / restore (ClipCode parity):** `src/clipboardFormat.ts`, `src/copy.ts` +
+`src/restore.ts`, `src/gitCopy.ts` + `src/gitContent.ts`, `src/graphCopy.ts`,
+`src/pathResolver.ts` + `src/filterMatcher.ts` + `src/settings.ts`.
 
-PR compare tab (pick base→head, inline diff, copy): `graph/webview-ui/src/components/pr/PrView.svelte`
-(webview UI) + `graph/src/git/git-service.ts` `commitsBetween` (host: base...HEAD three-dot
-diff/commits/merge-base). It's a Snipcode feature added INSIDE the vendored graph webview —
-fence every `graph/` edit with `/* SNIPCODE-HOOK start/end */` for upstream re-sync.
+**Inline blame:** `src/blame/` (toggle command + per-editor decorations; host-side,
+not in the graph webview).
+
+**Snipcode Git workbench + Diff + graph:** see `graph/AGENTS.md`. Entry points:
+`graph/src/tree/changes-workbench.ts` (TreeView staging),
+`graph/src/tree/commit-box-view.ts` (commit message webview),
+`graph/src/panels/DiffPanel.ts` (full-width Diff tab),
+`graph/src/panels/MainPanel.ts` (commit graph).
+
+**PR compare tab** (base→head, inline diff, copy): `graph/webview-ui/src/components/pr/PrView.svelte`
++ `graph/src/git/git-service.ts` `commitsBetween` (base...HEAD three-dot). Snipcode
+feature *inside* the vendored graph — fence with `SNIPCODE-HOOK`.
+
+For full structure, read the directories — don't trust a hand-written tree.
 
 ## Permissions
 

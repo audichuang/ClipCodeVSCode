@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/svelte';
+import { render, cleanup, fireEvent, screen } from '@testing-library/svelte';
 import FileDiffView from '../FileDiffView.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
 import type { DiffData } from '../../../lib/types';
@@ -393,6 +393,25 @@ describe('FileDiffView gutter line-selection', () => {
   });
 });
 
+/* SNIPCODE-HOOK start: Batch C side-by-side alignment regression. */
+describe('FileDiffView side-by-side alignment', () => {
+  it('pairs adjacent delete and add lines on the same visual row', () => {
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(),
+      diffMode: 'side-by-side',
+      hideModeToggle: true,
+    });
+
+    const leftRows = container.querySelectorAll('.sbs-left .diff-line');
+    const rightRows = container.querySelectorAll('.sbs-right .diff-line');
+    expect(leftRows.length).toBe(6);
+    expect(rightRows.length).toBe(6);
+    expect(leftRows[1].querySelector('.line-content')?.textContent).toBe('b');
+    expect(rightRows[1].querySelector('.line-content')?.textContent).toBe('b2');
+  });
+});
+/* SNIPCODE-HOOK end */
+
 // A blank line whose content is the empty string — exercises the edge where
 // selectedLinesText() returns '' for a single selected blank line.
 function blankLineDiff(): DiffData {
@@ -542,5 +561,93 @@ describe('FileDiffView copy lines (gutter)', () => {
     expect(onReverse).toHaveBeenCalledTimes(1);
     expect(onReverse.mock.calls[0][0]).toMatchObject({ hunkIndex: 1 });
     expect(onReverse.mock.calls[0][0].copyLinesText).toBeUndefined();
+  });
+});
+
+describe('FileDiffView stage/unstage (B-2c)', () => {
+  it('renders a "Stage Hunk" button on an unstaged diff and fires onStageHunk', async () => {
+    const onStageHunk = vi.fn();
+    const { container } = render(FileDiffView, { diff: sampleDiff(), staged: false, onStageHunk });
+    const btn = container.querySelector('.hunk-stage-btn');
+    expect(btn).not.toBeNull();
+    // Arrow-icon button (B): the label lives on aria-label/title, not text.
+    expect(btn!.getAttribute('aria-label')).toBe('Stage Hunk');
+    await fireEvent.click(btn!);
+    expect(onStageHunk).toHaveBeenCalledTimes(1);
+    expect(onStageHunk.mock.calls[0][0]).toEqual({ file: 'src/foo.ts', hunkIndex: 0 });
+  });
+
+  it('labels the button "Unstage Hunk" on a staged diff', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff(), staged: true, onStageHunk: vi.fn() });
+    expect(container.querySelector('.hunk-stage-btn')!.getAttribute('aria-label')).toBe('Unstage Hunk');
+  });
+
+  it('renders no stage button when onStageHunk is not provided', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.hunk-stage-btn')).toBeNull();
+  });
+
+  it('disables staging on a truncated hunk (never stage unseen lines)', () => {
+    const { container } = render(FileDiffView, { diff: hugeDiff(), onStageHunk: vi.fn() });
+    expect(container.querySelector('.hunk-stage-btn')).toBeNull();
+  });
+
+  it('shows one SBS gutter arrow per change block, anchored on the block', async () => {
+    i18n.setLocale('en');
+    const onStageLines = vi.fn();
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(), staged: false, onStageHunk: vi.fn(), onStageLines,
+      diffMode: 'side-by-side', hideModeToggle: true,
+    });
+    // sampleDiff hunk 0: 0 ctx, 1 del, 2 add, 3 ctx, 4 add, 5 add, 6 ctx.
+    // Two contiguous +/- blocks: [1,2] and [4,5] → two arrows.
+    const btns = container.querySelectorAll('.sbs-block-stage-btn');
+    expect(btns.length).toBe(2);
+    expect(btns[0].getAttribute('aria-label')).toBe('Stage Change Block');
+    // Clicking the first arrow stages just that block's changed lines.
+    await fireEvent.click(btns[0]);
+    expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1, 2] });
+  });
+
+  it('renders no SBS gutter arrow when onStageLines is absent (avoids a dead button)', () => {
+    // canStage is driven by onStageHunk, but the block arrow stages via onStageLines.
+    // Without onStageLines the arrow would click into a no-op, so it must not render.
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(), staged: false, onStageHunk: vi.fn(),
+      diffMode: 'side-by-side', hideModeToggle: true,
+    });
+    expect(container.querySelector('.sbs-block-stage-btn')).toBeNull();
+  });
+
+  it('labels SBS gutter arrows "Unstage Change Block" on a staged diff', () => {
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(), staged: true, onStageHunk: vi.fn(), onStageLines: vi.fn(),
+      diffMode: 'side-by-side', hideModeToggle: true,
+    });
+    expect(container.querySelector('.sbs-block-stage-btn')!.getAttribute('aria-label')).toBe('Unstage Change Block');
+  });
+
+  it('offers Stage Selected Lines and posts the changed indices (unstaged view)', async () => {
+    i18n.setLocale('en');
+    const onStageLines = vi.fn();
+    const { container } = render(FileDiffView, {
+      diff: sampleDiff(),
+      staged: false,
+      onStageHunk: vi.fn(),   // turns the staging view on (canStage)
+      onStageLines,
+    });
+
+    // sampleDiff hunk 0 lines: 0 ctx a, 1 del b, 2 add b2, 3 ctx c, 4 add d1, 5 add d2, 6 ctx e.
+    // Select the delete line (index 1) by a left mousedown on its gutter.
+    const gutters = container.querySelectorAll('.line-gutter');
+    await fireEvent.mouseDown(gutters[1], { button: 0 });
+
+    // The arrow "Stage Selected Lines" button now appears; click it.
+    const btn = container.querySelector('.hunk-stage-lines-btn');
+    expect(btn).toBeTruthy();
+    expect(btn!.getAttribute('aria-label')).toBe('Stage Selected Lines');
+    await fireEvent.click(btn!);
+
+    expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });
   });
 });

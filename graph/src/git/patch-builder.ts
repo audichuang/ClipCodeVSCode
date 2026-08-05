@@ -96,6 +96,24 @@ interface BodyLine {
  *  the canonical form rather than echoing the (whitespace-identical) original. */
 const NO_NEWLINE_MARKER = '\\ No newline at end of file';
 
+/* SNIPCODE-HOOK start: mirror whole-file paths even when Git C-quotes them */
+function mirrorHeaderPath(
+  header: string[],
+  sourceMarker: '---' | '+++',
+  sourcePrefix: 'a/' | 'b/',
+  targetMarker: '---' | '+++',
+  targetPrefix: 'a/' | 'b/',
+): string | undefined {
+  const unquoted = `${sourceMarker} ${sourcePrefix}`;
+  const quoted = `${sourceMarker} "${sourcePrefix}`;
+  const source = header.find((line) => line.startsWith(unquoted) || line.startsWith(quoted));
+  if (!source) return undefined;
+  const prefix = source.startsWith(quoted) ? quoted : unquoted;
+  const target = source.startsWith(quoted) ? `${targetMarker} "${targetPrefix}` : `${targetMarker} ${targetPrefix}`;
+  return target + source.slice(prefix.length);
+}
+/* SNIPCODE-HOOK end */
+
 /**
  * A whole-file add/delete diff carries a `new file mode`/`deleted file mode`
  * line and a `/dev/null` side. That header reverses cleanly only while one side
@@ -125,11 +143,13 @@ function normalizeWholeFileHeader(header: string[], oldCount: number, newCount: 
     const modeMatch = line.match(/^(?:new|deleted) file mode (\d+)$/);
     if (modeMatch) { mode = modeMatch[1]; continue; }
     if (rewriteOld && line === '--- /dev/null') {
-      const plus = header.find((l) => l.startsWith('+++ b/'));
-      out.push(plus ? '--- a/' + plus.slice('+++ b/'.length) : line);
+      /* SNIPCODE-HOOK start: support Git C-quoted whole-file paths */
+      out.push(mirrorHeaderPath(header, '+++', 'b/', '---', 'a/') ?? line);
+      /* SNIPCODE-HOOK end */
     } else if (rewriteNew && line === '+++ /dev/null') {
-      const minus = header.find((l) => l.startsWith('--- a/'));
-      out.push(minus ? '+++ b/' + minus.slice('--- a/'.length) : line);
+      /* SNIPCODE-HOOK start: support Git C-quoted whole-file paths */
+      out.push(mirrorHeaderPath(header, '---', 'a/', '+++', 'b/') ?? line);
+      /* SNIPCODE-HOOK end */
     } else {
       out.push(line);
     }
@@ -164,8 +184,12 @@ function normalizeWholeFileHeader(header: string[], oldCount: number, newCount: 
  *
  * @throws if the hunk index is out of range or nothing reversible is selected.
  */
-export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIndices?: number[]): string {
-  const { header, hunks } = parseFileDiff(rawFileDiff);
+/* SNIPCODE-HOOK start: byte-preserving commit reverse */
+export function buildReversePatch(rawFileDiff: Buffer, hunkIndex: number, lineIndices?: number[]): Buffer;
+export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIndices?: number[]): string;
+export function buildReversePatch(rawFileDiff: string | Buffer, hunkIndex: number, lineIndices?: number[]): string | Buffer {
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
+/* SNIPCODE-HOOK end */
   const hunk = hunks[hunkIndex];
   if (!hunk) {
     throw new Error(`Hunk ${hunkIndex} not found in diff`);
@@ -311,5 +335,343 @@ export function buildReversePatch(rawFileDiff: string, hunkIndex: number, lineIn
 
   const headerLine = rewriteHunkHeader(hunk.headerLine, oldCount, newCount);
   const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
-  return [...finalHeader, headerLine, ...body].join('\n') + '\n';
+  /* SNIPCODE-HOOK start: byte-preserving commit reverse */
+  return encodePatchBytes(rawFileDiff, [...finalHeader, headerLine, ...body].join('\n') + '\n');
+  /* SNIPCODE-HOOK end */
 }
+
+/**
+ * Build a patch that stages ONLY the selected hunks of a HEAD→working-tree
+ * file diff, for `git apply --cached`. Each hunk of a HEAD→working diff is an
+ * independent region, so staging a subset just means emitting those hunks
+ * verbatim (original header line + entries + no-newline markers) and dropping
+ * the rest — no line-count rewriting is needed because whole hunks keep their
+ * own already-correct `@@` counts.
+ *
+ * Hunk-level only (v1). Per-line selection (lineIndices) is intentionally left
+ * to v2. `selectedHunkIndices` index into the parsed hunk list exactly as
+ * `parseFileDiff`/`parseDiff` produce it; they are de-duplicated and applied in
+ * ascending file order (git apply wants hunks in file order).
+ *
+ * `normalizeWholeFileHeader` runs for parity with the reverse builder and to
+ * cover the whole-file `/dev/null` cases (new/deleted file selected in full);
+ * for ordinary modification diffs and verbatim hunk selection it is a no-op.
+ *
+ * @throws if nothing is selected or a selected index is out of range.
+ */
+/* SNIPCODE-HOOK start: byte-preserving forward hunk and line patches */
+function decodePatchBytes(rawFileDiff: string | Buffer): string {
+  return Buffer.isBuffer(rawFileDiff) ? rawFileDiff.toString('latin1') : rawFileDiff;
+}
+
+function encodePatchBytes(rawFileDiff: string | Buffer, patch: string): string | Buffer {
+  return Buffer.isBuffer(rawFileDiff) ? Buffer.from(patch, 'latin1') : patch;
+}
+
+export function buildForwardPatch(rawFileDiff: Buffer, selectedHunkIndices: number[]): Buffer;
+export function buildForwardPatch(rawFileDiff: string, selectedHunkIndices: number[]): string;
+export function buildForwardPatch(rawFileDiff: string | Buffer, selectedHunkIndices: number[]): string | Buffer {
+  if (selectedHunkIndices.length === 0) {
+    throw new Error('No hunks selected to stage');
+  }
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
+  const ordered = [...new Set(selectedHunkIndices)].sort((a, b) => a - b);
+
+  let oldCount = 0;
+  let newCount = 0;
+  const body: string[] = [];
+  for (const idx of ordered) {
+    const hunk = hunks[idx];
+    if (!hunk) {
+      throw new Error(`Hunk ${idx} not found in diff`);
+    }
+    body.push(hunk.headerLine);
+    for (const entry of hunk.entries) {
+      body.push(entry.text, ...entry.markers);
+      if (entry.kind === 'context') { oldCount++; newCount++; }
+      else if (entry.kind === 'delete') { oldCount++; }
+      else { newCount++; }
+    }
+  }
+
+  const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
+  const patch = [...finalHeader, ...body].join('\n') + '\n';
+  return encodePatchBytes(rawFileDiff, patch);
+}
+
+/**
+ * Build a single-hunk patch that stages ONLY the selected changed lines of one
+ * hunk from an index→working diff, for `git apply --cached`.
+ *
+ * Selection semantics (forward / stage direction; baseline = the current index):
+ *  - omitted lineIndices → stage every changed (+/-) line in the hunk;
+ *  - provided → stage only the listed +/- lines:
+ *     - selected `+` → kept as `+` (added to the index);
+ *     - UNSELECTED `+` → OMITTED entirely (not in the index, not being staged).
+ *       It does NOT demote to context — unlike reverse — because a context line
+ *       must exist in the baseline/index and an unstaged addition does not;
+ *     - selected `-` → kept as `-` (removed from the index);
+ *     - UNSELECTED `-` → demoted to context ` ` (it stays in the index).
+ *
+ * This is the mirror image of {@link buildReversePatch} with the old/new sides
+ * swapped: for `'stage'`, the OLD side (the index baseline) always reaches EOF
+ * because deletions are never dropped, while the NEW side (the staged result)
+ * can lose a trailing line when an unselected trailing addition is omitted.
+ * `'unstage'` inverts which side can be shortened instead: an unselected
+ * deletion is OMITTED (not demoted), so the OLD side can now end short of the
+ * hunk's true old-EOF entry — the no-newline re-anchoring tracks reachability
+ * for BOTH sides (`oldReachesEof`/`newReachesEof`) rather than assuming one
+ * side is always intact.
+ *
+ * `direction` picks which side of the RAW diff is the "current, don't-touch"
+ * baseline for an UNSELECTED changed line, because the same function is reused
+ * by both stage and unstage call sites on structurally different raw diffs:
+ *  - `'stage'` (default): raw = index→working; the baseline is the DELETE side
+ *    (current index content), matching the semantics above.
+ *  - `'unstage'`: raw = HEAD→index (the staged diff); the baseline is the ADD
+ *    side (current index content) instead, so the roles invert — an
+ *    unselected `-` (HEAD content, not the baseline) is OMITTED entirely, and
+ *    an unselected `+` (index content, the baseline) is demoted to context —
+ *    otherwise the reconstructed "new" side (which `git apply --cached
+ *    --reverse` must match against the CURRENT index) would use stale
+ *    HEAD-side text for the untouched portion instead of what is actually
+ *    staged right now.
+ *
+ * Both directions also reorder each maximal run of consecutive +/- entries by
+ * pairing the k-th delete with the k-th add (see `orderedEntries` below):
+ * git diff emits a run as ALL deletes then ALL adds, so selecting only one
+ * pair out of several in the same run — e.g. keep A→A2, leave B→B2 alone —
+ * would otherwise place the demoted/omitted line(s) out of position relative
+ * to the kept line(s) and silently swap two lines' order in the result.
+ *
+ * @throws if the hunk index is out of range or nothing stageable is selected.
+ */
+export function buildForwardPatchLines(
+  rawFileDiff: Buffer,
+  hunkIndex: number,
+  lineIndices?: number[],
+  direction?: 'stage' | 'unstage',
+): Buffer;
+export function buildForwardPatchLines(
+  rawFileDiff: string,
+  hunkIndex: number,
+  lineIndices?: number[],
+  direction?: 'stage' | 'unstage',
+): string;
+export function buildForwardPatchLines(
+  rawFileDiff: string | Buffer,
+  hunkIndex: number,
+  lineIndices?: number[],
+  direction: 'stage' | 'unstage' = 'stage',
+): string | Buffer {
+  const { header, hunks } = parseFileDiff(decodePatchBytes(rawFileDiff));
+  const hunk = hunks[hunkIndex];
+  if (!hunk) {
+    throw new Error(`Hunk ${hunkIndex} not found in diff`);
+  }
+
+  const selected = lineIndices ? new Set(lineIndices) : null;
+  const isStaging = (idx: number, kind: PatchEntry['kind']): boolean =>
+    kind !== 'context' && (selected ? selected.has(idx) : true);
+
+  // Each side's original EOF-newline state, from the ORIGINAL hunk markers
+  // (identical derivation to buildReversePatch).
+  let oldNoNewline = false;
+  let newNoNewline = false;
+  for (const entry of hunk.entries) {
+    if (entry.markers.length === 0) { continue; }
+    if (entry.kind === 'context') { oldNoNewline = true; newNoNewline = true; }
+    else if (entry.kind === 'delete') { oldNoNewline = true; }
+    else { newNoNewline = true; }
+  }
+
+  // Reorder each maximal run of consecutive +/- entries by pairing the k-th
+  // delete with the k-th add (same convention as word-diff's pairHunkWordDiffs).
+  // Raw git diff emits a run as ALL deletes then ALL adds; when a delete in the
+  // middle of a run is demoted to context (kept in the index) while a LATER add
+  // in the same run is staged, emitting them in raw order would place the
+  // demoted context AHEAD of the staged add in the body, and since `git apply`
+  // emits `+` content strictly in patch-encounter order, that silently swaps the
+  // two lines' order in the resulting index blob. Pairing keeps each add
+  // adjacent to "its" delete's original slot so partial-run selection preserves
+  // line order. `origIdx` still refers to the ORIGINAL hunk.entries index (the
+  // lineIndices convention), only the traversal order changes.
+  // ponytail: only reorders WITHIN a same-kind run; runs that are pure adds or
+  // pure deletes (the SAMPLE-based unit tests) are emitted unchanged.
+  const orderedEntries: Array<{ entry: (typeof hunk.entries)[number]; origIdx: number }> = [];
+  {
+    let i = 0;
+    while (i < hunk.entries.length) {
+      if (hunk.entries[i].kind === 'context') {
+        orderedEntries.push({ entry: hunk.entries[i], origIdx: i });
+        i++;
+        continue;
+      }
+      const runStart = i;
+      while (i < hunk.entries.length && hunk.entries[i].kind !== 'context') { i++; }
+      const dels: number[] = [];
+      const adds: number[] = [];
+      for (let j = runStart; j < i; j++) {
+        (hunk.entries[j].kind === 'delete' ? dels : adds).push(j);
+      }
+      const pairCount = Math.max(dels.length, adds.length);
+      for (let k = 0; k < pairCount; k++) {
+        if (k < dels.length) { orderedEntries.push({ entry: hunk.entries[dels[k]], origIdx: dels[k] }); }
+        if (k < adds.length) { orderedEntries.push({ entry: hunk.entries[adds[k]], origIdx: adds[k] }); }
+      }
+    }
+  }
+
+  // Whether the hunk's final NEW-side entry survives onto the new side of our
+  // reconstruction (so the new side still reaches new-EOF). Context always
+  // survives; a trailing add survives only if selected. Deletions aren't on the
+  // new side, so scan past them. (Mirror of buildReversePatch's oldReachesEof.)
+  // Scanned over the REORDERED traversal — the pairing above can change which
+  // entry ends up last on the new side.
+  let newReachesEof = false;
+  for (let i = orderedEntries.length - 1; i >= 0; i--) {
+    const { entry, origIdx } = orderedEntries[i];
+    if (entry.kind === 'context') { newReachesEof = true; break; }
+    if (entry.kind === 'add') {
+      // 'stage': an unselected add is OMITTED (not on the new side) → depends
+      // on selection. 'unstage': an unselected add is DEMOTED to context
+      // (always on the new side) → always survives regardless of selection.
+      newReachesEof = direction === 'unstage' ? true : isStaging(origIdx, 'add');
+      break;
+    }
+    if (direction === 'stage' && !isStaging(origIdx, 'delete')) {
+      // An unselected deletion is demoted to context, so the staged result
+      // retains the old side's EOF instead of reaching the working side's EOF.
+      break;
+    }
+    // Selected delete — absent from the new side; keep scanning.
+  }
+
+  // Whether the hunk's final OLD-side entry survives onto the old side of our
+  // reconstruction (mirror of newReachesEof, for deletions). Context always
+  // survives; a trailing delete survives per direction: 'stage' demotes an
+  // unselected delete to context (always on the old side, so this is always
+  // true there — same as before this existed); 'unstage' OMITS an unselected
+  // delete entirely (survives only if selected). Adds aren't on the old side,
+  // so scan past them.
+  let oldReachesEof = false;
+  for (let i = orderedEntries.length - 1; i >= 0; i--) {
+    const { entry, origIdx } = orderedEntries[i];
+    if (entry.kind === 'context') { oldReachesEof = true; break; }
+    if (entry.kind === 'delete') {
+      oldReachesEof = direction === 'stage' ? true : isStaging(origIdx, 'delete');
+      break;
+    }
+    if (direction === 'unstage' && !isStaging(origIdx, 'add')) {
+      // An unselected addition is demoted to context, so the partially
+      // unstaged result retains the index side's EOF.
+      break;
+    }
+    // Selected add — removed from the old side on reverse; keep scanning.
+  }
+
+  const bodyLines: BodyLine[] = [];
+  let oldCount = 0;
+  let newCount = 0;
+  let stagedAny = false;
+
+  for (const { entry, origIdx } of orderedEntries) {
+    if (entry.kind === 'context') {
+      bodyLines.push({ text: entry.text, onOld: true, onNew: true });
+      oldCount++;
+      newCount++;
+    } else if (entry.kind === 'add') {
+      if (isStaging(origIdx, 'add')) {
+        // Keep as an addition (new side only); apply --cached adds it to the index.
+        bodyLines.push({ text: entry.text, onOld: false, onNew: true });
+        newCount++;
+        stagedAny = true;
+      } else if (direction === 'unstage') {
+        // 'unstage': the add side IS the baseline (current index) here, so an
+        // unselected add stays exactly as currently staged → demote to context
+        // instead of omitting it.
+        bodyLines.push({ text: ' ' + entry.text.slice(1), onOld: true, onNew: true });
+        oldCount++;
+        newCount++;
+      }
+      // 'stage', unselected addition: OMIT it — not in the index and we aren't staging it.
+    } else {
+      if (isStaging(origIdx, 'delete')) {
+        // Keep as a removal (old side only); apply --cached removes it from the index.
+        bodyLines.push({ text: entry.text, onOld: true, onNew: false });
+        oldCount++;
+        stagedAny = true;
+      } else if (direction === 'unstage') {
+        // 'unstage': the delete side is HEAD content, not the baseline, so an
+        // unselected delete is OMITTED entirely rather than demoted.
+      } else {
+        // 'stage': demote to context — the line stays in the index (both sides).
+        bodyLines.push({ text: ' ' + entry.text.slice(1), onOld: true, onNew: true });
+        oldCount++;
+        newCount++;
+      }
+    }
+  }
+
+  if (!stagedAny) {
+    throw new Error('No changed lines selected to stage');
+  }
+
+  // Re-attach no-newline markers from the RECONSTRUCTED body (mirror of reverse,
+  // old/new swapped).
+  let lastOld = -1;
+  let lastNew = -1;
+  for (let i = 0; i < bodyLines.length; i++) {
+    if (bodyLines[i].onOld) { lastOld = i; }
+    if (bodyLines[i].onNew) { lastNew = i; }
+  }
+
+  // The current-index baseline is always complete: old for stage, new for
+  // unstage. The reconstructed opposite side uses its own EOF state only when
+  // it reaches that side's original EOF; otherwise an unselected trailing
+  // change leaves the baseline side's EOF state in place.
+  const oldEndsNoNewline = lastOld !== -1 && (
+    (direction === 'stage' || oldReachesEof) ? oldNoNewline : newNoNewline
+  );
+  const newEndsNoNewline = lastNew !== -1 && (
+    (direction === 'unstage' || newReachesEof) ? newNoNewline : oldNoNewline
+  );
+
+  const body: string[] = [];
+  for (let i = 0; i < bodyLines.length; i++) {
+    const ln = bodyLines[i];
+    const isOldTerm = oldEndsNoNewline && i === lastOld;
+    const isNewTerm = newEndsNoNewline && i === lastNew;
+
+    if (isOldTerm && isNewTerm) {
+      // Same shared trailing line terminates both sides → one marker.
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else if (isNewTerm && i < lastOld && ln.onOld && ln.onNew) {
+      // Shared line that is the new-side terminator but old-only (kept-delete)
+      // lines follow: split so the marker terminates the new side without
+      // truncating the old. The split contributes one old + one new line — the
+      // same as the context line it replaces — so the running counts are unchanged.
+      const content = ln.text.slice(1);
+      body.push('+' + content, NO_NEWLINE_MARKER, '-' + content);
+    } else if (isOldTerm && i < lastNew && ln.onOld && ln.onNew) {
+      // Mirror split: shared line is the old-side terminator but new-only
+      // (kept-add) lines follow (reachable in 'unstage', where the old side can
+      // now end short of the new side) — split so the marker terminates the old
+      // side without truncating the new.
+      const content = ln.text.slice(1);
+      body.push('-' + content, NO_NEWLINE_MARKER, '+' + content);
+    } else if (isNewTerm) {
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else if (isOldTerm) {
+      body.push(ln.text, NO_NEWLINE_MARKER);
+    } else {
+      body.push(ln.text);
+    }
+  }
+
+  const headerLine = rewriteHunkHeader(hunk.headerLine, oldCount, newCount);
+  const finalHeader = normalizeWholeFileHeader(header, oldCount, newCount);
+  const patch = [...finalHeader, headerLine, ...body].join('\n') + '\n';
+  return encodePatchBytes(rawFileDiff, patch);
+}
+/* SNIPCODE-HOOK end */

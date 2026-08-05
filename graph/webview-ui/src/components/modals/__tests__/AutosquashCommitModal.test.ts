@@ -59,6 +59,22 @@ describe('AutosquashCommitModal', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  // SNIPCODE-HOOK start: probe-failure fallback
+  it('unlocks the button when the staged probe never responds (5s fallback)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(AutosquashCommitModal, { ...base, mode: 'fixup', onClose: vi.fn(), onConfirm: vi.fn() });
+      expect(container.querySelector<HTMLButtonElement>('button.primary')!.disabled).toBe(true);
+      vi.advanceTimersByTime(5001);
+      await tick();
+      expect(container.querySelector<HTMLButtonElement>('button.primary')!.disabled).toBe(false);
+      expect(container.querySelector('.spinner')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  // SNIPCODE-HOOK end
+
   it('re-requests the diff when the repo changes', async () => {
     render(AutosquashCommitModal, { ...base, mode: 'fixup', onClose: vi.fn(), onConfirm: vi.fn() });
     globalThis.__postedMessages.length = 0;

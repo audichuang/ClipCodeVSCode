@@ -12,6 +12,9 @@ import { StashesViewProvider } from './views/stashes-view';
 import { WorktreesViewProvider } from './views/worktrees-view';
 import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
+import { ChangesWorkbench } from './tree/changes-workbench';
+import { CommitBoxViewProvider } from './tree/commit-box-view';
+import { DiffPanel } from './panels/DiffPanel';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
 import { readTimeoutMs } from './utils/config';
@@ -105,6 +108,9 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   let activeRepoPath = workspaceFolder.uri.fsPath;
+  // Set once the ChangesWorkbench exists (below); the built-in git env callback
+  // fires on a later microtask, so it forwards the env through this reference.
+  let workbenchRef: ChangesWorkbench | undefined;
 
   // Resolve the git executable so the extension works when git is not on PATH
   // (e.g. portable/MSYS2 installs configured via `git.path`). The configured
@@ -131,6 +137,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (git?.env) {
           activeGitService.setExtraEnv(git.env);
           MainPanel.setExtraEnv(git.env);
+          workbenchRef?.setGitEnv(git.env);
         }
         // The built-in extension's resolved path already honors `git.path`; adopt
         // it as the fallback for when the user hasn't set a valid `git.path`.
@@ -182,6 +189,38 @@ export function activate(context: vscode.ExtensionContext) {
     stashesView,
     worktreesView,
   );
+
+  // --- Snipcode Git commit workbench (TreeView + commit-box webview, B-2) ---
+  // TreeView paints Staged/Unstaged → repo → file (native file icons via
+  // resourceUri); the webview above it is the shared commit message box.
+  const workbench = new ChangesWorkbench();
+  workbenchRef = workbench;
+  const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true, canSelectMany: true });
+  workbench.setView(changesView);
+  changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));
+  const diffPanel = DiffPanel.register(context.extensionUri, workbench);
+  workbench.setDiffPanel(diffPanel);
+  context.subscriptions.push(
+    workbench,
+    changesView,
+    diffPanel,
+    vscode.window.registerWebviewViewProvider(
+      CommitBoxViewProvider.viewType,
+      new CommitBoxViewProvider(context.extensionUri, workbench),
+    ),
+  );
+  workbench.registerCommands(context);
+  void workbench.refresh();
+  // One FileWatcher per discovered repo, funnelled through the workbench's 300ms
+  // debounce. Dynamic repo add/remove re-wiring is a follow-up.
+  const scmFolders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+  RepoDiscoveryService.discoverRepos(scmFolders).then(repos => {
+    for (const r of repos) {
+      const w = new FileWatcher(r.path, () => workbench.scheduleRefresh());
+      w.enabled = true;
+      context.subscriptions.push(w);
+    }
+  }).catch(() => {});
 
   // Prefetch all tree view data in parallel so first expand is instant
   Promise.all([
@@ -447,6 +486,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('gitGraphPlus.open', (sourceControl?: vscode.SourceControl) => {
       if (sourceControl?.rootUri) { switchToRepo(sourceControl.rootUri.fsPath); }
       MainPanel.createOrShow(context.extensionUri, activeRepoPath);
+      /* SNIPCODE-HOOK start: webview boot handshake (e2e strategy #20)
+         Return the readiness promise so `executeCommand('gitGraphPlus.open')`
+         resolves only after the webview's first message (or rejects on boot
+         failure). The no-op catch prevents an unhandled rejection when the
+         caller doesn't await; awaiting callers still observe the rejection. */
+      const ready = MainPanel.currentPanel?.whenWebviewReady();
+      ready?.catch(() => {});
+      return ready;
+      /* SNIPCODE-HOOK end */
     }),
     vscode.commands.registerCommand('gitGraphPlus.refresh', () => {
       refreshAll();

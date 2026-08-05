@@ -6,9 +6,15 @@
     file: string;
     staged: boolean;
     commitHash?: string;
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    repoPath?: string;
+    generation?: number;
+    /* SNIPCODE-HOOK end */
   }
 
-  let { file, staged, commitHash }: Props = $props();
+  /* SNIPCODE-HOOK start: Batch B image request identity */
+  let { file, staged, commitHash, repoPath, generation }: Props = $props();
+  /* SNIPCODE-HOOK end */
 
   const vscode = getVsCodeApi();
 
@@ -43,14 +49,21 @@
       newRef = 'working';
     }
 
-    vscode.postMessage({ type: 'getImageAtRef', payload: { ref: oldRef, path: file } });
-    vscode.postMessage({ type: 'getImageAtRef', payload: { ref: newRef, path: file } });
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    const identity = repoPath !== undefined && generation !== undefined ? { repoPath, generation } : {};
+    vscode.postMessage({ type: 'getImageAtRef', payload: { ...identity, ref: oldRef, path: file } });
+    vscode.postMessage({ type: 'getImageAtRef', payload: { ...identity, ref: newRef, path: file } });
+    /* SNIPCODE-HOOK end */
   });
 
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
-      if (msg.type === 'imageData' && msg.payload.path === file) {
+      /* SNIPCODE-HOOK start: Batch B image request identity */
+      if (msg.type === 'imageData' && msg.payload.path === file
+        && (repoPath === undefined || msg.payload.repoPath === repoPath)
+        && (generation === undefined || msg.payload.generation === generation)) {
+      /* SNIPCODE-HOOK end */
         const dataUrl = msg.payload.base64
           ? `data:${msg.payload.mimeType};base64,${msg.payload.base64}`
           : null;

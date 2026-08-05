@@ -52,15 +52,32 @@ describe('GitService.exec safety guards', () => {
     vi.clearAllMocks();
   });
 
+  // Timeout/overflow now kill the process but deliver the rejection on
+  // 'close' (or the 10s force timer if the child never exits) — rejecting
+  // earlier would release the mutation lock while the dying child still holds
+  // .git locks. Tests emit stream 'end' + 'close' to simulate the kill
+  // landing, mirroring real child_process ordering (stdio ends before close).
+  function emitKilled() {
+    proc.stdout.emit('end');
+    proc.stderr.emit('end');
+    proc.emit('close', null);
+  }
+
   it('rejects with a GitError when stdout exceeds maxBufferBytes', async () => {
     const p = (service as never as { exec: (a: string[], o?: object) => Promise<string> })
       .exec(['version'], { maxBufferBytes: 4, silent: true });
+    const assertion = expect(p).rejects.toThrow(/exceeded 4 bytes/);
     // 11 bytes against a 4-byte cap → overflow.
     proc.stdout.emit('data', Buffer.from('hello world'));
-    await expect(p).rejects.toThrow(/exceeded 4 bytes/);
-    await expect(p).rejects.toBeInstanceOf(GitError);
-    // The guard must terminate the runaway process.
+    // The overflow propagates through a promise .catch — flush microtasks
+    // before asserting the kill.
+    await vi.advanceTimersByTimeAsync(0);
+    // The guard must terminate the runaway process...
     expect(proc.kill).toHaveBeenCalled();
+    // ...and the rejection arrives once the killed process closes.
+    emitKilled();
+    await assertion;
+    await expect(p).rejects.toBeInstanceOf(GitError);
   });
 
   it('rejects with a GitError when the command exceeds its timeout', async () => {
@@ -69,20 +86,32 @@ describe('GitService.exec safety guards', () => {
     // Attach the rejection handler before advancing time, so the timeout
     // reject never momentarily looks "unhandled" between fire and assert.
     const assertion = expect(p).rejects.toThrow(/timed out after 20ms/);
-    // Never emit 'close'; let the timeout timer fire.
     await vi.advanceTimersByTimeAsync(20);
-    await assertion;
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    emitKilled();
+    await assertion;
+  });
+
+  it('force-rejects after the backstop when the killed process never closes', async () => {
+    const p = (service as never as { exec: (a: string[], o?: object) => Promise<string> })
+      .exec(['version'], { timeout: 20, silent: true });
+    const assertion = expect(p).rejects.toThrow(/timed out after 20ms/);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    // Never emit 'close' — an unkillable child must not hold callers (and the
+    // mutation lock) forever.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
   });
 
   it('uses a 60s default timeout when none is given', async () => {
     const p = (service as never as { exec: (a: string[], o?: object) => Promise<string> })
       .exec(['version'], { silent: true });
     const assertion = expect(p).rejects.toThrow(/timed out after 60000ms/);
-    // Never emit 'close'; let the default timeout timer fire.
     await vi.advanceTimersByTimeAsync(60000);
-    await assertion;
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    emitKilled();
+    await assertion;
   });
 
   it('honors a default timeout overridden via setDefaultTimeout', async () => {
@@ -91,8 +120,9 @@ describe('GitService.exec safety guards', () => {
       .exec(['version'], { silent: true });
     const assertion = expect(p).rejects.toThrow(/timed out after 120000ms/);
     await vi.advanceTimersByTimeAsync(120000);
-    await assertion;
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    emitKilled();
+    await assertion;
   });
 
   it('ignores a non-positive default timeout and keeps the 60s fallback', async () => {
@@ -101,6 +131,7 @@ describe('GitService.exec safety guards', () => {
       .exec(['version'], { silent: true });
     const assertion = expect(p).rejects.toThrow(/timed out after 60000ms/);
     await vi.advanceTimersByTimeAsync(60000);
+    emitKilled();
     await assertion;
   });
 
