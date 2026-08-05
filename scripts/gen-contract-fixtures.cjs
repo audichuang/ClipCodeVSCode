@@ -16,6 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const fmt = require('../out/src/clipboardFormat.js');
+const { estimateTokens } = require('../out/src/copy.js');
 
 const DEFAULT_HEADER = '// file: $FILE_PATH';
 
@@ -228,6 +229,35 @@ const parseInputs = [
   },
 ];
 
+// ---- token-estimate scenarios --------------------------------------------------
+// The copy notification's "~N tokens" must be the SAME number in both tools for the
+// same clipboard text. The two implementations (src/copy.ts estimateTokens /
+// ClipCode TokenEstimator) are word-count + structural punctuation, so every case
+// below targets a place where the two stdlibs could disagree on "whitespace".
+const tokenInputs = [
+  { name: 'empty string', text: '' },
+  { name: 'ascii whitespace only', text: ' \t\n\u000B\f\r' },
+  { name: 'plain words', text: 'hello world' },
+  { name: 'structural punctuation attaches to its word', text: 'foo(bar);' },
+  { name: 'every punctuation char counts', text: '(){}[],;' },
+  // JS \s splits on these, Java \s does not - the whole reason both sides pin ASCII.
+  { name: 'U+3000 ideographic space does NOT split', text: '\u4E2D\u3000\u6587' },
+  { name: 'U+00A0 no-break space does NOT split', text: 'a\u00A0b' },
+  { name: 'U+FEFF BOM does NOT split', text: 'a\uFEFFb' },
+  { name: 'U+2028 / U+2029 line+paragraph separators do NOT split', text: 'a\u2028b\u2029c' },
+  { name: 'U+2002 / U+200A en+hair spaces do NOT split', text: 'a\u2002b\u200Ac' },
+  { name: 'U+1680 / U+202F / U+205F do NOT split', text: 'a\u1680b\u202Fc\u205Fd' },
+  // ...and these are in BOTH ascii classes, so they must split on both sides.
+  { name: 'vertical tab and form feed DO split', text: 'a\u000Bb\fc' },
+  { name: 'CRLF splits once, not twice', text: 'a\r\nb' },
+  { name: 'lone CR splits', text: 'a\rb' },
+  { name: 'U+001C-U+001F file/group/record/unit separators do NOT split', text: 'a\u001Cb\u001Db\u001Eb\u001Fb' },
+  {
+    name: 'realistic payload: root line, header, CJK comment, code',
+    text: '// clipcode-root: myrepo\n\n// file: src/a.ts\n// \u9019\u662F\u3000\u4E2D\u6587\u8A3B\u89E3\nconst x = foo(bar, baz);\n',
+  },
+];
+
 function buildWire(input) {
   return input.kind === 'git' ? fmt.buildGitPayload(input.options) : fmt.buildPayload(input.options);
 }
@@ -246,6 +276,7 @@ const fixtures = {
     'Regenerate and copy to both repos; update EXPECTED_FIXTURES_SHA on both sides.',
   buildCases: buildInputs.map(i => ({ name: i.name, kind: i.kind, options: i.options, wire: buildWire(i) })),
   parseCases: parseInputs.map(i => ({ name: i.name, headerFormat: i.headerFormat, input: i.input, expected: parseExpected(i) })),
+  tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, tokens: estimateTokens(i.text) })),
 };
 
 const json = JSON.stringify(fixtures, null, 2) + '\n';
