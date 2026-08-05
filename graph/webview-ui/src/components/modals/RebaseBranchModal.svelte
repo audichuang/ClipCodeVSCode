@@ -27,14 +27,27 @@
     const vscode = getVsCodeApi();
     const requestId = `rb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     vscode.postMessage({ type: 'predictConflicts', payload: { ours: branch, theirs: onto, mode: 'rebase', requestId } });
+    /* SNIPCODE-HOOK start: bound the wait (same as CherryPickModal) — a failed
+       prediction or a repo-switch drop would otherwise spin forever. */
+    const timeoutId = window.setTimeout(() => {
+      if (conflictPrediction === null) {
+        conflictPrediction = { hasConflict: false, files: [] };
+      }
+      window.removeEventListener('message', handler);
+    }, 5000);
+    /* SNIPCODE-HOOK end */
     const handler = (event: MessageEvent) => {
       if (event.data.type !== 'conflictPrediction') { return; }
       if (event.data.payload?.requestId !== requestId) { return; }
       conflictPrediction = event.data.payload;
+      window.clearTimeout(timeoutId); // SNIPCODE-HOOK
       window.removeEventListener('message', handler);
     };
     window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      window.clearTimeout(timeoutId); // SNIPCODE-HOOK
+      window.removeEventListener('message', handler);
+    };
   });
 </script>
 

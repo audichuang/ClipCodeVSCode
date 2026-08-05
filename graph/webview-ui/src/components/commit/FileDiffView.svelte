@@ -2,7 +2,9 @@
   import type { DiffData } from '../../lib/types';
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n/index.svelte';
-  import { detectLanguage, highlightLineSync, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
+  import { detectLanguage, highlightLineSync, highlightLineWithRanges, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
+  /* SNIPCODE-HOOK (B-2d): intraline word-level diff. */
+  import { pairHunkWordDiffs } from '../../lib/utils/word-diff';
   import ImageDiff from '../common/ImageDiff.svelte';
 
   // Right-click target on a diff line. The parent owns the context menu (it
@@ -55,10 +57,29 @@
        compatible, see `mode` below. */
     diffMode?: 'inline' | 'side-by-side';
     hideModeToggle?: boolean;
+    /* SNIPCODE-HOOK (B-2c): full-tab stage/unstage. Fires per-hunk with the file
+       + hunk index; the button label follows `staged` (unstaged file → "Stage
+       Hunk", staged file → "Unstage Hunk"). Line-level staging (B-2d) is
+       onStageLines below. */
+    onStageHunk?: (target: { file: string; hunkIndex: number }) => void;
+    /* SNIPCODE-HOOK (B-2d): line-level staging. Fires with the file + hunk index
+       + the gutter-selected changed line indices, mirroring onReverseLines. */
+    onStageLines?: (target: { file: string; hunkIndex: number; lineIndices: number[] }) => void;
+    /* SNIPCODE-HOOK start (B-2c): full-tab busy gate — Diff.svelte passes
+       diffStore.busy so the Stage/Unstage buttons disable while a hunk op is
+       in flight (index shifts once the diff re-parses). Omitted by every other
+       caller (CommitDetails, PrView), so `undefined` there never disables. */
+    stageBusy?: boolean;
+    /* SNIPCODE-HOOK start: Batch B image request identity */
+    imageRepoPath?: string;
+    imageGeneration?: number;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   }
 
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, diffMode: diffModeProp, hideModeToggle = false }: Props = $props();
+  /* SNIPCODE-HOOK start: Batch B image request identity */
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy, imageRepoPath, imageGeneration }: Props = $props();
+  /* SNIPCODE-HOOK end */
 
   // Whether this diff supports reversing (committed view). Drives both the
   // right-click menu and the per-hunk header reverse affordance. Whole-file
@@ -66,6 +87,33 @@
   // hunk removes it, and of a deleted file's hunk restores it (the backend's
   // patch-builder rewrites the whole-file header for partial selections).
   const canReverse = $derived(!!onReverse && !!commitHash);
+
+  /* SNIPCODE-HOOK start (B-2c): staging affordance gate + action. */
+  const canStage = $derived(!!onStageHunk);
+  /* SNIPCODE-HOOK (B-2d): gutter line-selection turns on for the reverse view
+     (canReverse) OR the staging view (canStage). */
+  const canSelectLines = $derived(canReverse || canStage);
+
+  function stageHunk(hunkIndex: number) {
+    if (!onStageHunk || !isHunkComplete(hunkIndex)) return;
+    onStageHunk({ file: diff.file, hunkIndex });
+  }
+
+  /* SNIPCODE-HOOK (B-2d): stage/unstage just the gutter-selected changed lines. */
+  function stageSelectedLines(hunkIndex: number) {
+    if (!onStageLines || !lineSel || lineSel.hunkIdx !== hunkIndex) return;
+    const indices = selectedChangedIndices;
+    if (!indices.length || !isHunkComplete(hunkIndex)) return;
+    onStageLines({ file: diff.file, hunkIndex, lineIndices: indices });
+  }
+
+  /* SNIPCODE-HOOK: IntelliJ-style per-change-block staging. stage/unstage exactly
+     the lines of one contiguous +/- block (the gutter arrow that sits next to it). */
+  function stageBlock(hunkIndex: number, lineIndices: number[]) {
+    if (!onStageLines || !lineIndices.length || !isHunkComplete(hunkIndex)) return;
+    onStageLines({ file: diff.file, hunkIndex, lineIndices });
+  }
+  /* SNIPCODE-HOOK end */
 
   // A truncated diff renders only the first N lines of its final hunk (see
   // renderHunks). Reversing then would silently undo the unseen tail too, so we
@@ -123,7 +171,7 @@
 
   function startLineSelect(e: MouseEvent, hunkIdx: number, lineIndex: number) {
     if (e.button !== 0) return; // right/middle-click must not reset an active selection
-    if (!canReverse || !isHunkComplete(hunkIdx)) return;
+    if (!canSelectLines || !isHunkComplete(hunkIdx)) return;
     e.preventDefault(); // suppress native text-selection beginning in the gutter
     if (e.shiftKey && lineSel && lineSel.hunkIdx === hunkIdx) {
       lineSel = { ...lineSel, indices: rangeSet(lineSel.anchor, lineIndex) };
@@ -233,6 +281,9 @@
   // diff starts collapsed even if the previous one was expanded.
   $effect(() => {
     diff;
+    /* SNIPCODE-HOOK start: Batch C reset reused diff-view highlight state. */
+    highlightedLines = new Map();
+    /* SNIPCODE-HOOK end */
     showFullDiff = false;
     lineSel = null;
   });
@@ -253,10 +304,12 @@
   );
   let diffTruncated = $derived(!showFullDiff && totalDiffLines > MAX_RENDER_LINES);
 
+  /* SNIPCODE-HOOK start: Batch C describe file/content-aware highlight keys. */
   // Hunks actually handed to the template. When truncated, include whole hunks
   // until the line budget runs out, slicing the final partial hunk. The sliced
-  // hunk keeps its original `oldStart` and the first-N line indices, so the
-  // highlight-cache keys (`${oldStart}-${lineIndex}`) still line up.
+  // hunk keeps its original `oldStart`, content, and first-N line indices, so
+  // its file/content-aware highlight keys still line up.
+  /* SNIPCODE-HOOK end */
   let renderHunks = $derived.by(() => {
     if (!diff || diff.isBinary) return [];
     if (!diffTruncated) return diff.hunks;
@@ -274,6 +327,90 @@
     }
     return out;
   });
+
+  /* SNIPCODE-HOOK start: Batch C align replacement rows side-by-side. */
+  type DiffLine = DiffData['hunks'][number]['lines'][number];
+  interface SbsLine { line: DiffLine; index: number }
+  interface SbsRow { left?: SbsLine; right?: SbsLine }
+
+  function pairSideBySideRows(lines: DiffLine[]): SbsRow[] {
+    const rows: SbsRow[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].type === 'context') {
+        const entry = { line: lines[i], index: i };
+        rows.push({ left: entry, right: entry });
+        i++;
+        continue;
+      }
+      if (lines[i].type === 'add') {
+        rows.push({ right: { line: lines[i], index: i } });
+        i++;
+        continue;
+      }
+      const deletes: SbsLine[] = [];
+      while (i < lines.length && lines[i].type === 'delete') {
+        deletes.push({ line: lines[i], index: i });
+        i++;
+      }
+      const adds: SbsLine[] = [];
+      while (i < lines.length && lines[i].type === 'add') {
+        adds.push({ line: lines[i], index: i });
+        i++;
+      }
+      for (let row = 0; row < Math.max(deletes.length, adds.length); row++) {
+        rows.push({ left: deletes[row], right: adds[row] });
+      }
+    }
+    return rows;
+  }
+
+  const sbsRows = $derived(renderHunks.map(hunk => pairSideBySideRows(hunk.lines)));
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: contiguous change blocks per hunk. Each run of adjacent
+     +/- lines is one block; the SBS gutter arrow anchors on the block's first
+     line so it sits next to the actual change (not the hunk top). Keyed
+     hunkIdx → (firstLineIndex → all line indices in that block) for O(1) lookup
+     in the render loop. */
+  const blockFirstByHunk = $derived.by(() => {
+    const map = new Map<number, Map<number, number[]>>();
+    renderHunks.forEach((hunk, hunkIdx) => {
+      const byFirst = new Map<number, number[]>();
+      let cur: number[] | null = null;
+      hunk.lines.forEach((line, i) => {
+        if (line.type !== 'context') {
+          if (!cur) { cur = []; byFirst.set(i, cur); }
+          cur.push(i);
+        } else {
+          cur = null;
+        }
+      });
+      map.set(hunkIdx, byFirst);
+    });
+    return map;
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start (B-2d): per-line word-diff ranges, keyed like the
+     highlight cache so the effect can overlay them on the Shiki output. */
+  const wordDiffByKey = $derived.by(() => {
+    const map = new Map<string, { ranges: import('../../lib/utils/word-diff').Range[]; kind: 'add' | 'delete' }>();
+    for (const hunk of renderHunks) {
+      const paired = pairHunkWordDiffs(hunk.lines);
+      for (const [lineIdx, entry] of paired) {
+        map.set(highlightKey(diff.file, hunk.oldStart, lineIdx, hunk.lines[lineIdx].content), entry);
+      }
+    }
+    return map;
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: Batch C bind cached HTML to file and content identity. */
+  function highlightKey(file: string, hunkStart: number, lineIdx: number, content: string): string {
+    return JSON.stringify([file, hunkStart, lineIdx, content]);
+  }
+  /* SNIPCODE-HOOK end */
 
   const MAX_HIGHLIGHT_LINES = 5000;
 
@@ -312,9 +449,11 @@
     // so the revealed lines get highlighted then.
     const visibleHunks = renderHunks;
     const theme = shikiTheme; // capture so a theme switch invalidates the pass
+    /* SNIPCODE-HOOK start: Batch C task-yielded highlighting. */
     // Yield to the event loop between chunks so a multi-thousand-line diff
     // doesn't freeze the panel. Each batch processes CHUNK_SIZE lines then
-    // hands control back via a microtask.
+    // hands control back via a task so paint and input can run.
+    /* SNIPCODE-HOOK end */
     const CHUNK_SIZE = 250;
     let cancelled = false;
     getHighlighter()
@@ -330,20 +469,33 @@
         const flat: Array<{ key: string; content: string }> = [];
         for (const hunk of visibleHunks) {
           for (let i = 0; i < hunk.lines.length; i++) {
-            flat.push({ key: `${hunk.oldStart}-${i}`, content: hunk.lines[i].content });
+            /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
+            flat.push({
+              key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content),
+              content: hunk.lines[i].content,
+            });
+            /* SNIPCODE-HOOK end */
           }
         }
         for (let i = 0; i < flat.length; i += CHUNK_SIZE) {
           if (cancelled || diff !== target) return;
           const end = Math.min(i + CHUNK_SIZE, flat.length);
           for (let j = i; j < end; j++) {
-            newMap.set(flat[j].key, highlightLineSync(h, flat[j].content, lang, theme));
+            const wd = wordDiffByKey.get(flat[j].key);
+            newMap.set(
+              flat[j].key,
+              wd
+                ? highlightLineWithRanges(h, flat[j].content, lang, wd.ranges, wd.kind, theme)
+                : highlightLineSync(h, flat[j].content, lang, theme),
+            );
           }
-          // Defer to next microtask so user interaction (scroll, switch file)
+          /* SNIPCODE-HOOK start: Batch C yield to paint/input between chunks. */
+          // Defer to the next task so user interaction (scroll, switch file)
           // can interrupt mid-highlight without paying for the whole pass.
           if (end < flat.length) {
-            await new Promise<void>(resolve => queueMicrotask(resolve));
+            await new Promise<void>(resolve => setTimeout(resolve, 0));
           }
+          /* SNIPCODE-HOOK end */
         }
         if (cancelled || diff !== target) return;
         highlightedLines = newMap;
@@ -353,7 +505,9 @@
   });
 
   function getHighlighted(hunkStart: number, lineIdx: number, content: string): string {
-    const key = `${hunkStart}-${lineIdx}`;
+    /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
+    const key = highlightKey(diff.file, hunkStart, lineIdx, content);
+    /* SNIPCODE-HOOK end */
     return highlightedLines.get(key) ?? escapeHtml(content);
   }
 </script>
@@ -398,18 +552,22 @@
     {/if}
     {#if diff.isBinary && diff.isImage}
       {#if commitHash && commitHash !== 'UNCOMMITTED'}
-        <ImageDiff file={diff.file} staged={false} commitHash={commitHash} />
+        <!-- SNIPCODE-HOOK start: Batch B image request identity -->
+        <ImageDiff file={diff.file} staged={false} commitHash={commitHash} repoPath={imageRepoPath} generation={imageGeneration} />
+        <!-- SNIPCODE-HOOK end -->
       {:else}
         <!-- UNCOMMITTED: no real commit to diff against; compare index/working
              trees based on which tab (staged vs unstaged) the file is in. -->
-        <ImageDiff file={diff.file} {staged} />
+        <!-- SNIPCODE-HOOK start: Batch B image request identity -->
+        <ImageDiff file={diff.file} {staged} repoPath={imageRepoPath} generation={imageGeneration} />
+        <!-- SNIPCODE-HOOK end -->
       {/if}
     {:else if diff.isBinary}
       <div class="diff-empty">{t('details.binaryFile')}</div>
     {:else if mode === 'inline'}
       <div class="diff-content">
         {#each renderHunks as hunk, hunkIdx}
-          <div class="diff-hunk" class:reversible={canReverse && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
+          <div class="diff-hunk" class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
             <div class="diff-hunk-header">
               <div class="hunk-header-inner">
                 <span class="diff-hunk-range" title={hunkLabel(hunk, hunkIdx)}>{hunkLabel(hunk, hunkIdx)}</span>
@@ -427,6 +585,25 @@
                     <span>{t('file.reverseHunk')}</span>
                   </button>
                 {/if}
+                <!-- SNIPCODE-HOOK start (B-2c/B-2d): inline per-hunk + per-line Stage/Unstage -->
+                {#if canStage && isHunkComplete(hunkIdx)}
+                  {#if onStageLines && lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}
+                    <button class="hunk-action-btn hunk-stage-lines-btn" onclick={() => stageSelectedLines(hunkIdx)}
+                            disabled={stageBusy}
+                            aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
+                            title={staged ? t('file.unstageLines') : t('file.stageLines')}>
+                      <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                      <span>{selectedChangedIndices.length}</span>
+                    </button>
+                  {/if}
+                  <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                          disabled={stageBusy}
+                          aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
+                          title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
+                    <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                  </button>
+                {/if}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             </div>
             {#each hunk.lines as line, lineIndex}
@@ -462,24 +639,53 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="sbs-hunk"
-                class:hunk-hover={canReverse && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
+                class:hunk-hover={(canReverse || canStage) && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
                 onmouseenter={() => { hoveredHunkIdx = hunkIdx; }}
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
-                {#each hunk.lines as line, lineIndex}
-                  {#if line.type === 'context' || line.type === 'delete'}
+                <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
+                {#each sbsRows[hunkIdx] as row}
+                  <!-- SNIPCODE-HOOK start: per-change-block stage arrow. Anchored
+                       on the block's first line (works even for a pure-addition
+                       block, whose left-pane row is an empty placeholder). The
+                       arrow is `position: sticky; right` + margin-left:auto so it
+                       stays pinned to the visible right edge of the left pane (≈
+                       the center gutter, IntelliJ-style) instead of scrolling off
+                       with the long `pre` line content. -->
+                  {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
+                  {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
+                  {#if row.left}
+                    {@const line = row.left.line}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
+                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                        </button>
+                      {/if}
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
                       <span class="line-num"></span>
                       <span class="line-content"></span>
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
+                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                        </button>
+                      {/if}
                     </div>
                   {/if}
+                  <!-- SNIPCODE-HOOK end -->
                 {/each}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>
@@ -491,16 +697,18 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="sbs-hunk"
-                class:hunk-hover={canReverse && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
+                class:hunk-hover={(canReverse || canStage) && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
                 onmouseenter={() => { hoveredHunkIdx = hunkIdx; }}
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
-                {#each hunk.lines as line, lineIndex}
-                  {#if line.type === 'context' || line.type === 'add'}
+                <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
+                {#each sbsRows[hunkIdx] as row}
+                  {#if row.right}
+                    {@const line = row.right.line}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
@@ -509,6 +717,7 @@
                     </div>
                   {/if}
                 {/each}
+                <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>
@@ -671,6 +880,71 @@
     opacity: 1;
   }
 
+  /* SNIPCODE-HOOK start (B-2c): stage/unstage buttons (green accent). */
+  .hunk-stage-btn {
+    color: var(--vscode-charts-green, #48bf91);
+    opacity: 0;
+  }
+  .diff-hunk.reversible:hover .hunk-stage-btn,
+  .hunk-stage-btn:focus {
+    opacity: 1;
+  }
+  /* Per-change-block gutter arrow. Anchored on the block's first line (last child
+     of that line's flex row); `margin-left:auto` pushes it to the line's right end
+     and `position: sticky; right` pins it to the visible right edge of the left
+     pane (≈ the center gutter) so it never scrolls off with the long `pre` line —
+     works because every .diff-line is stretched to the pane's max-content width.
+     Always visible (IntelliJ-style), brightened on hover of its line/hunk. */
+  .sbs-block-stage-btn {
+    position: sticky;
+    right: 3px;
+    margin-left: auto;
+    align-self: center;
+    flex-shrink: 0;
+    z-index: 2;
+    opacity: 0.55;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--vscode-focusBorder, #4a9eff);
+    border-radius: 4px;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    cursor: pointer;
+    font-size: 0.95em;
+    line-height: 1;
+    transition: opacity 0.1s;
+  }
+  .sbs-hunk.hunk-hover .sbs-block-stage-btn,
+  .diff-line:hover .sbs-block-stage-btn,
+  .sbs-block-stage-btn:hover,
+  .sbs-block-stage-btn:focus {
+    opacity: 1;
+  }
+  /* Busy gate (stageBusy prop): dim + block clicks even while hovered/focused. */
+  .hunk-stage-btn:disabled,
+  .sbs-block-stage-btn:disabled {
+    opacity: 0.35 !important;
+    cursor: not-allowed;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start (B-2d): intraline word-diff highlight. Sits on top of
+     the whole-line add/delete background; uses a stronger tint so the changed
+     characters stand out (IntelliJ-style). Inherits the Shiki syntax color. */
+  :global(.word-diff-del) {
+    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
+    border-radius: 2px;
+  }
+  :global(.word-diff-add) {
+    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.30));
+    border-radius: 2px;
+  }
+  /* SNIPCODE-HOOK end */
+
   .diff-hunk.reversible:hover .hunk-hunk-btn,
   .diff-hunk.has-selection .hunk-hunk-btn,
   .hunk-action-btn:focus {
@@ -790,6 +1064,10 @@
   .diff-truncated-banner button:hover {
     background: var(--vscode-button-hoverBackground, #1177bb);
   }
+
+  /* SNIPCODE-HOOK (B-2c): hunk-level positioning context (block arrows now anchor
+     on their own line via .has-block-arrow). */
+  .sbs-hunk { position: relative; }
 
   /* Side-by-side */
   .diff-sbs {

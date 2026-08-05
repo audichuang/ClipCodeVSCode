@@ -1,5 +1,108 @@
 # Changelog
 
+## 0.3.39
+
+Hotfix for the 0.3.38 Git features: 26 findings from four independent
+adversarial reviews, hardened through three further cross-model review rounds.
+
+- **Staging safety.** Partially staging a file whose path Git C-quotes can no
+  longer corrupt the index entry; staging, unstaging, and commit-reverse now
+  round-trip non-UTF-8 file bytes exactly; mixed line-ending files keep each
+  side's end-of-file state. Every hunk/line mutation is guarded by a content
+  fingerprint of the rendered diff — a stale view is rejected and the panel
+  re-renders itself instead of dead-ending.
+- **Multi-repo commit.** Mixed tree selections mutate only the clicked repo
+  and side, with a notice for skipped items; an unreadable repo you unchecked
+  no longer blocks committing the others; the commit honours the checkbox
+  state as of the click; amend stays gated to exactly one staged repo.
+- **Diff tab.** Side-by-side view aligns replaced lines face-to-face instead
+  of diagonally; switching files can no longer show the previous file's
+  highlighted source; word-level diff of huge rewrite blocks degrades
+  gracefully instead of freezing the panel; navigation shows a loading state
+  while same-file refreshes keep the current body; stage/unstage replies are
+  strictly correlated, so a late or duplicate reply cannot unlock or
+  overwrite a newer operation.
+- **Inline blame.** Hover links are restricted to the reveal-commit command;
+  the per-editor toggle survives tab switches and resets on tab close (even
+  when the document stays open in another split); superseded `git blame`
+  processes are cancelled; the five age buckets use five distinct colors;
+  blame re-renders on HEAD changes, in every split pane, and retries once the
+  built-in Git extension activates.
+
+## 0.3.38
+
+- **Snipcode Git commit workbench.** A dedicated Activity Bar view for multi-repo
+  staging and commit: Staged / Unstaged trees, multi-select, per-repo stage or
+  unstage all, right-click copy in ClipCode format, and commit (including
+  amend when only one repo is selected).
+- **Full-width Diff tab** with a unified Staged + Unstaged view, per-hunk and
+  per-line stage/unstage (IntelliJ-style arrows), word-level diff highlighting,
+  syntax coloring, and an “open full file diff” action. Git failures show an
+  error banner instead of a false “no changes” empty state; image diffs and
+  several race conditions around panel close / side switching are fixed.
+- **Inline blame** on the active editor (toggle command + title-bar button),
+  with relative timestamps and age-colored decorations.
+- **One-click Fetch / Pull / Push across all repos** from the Snipcode Git
+  toolbar, with ↓↑ ahead/behind badges on the tree.
+
+## 0.3.37
+
+- **Internal hardening of the repository-switch transaction** shipped in
+  0.3.36: the mutation/read classification of every webview message is now
+  enforced at compile time (an unclassified new message type fails the build
+  instead of silently skipping the transaction gate), the webview boot
+  handshake was simplified, and redundant guards were consolidated. No
+  user-facing behavior changes.
+
+## 0.3.36
+
+- **Fixed a cross-repository mutation race:** switching the active repository
+  while a multi-step git operation (e.g. pull / fast-forward with auto-stash)
+  was running could redirect its remaining steps — including the final stash
+  pop — to the newly selected repository, popping that repo's own stash. All
+  mutating operations now run as one transaction: a repository switch waits
+  for the running operation to finish (the latest selection wins) instead of
+  interleaving with it.
+- **The graph webview now completes a boot handshake:** opening the graph
+  resolves only after the webview's bundled script actually starts and talks
+  to the extension host, so a broken asset, CSP block, or boot crash surfaces
+  as an error instead of a silently blank panel.
+
+## 0.3.35
+
+- **Copy notifications now auto-dismiss** after ~5s instead of lingering, and
+  the History view also shows the token count. If the estimate exceeds ~1.5M
+  tokens the notification switches to a sticky warning so it can't be missed.
+- **Right-click a SCM group header** (staged / unstaged) to copy that whole
+  group at once — the command moved from an invisible inline slot to the
+  navigation menu.
+- **Git graph reliability fixes:** the Squash modal could hang (a late response
+  filled the wrong range); rebase/interactive-rebase could falsely report
+  success while paused on a conflict; remote/branch/path arguments are now
+  guarded against flag smuggling; and local mutating git operations take a
+  global lock to avoid concurrent-operation races.
+
+## 0.3.34
+
+- **Copy notifications now show an estimated token count** (`~N tokens`) for the
+  copied payload — file copy, open-editor copy, Git-changes copy, and the graph
+  "copy full source" all report it, matching the IntelliJ ClipCode plugin.
+
+## 0.3.33
+
+- **Fix: file paths containing `$` (e.g. `$&`, `$$`) were corrupted in copied
+  headers.** The header builder used `String.replaceAll` with a string
+  replacement, which expands `$&`/`$$`/`` $` `` patterns; such paths now insert
+  verbatim, so copy → restore round-trips them intact.
+- **Fix: a header-like line indented with a full-width (or other Unicode)
+  space could split into a phantom file on restore.** Header and change-label
+  detection now use an ASCII-only whitespace class, matching the IntelliJ
+  ClipCode parser exactly, so a line like `　// file: …` is treated as content
+  on both tools.
+- **Cross-tool format contract is now pinned by a shared golden test suite.**
+  The same fixtures are verified in both the VS Code and IntelliJ repos, so the
+  clipboard format cannot drift between the two tools without a failing test.
+
 ## 0.3.32
 
 - **Faster refresh, fewer duplicate git spawns.** Git Graph+ now caches

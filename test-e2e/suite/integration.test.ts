@@ -47,8 +47,12 @@ describe('Snipcode × git-graph-plus integration', () => {
     );
   });
 
-  it('opens the graph without throwing', async () => {
-    // webview CSP/404 is hard to assert headless; at least the command resolves and runs.
+  it('opens the graph and completes the webview boot handshake', async () => {
+    // The command resolves only after the webview posts its first message to
+    // the host — proof the bundled JS actually booted under the real CSP.
+    // Catches asset 404, CSP-blocked scripts, bundle syntax errors, and
+    // Svelte boot crashes that a bare "command did not throw" check misses;
+    // rejects after 15s if the webview never speaks.
     await vscode.commands.executeCommand('gitGraphPlus.open');
   });
 

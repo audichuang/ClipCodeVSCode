@@ -256,6 +256,11 @@ export const zh: Record<string, string> = {
   'squash.message': '提交消息',
   'squash.squash': 'Squash 合并',
   'squash.loading': '正在加载提交',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': '加载提交范围失败，请关闭后重试。',
+  'squash.notOnHead': '选中的提交不在当前分支 (HEAD) 上，请先检出所在分支。',
+  'squash.mergeInRange': '选中提交与 HEAD 之间存在 merge 提交，squash 会扁平化合并历史。',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': '部分提交已推送。Squash 会重写历史记录，需要 <span class="modal-emph modal-emph--danger">force push</span>。',
 
   // Commit details
@@ -649,6 +654,13 @@ export const zh: Record<string, string> = {
   'lfs.locked': '由 {owner} 锁定',
   'file.open': '打开文件',
   'file.openChanges': '打开更改',
+  /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': '正在加载更改',
+  'file.noChanges': '无变更',
+  'file.stageFailed': '操作失败',
+  'file.stageTimeout': '操作耗时超出预期 — 完成后按钮会解锁（若一直无响应请重开此分页）',
+  'file.openFullDiff': '在编辑器中打开完整文件 diff',
+  /* SNIPCODE-HOOK end */
   'file.createPatch': '创建 Patch',
   'file.createPatchFromSelected': '从选中的 {count} 个文件创建 Patch',
   'file.createPatchFromFolder': '从文件夹创建 Patch',
@@ -658,6 +670,12 @@ export const zh: Record<string, string> = {
   'file.reverseFile': '还原文件更改',
   'file.reverseHunk': '还原 Hunk 更改',
   'file.reverseLines': '还原选定行',
+  'file.stageHunk': '暂存此 Hunk',
+  'file.unstageHunk': '取消暂存此 Hunk',
+  'file.stageLines': '暂存选定行',
+  'file.unstageLines': '取消暂存选定行',
+  'file.stageBlock': '暂存此变更块',
+  'file.unstageBlock': '取消暂存此变更块',
   'file.lines': '行',
   'file.copySelection': '复制',
   'file.copyLines': '复制行',

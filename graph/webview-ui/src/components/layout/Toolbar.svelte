@@ -58,6 +58,11 @@
   function openFlowDropdown() {
     showFlowDropdown = !showFlowDropdown;
     if (showFlowDropdown) {
+      // SNIPCODE-HOOK: reset before refetch — otherwise a failed/dropped reply
+      // leaves the dropdown stuck on loading (or flashing the previous repo's
+      // flow branches on reopen).
+      flowStatus = null;
+      flowBranches = { features: [], releases: [], hotfixes: [] };
       vscode.postMessage({ type: 'checkFlowStatus' });
       vscode.postMessage({ type: 'getFlowBranches' });
     }
@@ -101,6 +106,11 @@
       }
       if (msg.type === 'flowStatus') flowStatus = msg.payload;
       if (msg.type === 'flowBranches') flowBranches = msg.payload;
+      // SNIPCODE-HOOK: a failed probe must not leave the dropdown on the
+      // loading branch — degrade to "git-flow not installed".
+      if (msg.type === 'error' && msg.payload?.source === 'checkFlowStatus' && !flowStatus) {
+        flowStatus = { installed: false, initialized: false, config: null };
+      }
     }
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);

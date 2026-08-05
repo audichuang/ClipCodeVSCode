@@ -1,8 +1,8 @@
 {
   "name": "clipcode-vscode",
   "displayName": "Snipcode",
-  "description": "Copy and restore files using the IntelliJ ClipCode clipboard format.",
-  "version": "0.3.32",
+  "description": "Copy and restore files in the IntelliJ ClipCode clipboard format, plus Snipcode Git workbench, commit graph, and inline blame.",
+  "version": "0.3.39",
   "publisher": "audichuang",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -22,7 +22,8 @@
     "onCommand:clipcode.copyGitChanges",
     "onCommand:clipcode.pasteAndRestoreFiles",
     "onView:clipcode.history",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:clipcode.blame.toggle"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -201,9 +202,107 @@
         "command": "gitGraphPlus.pruneWorktrees",
         "title": "Git Graph+: Prune Worktrees",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "clipcode.blame.toggle",
+        "title": "Snipcode: Toggle Inline Blame",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "clipcode.blame.revealCommit",
+        "title": "Snipcode: Reveal Blamed Commit in Graph"
+      },
+      {
+        "command": "snipcode.git.stage",
+        "title": "Snipcode Git: Stage",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.git.unstage",
+        "title": "Snipcode Git: Unstage",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.git.stageRepo",
+        "title": "Snipcode Git: Stage All in Repo",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.git.unstageRepo",
+        "title": "Snipcode Git: Unstage All in Repo",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.git.copyAsClipCode",
+        "title": "Snipcode Git: Copy as ClipCode",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "snipcode.git.stageAll",
+        "title": "Snipcode Git: Stage All",
+        "icon": "$(add)"
+      },
+      {
+        "command": "snipcode.git.unstageAll",
+        "title": "Snipcode Git: Unstage All",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "snipcode.git.refresh",
+        "title": "Snipcode Git: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "snipcode.git.fetchAll",
+        "title": "Snipcode Git: Fetch All Repos",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "snipcode.git.pullAll",
+        "title": "Snipcode Git: Pull All Repos",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "snipcode.git.pushAll",
+        "title": "Snipcode Git: Push All Repos",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "snipcode.git.filterRepos",
+        "title": "Snipcode Git: Filter Repos",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "snipcode.git.showDiff",
+        "title": "Snipcode Git: Show Diff"
+      },
+      {
+        "command": "snipcode.git.openChange",
+        "title": "Snipcode Git: Open in Editor",
+        "icon": "$(go-to-file)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "snipcode-git",
+          "title": "Snipcode Git",
+          "icon": "images/snipcode-git.svg"
+        }
+      ]
+    },
     "views": {
+      "snipcode-git": [
+        {
+          "id": "snipcode.changes",
+          "name": "Changes"
+        },
+        {
+          "id": "snipcode.commitBox",
+          "name": "Commit",
+          "type": "webview"
+        }
+      ],
       "scm": [
         {
           "id": "clipcode.history",
@@ -249,6 +348,11 @@
         {
           "command": "gitGraphPlus.open",
           "group": "navigation"
+        },
+        {
+          "command": "clipcode.blame.toggle",
+          "group": "navigation",
+          "when": "editorIsOpen"
         }
       ],
       "scm/title": [
@@ -285,10 +389,50 @@
         {
           "command": "clipcode.copyGitChanges",
           "when": "scmProvider == git",
-          "group": "inline"
+          "group": "navigation@20"
         }
       ],
       "view/title": [
+        {
+          "command": "snipcode.git.filterRepos",
+          "when": "view == snipcode.changes",
+          "group": "navigation@0"
+        },
+        {
+          "command": "snipcode.git.stageAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "snipcode.git.unstageAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "snipcode.git.refresh",
+          "when": "view == snipcode.changes",
+          "group": "navigation@3"
+        },
+        {
+          "command": "snipcode.git.fetchAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@4"
+        },
+        {
+          "command": "snipcode.git.pullAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@5"
+        },
+        {
+          "command": "snipcode.git.pushAll",
+          "when": "view == snipcode.changes",
+          "group": "navigation@6"
+        },
+        {
+          "command": "gitGraphPlus.open",
+          "when": "view == snipcode.changes",
+          "group": "navigation@7"
+        },
         {
           "command": "clipcode.history.switchRepository",
           "when": "view == clipcode.history",
@@ -361,6 +505,36 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "snipcode.git.stage",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.unstage",
+          "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.openChange",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "inline@9"
+        },
+        {
+          "command": "snipcode.git.stageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.unstageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-staged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.copyAsClipCode",
+          "when": "view == snipcode.changes && viewItem =~ /^(file|repo|group)-/",
+          "group": "navigation@10"
+        },
         {
           "command": "clipcode.history.copyFullSource",
           "when": "view == clipcode.history && viewItem =~ /^(commit|folder|file)$/",

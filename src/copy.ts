@@ -5,6 +5,23 @@ import { fileSize, listFilesRecursive, readTextFile } from './fileSystem.js';
 import { toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
+/**
+ * Rough token estimate for a copied payload, shown in the copy notification so the
+ * user sees how large a chunk they're about to paste into an AI assistant. Mirrors
+ * the IntelliJ ClipCode heuristic (TokenEstimator.kt): word count plus a few
+ * structural punctuation marks — deliberately crude, not a real tokenizer.
+ *
+ * The word split uses an ASCII whitespace class, NOT JS `\s`: Kotlin's `\s` is
+ * ASCII-only, so a Unicode split would count U+3000 / NBSP-separated CJK text as
+ * more words here than IntelliJ does and the two tools would report different
+ * token counts for the same payload. Same reason `clipboardFormat.ts` pins ASCII_WS.
+ */
+export function estimateTokens(text: string): number {
+  const words = text.split(/[ \t\n\x0B\f\r]+/).filter(w => w.length > 0).length;
+  const punctuation = (text.match(/[;{}()[\],]/g) ?? []).length;
+  return words + punctuation;
+}
+
 export interface CopyResult {
   files: PayloadFile[];
   payload: string;

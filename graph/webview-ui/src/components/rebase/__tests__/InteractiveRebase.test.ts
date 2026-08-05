@@ -18,9 +18,12 @@ function commit(over: Partial<Commit>): Commit {
   };
 }
 
-function deliverCommits(commits: Commit[]) {
+// The component now ignores responses whose base doesn't match its own
+// (SNIPCODE-HOOK: a late response from another modal must not populate this
+// editor with the wrong range), so the helper echoes the mounted base.
+function deliverCommits(commits: Commit[], base = 'baseHash1234567') {
   window.dispatchEvent(new MessageEvent('message', {
-    data: { type: 'rebaseCommitsData', payload: { commits } },
+    data: { type: 'rebaseCommitsData', payload: { base, commits } },
   }));
 }
 
@@ -54,6 +57,32 @@ describe('InteractiveRebase — initial flow', () => {
     const { container } = render(InteractiveRebase, baseProps);
     expect(container.querySelector('.rebase-loading')).not.toBeNull();
   });
+
+  /* SNIPCODE-HOOK start: base-mismatch + failure states */
+  it('ignores a rebaseCommitsData for a different base (late response from another modal)', async () => {
+    const { container } = render(InteractiveRebase, baseProps);
+    deliverCommits([commit({ hash: 'c1', subject: 'wrong range' })], 'otherBase9999999');
+    // Still loading — the wrong-range response must not populate the editor.
+    await new Promise(r => setTimeout(r, 10));
+    expect(container.querySelector('.rebase-loading')).not.toBeNull();
+    deliverCommits([commit({ hash: 'c2', subject: 'right range' })]);
+    await waitFor(() => {
+      expect(container.textContent).toContain('right range');
+    });
+    expect(container.textContent).not.toContain('wrong range');
+  });
+
+  it('shows the host error instead of spinning forever when getRebaseCommits fails', async () => {
+    const { container } = render(InteractiveRebase, baseProps);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'error', payload: { message: 'boom', source: 'getRebaseCommits' } },
+    }));
+    await waitFor(() => {
+      expect(container.querySelector('.rebase-load-error')?.textContent).toContain('boom');
+    });
+    expect(container.querySelector('.rebase-loading')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
 
   it('shows empty state when zero commits returned', async () => {
     const { container } = render(InteractiveRebase, baseProps);

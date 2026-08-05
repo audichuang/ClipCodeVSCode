@@ -23,6 +23,18 @@ for (const name of await readdir(viteDist)) {
   await cp(path.join(viteDist, name), path.join(outDir, name), { recursive: true });
 }
 
+// The graph and workbench have SEPARATE vite builds (vite.config.ts +
+// vite.workbench.config.ts); both self-contained bundles must land here or a
+// view boots blank. Fail the build instead of shipping a broken webview.
+for (const required of ['main.js', 'main.css', 'workbench.js', 'workbench.css', 'diff.js', 'diff.css']) {
+  if (!existsSync(path.join(outDir, required))) {
+    throw new Error(
+      `graph webview asset missing after copy: ${required} ` +
+        `(vite output changed? check webview-ui/vite.config.ts + vite.workbench.config.ts)`,
+    );
+  }
+}
+
 // 2. Codicons css + woff font. MainPanel links <assetRoot>/codicon.css, so both
 //    files must sit at the asset-dir root (the css references ./codicon.ttf).
 if (!existsSync(codiconsDist)) {

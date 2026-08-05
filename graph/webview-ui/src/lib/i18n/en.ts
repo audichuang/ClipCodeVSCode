@@ -256,6 +256,11 @@ export const en: Record<string, string> = {
   'squash.message': 'Commit message',
   'squash.squash': 'Squash',
   'squash.loading': 'Loading commits',
+  // SNIPCODE-HOOK start: squash load-failure states
+  'squash.loadFailed': 'Failed to load the commit range. Close and try again.',
+  'squash.notOnHead': 'The selected commits are not on the current branch (HEAD). Check out their branch first.',
+  'squash.mergeInRange': 'A merge commit lies between the selection and HEAD; squashing would flatten the merge history.',
+  // SNIPCODE-HOOK end
   'squash.pushedWarning': 'Some of these commits are already pushed. Squashing rewrites history and will require a <span class="modal-emph modal-emph--danger">force push</span>.',
 
   // Commit details
@@ -648,6 +653,13 @@ export const en: Record<string, string> = {
   // File context menu
   'file.open': 'Open File',
   'file.openChanges': 'Open Changes',
+  /* SNIPCODE-HOOK start: unified staged/unstaged diff tab */
+  'file.loadingChanges': 'Loading changes',
+  'file.noChanges': 'No changes',
+  'file.stageFailed': 'Operation failed',
+  'file.stageTimeout': 'Operation is taking longer than expected — buttons unlock when it completes (reopen this tab if it never does)',
+  'file.openFullDiff': 'Open full file diff in editor',
+  /* SNIPCODE-HOOK end */
   'file.createPatch': 'Create Patch',
   'file.createPatchFromSelected': 'Create Patch from {count} selected files',
   'file.createPatchFromFolder': 'Create Patch from folder',
@@ -657,6 +669,12 @@ export const en: Record<string, string> = {
   'file.reverseFile': 'Reverse File',
   'file.reverseHunk': 'Reverse Hunk',
   'file.reverseLines': 'Reverse Selected Lines',
+  'file.stageHunk': 'Stage Hunk',
+  'file.unstageHunk': 'Unstage Hunk',
+  'file.stageLines': 'Stage Selected Lines',
+  'file.unstageLines': 'Unstage Selected Lines',
+  'file.stageBlock': 'Stage Change Block',
+  'file.unstageBlock': 'Unstage Change Block',
   'file.lines': 'Lines',
   'file.copySelection': 'Copy',
   'file.copyLines': 'Copy Lines',
