@@ -46,7 +46,7 @@ dev; Snipcode packaging is always from the **repo root**.
 | Area | Role |
 |---|---|
 | `src/git/git-service.ts` | Central git CLI hub; almost all ops go through it |
-| `src/git/patch-builder.ts` | Patches for reverse-changes and forward stage/unstage hunks/lines. **Byte-safe:** patch reconstruction + fingerprints read raw `Buffer` stdout (`exec(..., {encoding:'buffer'})`), never a decoded string — quoted-path/UTF-8/mixed-EOF fidelity |
+| `src/git/patch-builder.ts` | Pure patch builders for reverse-changes and forward stage/unstage hunks/lines. **Byte-safe:** it takes a raw `Buffer` and round-trips through `latin1`, never a UTF-8-decoded string — quoted-path/UTF-8/mixed-EOF fidelity. The Buffer (and the stale-diff fingerprint) comes from the **caller**: `git-service.ts` execs those diffs with `{encoding:'buffer'}`. Keep both ends buffer-typed or fidelity is lost before the builder ever runs |
 | `src/utils/message-bus.ts` | Graph webview ↔ host message types + **live** `MESSAGE_EFFECTS` gate |
 | `src/panels/MainPanel.ts` | Commit-graph WebviewPanel; message router + mutation transactions |
 | `src/panels/DiffPanel.ts` | Snipcode Diff tab (classic `diff.js` bundle) |
