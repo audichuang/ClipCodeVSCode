@@ -10,13 +10,14 @@ import {
   type ChangeTypeLabel,
   type PayloadFile
 } from '../src/clipboardFormat.js';
+import { estimateTokens } from '../src/copy.js';
 
 // Shared cross-tool contract goldens — the SAME file is committed byte-identically
 // in the IntelliJ repo (ClipCode/src/test/resources/clipboard-contract.json). Both
 // sides assert their build + parse match these frozen bytes, so neither can drift
 // from the contract without a red test. Regenerate via scripts/gen-contract-fixtures.cjs
 // and update EXPECTED_FIXTURES_SHA on BOTH sides.
-const EXPECTED_FIXTURES_SHA = 'aa5010128ab8eb2507c7f32aefb878c6cc786aa411ef9e8898e06ddaeee5179b';
+const EXPECTED_FIXTURES_SHA = '397f13931fdcdef10c14e525051b80216b192bf2403216240a68eaf82f48526d';
 const FIXTURES_PATH = path.join(process.cwd(), 'test', 'fixtures', 'clipboard-contract.json');
 
 interface BuildOptions {
@@ -30,7 +31,8 @@ interface BuildOptions {
 interface BuildCase { name: string; kind: 'regular' | 'git'; options: BuildOptions; wire: string; }
 interface ExpectedEntry { path: string; content: string; changeTypes: string[]; }
 interface ParseCase { name: string; headerFormat: string; input: string; expected: ExpectedEntry[]; }
-interface Fixtures { buildCases: BuildCase[]; parseCases: ParseCase[]; }
+interface TokenCase { name: string; text: string; tokens: number; }
+interface Fixtures { buildCases: BuildCase[]; parseCases: ParseCase[]; tokenCases: TokenCase[]; }
 
 const rawFixtures = readFileSync(FIXTURES_PATH);
 const fixtures: Fixtures = JSON.parse(rawFixtures.toString('utf8'));
@@ -48,6 +50,15 @@ for (const c of fixtures.buildCases) {
   test(`build ${c.kind}: ${c.name}`, () => {
     const built = c.kind === 'git' ? buildGitPayload(c.options) : buildPayload(c.options);
     assert.equal(built, c.wire);
+  });
+}
+
+// The "~N tokens" in the copy notification must be the SAME number in both tools
+// for the same clipboard text — the IntelliJ mirror (TokenEstimator) asserts these
+// exact values against the same frozen file.
+for (const c of fixtures.tokenCases) {
+  test(`tokens: ${c.name}`, () => {
+    assert.equal(estimateTokens(c.text), c.tokens);
   });
 }
 

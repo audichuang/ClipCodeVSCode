@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
-import { collectCopyFiles, collectCopyTextFiles, estimateTokens, type CopyTextFile } from './copy.js';
+import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
@@ -160,12 +160,6 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
 // succeed on SSH-remote hosts where bare 'git' isn't on the spawn PATH.
 interface CopyRuntime { gitPath?: string; gitEnv?: Record<string, string>; }
 
-// " ~1,234 tokens." — appended to copy toasts so the user sees roughly how large a
-// chunk they just copied (mirrors the IntelliJ ClipCode notification).
-function tokenNote(copiedText: string): string {
-  return ` ~${estimateTokens(copiedText).toLocaleString()} tokens.`;
-}
-
 async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyRuntime): Promise<void> {
   const api = await getGitApi();
   if (!api || api.repositories.length === 0) {
@@ -183,25 +177,20 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
     const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
-    if (result.skippedFiles.length > 0) {
-      // Offer the actual skipped paths/sizes behind a button so the toast stays short.
-      // Fire-and-forget: do NOT await — an action-button notification never
-      // auto-dismisses, so awaiting it would block the copy from returning (hangs
-      // headless e2e and leaves the caller waiting on a toast).
-      void vscode.window.showInformationMessage(`${message}${tokenNote(result.text)}`, 'Show skipped').then(picked => {
-        if (picked === 'Show skipped') {
-          const list = result.skippedFiles
-            .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
-            .join('\n');
-          void vscode.window.showInformationMessage(
-            `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
-            { modal: true, detail: list }
-          );
-        }
-      });
-    } else {
-      notifyCopied(message, result.text);
-    }
+    // Offer the actual skipped paths/sizes behind a button so the toast stays short.
+    // Goes through notifyCopied so an oversized copy still gets its warning/error colour.
+    notifyCopied(message, result.text, result.skippedFiles.length > 0 ? {
+      label: 'Show skipped',
+      run: () => {
+        const list = result.skippedFiles
+          .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
+          .join('\n');
+        void vscode.window.showInformationMessage(
+          `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
+          { modal: true, detail: list }
+        );
+      }
+    } : undefined);
   }
 }
 
