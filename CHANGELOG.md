@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.41
+
+Performance: copying no longer scales its memory with the payload.
+
+- **The `~N tokens` estimate no longer materialises the whole payload as words.**
+  It used to `split()` the entire clipboard text into one string per word and
+  `match()` every punctuation character into a second array — on the single
+  extension-host thread, and precisely when the payload was large enough to
+  warrant the 1,000,000 / 2,000,000-token warning. It is now one linear scan with
+  constant extra memory. **The number is unchanged:** the rewrite is pinned
+  byte-for-byte by the 16 cases in the shared cross-tool golden fixture, verified
+  against 300,000 randomised inputs, and the IntelliJ sibling received the
+  identical rewrite so the two tools still agree exactly.
+- **Folder and multi-file copies now read files concurrently.** `collectCopyFiles`
+  awaited one file's size and content before starting the next; it now fans out 16
+  at a time through the same helper the Git copy path already used. Output order,
+  filtering, de-duplication, the size guard and the file-count limit's early stop
+  are all unchanged — a limit of 10 still stops the walk instead of scanning the
+  whole tree.
+
 ## 0.3.40
 
 Token estimate accuracy and size warnings.
