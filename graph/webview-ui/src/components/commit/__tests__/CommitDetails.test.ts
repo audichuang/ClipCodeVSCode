@@ -246,6 +246,24 @@ describe('CommitDetails — tabs', () => {
     expect(tabs.some(t => t.includes('staged'))).toBe(true);
     expect(tabs.some(t => t.includes('unstaged'))).toBe(true);
   });
+
+  /* SNIPCODE-HOOK start: M2 — mounting directly on an UNCOMMITTED commit (the
+     shape uiStore.selectCommit('UNCOMMITTED') will produce once the graph wires
+     up single-click selection) must render the Staged/Unstaged tree, not the
+     dead Commit-tab content, and must request getUncommittedDiff. */
+  it('mounting directly on commit.hash === "UNCOMMITTED" requests getUncommittedDiff and never renders Commit-tab content', () => {
+    const { container } = render(CommitDetails, {
+      commit: commit({ hash: 'UNCOMMITTED', subject: 'Uncommitted changes (2)', author: { name: '', email: '', date: '' }, committer: { name: '', email: '', date: '' } }),
+    });
+    expect(globalThis.__postedMessages.some(
+      (m) => (m.data as { type?: string }).type === 'getUncommittedDiff'
+    )).toBe(true);
+    // The Commit tab (author/committer info, avatar) must not appear even for
+    // the very first render — the synthetic commit has no real author/date.
+    expect(container.querySelector('.info-section')).toBeNull();
+    expect(container.querySelector('.avatar-lg')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — header actions', () => {
