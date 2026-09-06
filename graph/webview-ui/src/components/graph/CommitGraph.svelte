@@ -580,14 +580,18 @@
       vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } });
       return;
     }
-    // The uncommitted-changes row opens VS Code's Source Control view
-    // (where the user stages/commits) instead of the in-graph detail panel.
+    /* SNIPCODE-HOOK start: M2 — select UNCOMMITTED like any other row instead of
+       hijacking the click to open VS Code's SCM view. This is what makes
+       CommitDetails' Staged | Unstaged tabs reachable at all (they only ever
+       render for uiStore.selectedCommitHash === 'UNCOMMITTED', which nothing
+       previously wrote). Opening the SCM view is still one right-click away
+       (onUncommittedContextMenu). */
     if (commit.hash === 'UNCOMMITTED') {
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
-      uiStore.selectedCommitHash = null;
-      vscode.postMessage({ type: 'openScmView' });
+      uiStore.selectCommit('UNCOMMITTED');
       return;
     }
+    /* SNIPCODE-HOOK end */
 
     // In multi-select mode, only modifier clicks change the set. Shift extends
     // the range, Ctrl/Cmd toggles membership. A plain click falls through to the
@@ -1286,6 +1290,19 @@
     e.preventDefault();
     const items: any[] = [];
 
+    /* SNIPCODE-HOOK start: M2 — openScmView moved here from the single-click
+       handler, which now selects the row instead (so CommitDetails' Staged |
+       Unstaged tabs are reachable). */
+    items.push({
+      label: t('graph.openSourceControl'),
+      icon: 'source-control',
+      action: () => {
+        contextMenu = null;
+        vscode.postMessage({ type: 'openScmView' });
+      },
+    });
+    items.push({ separator: true, label: '', action: () => {} });
+    /* SNIPCODE-HOOK end */
 
     // Stash is always available: the row only renders when there are uncommitted
     // changes to stash.
@@ -1754,7 +1771,12 @@
                 {#if commit.hash === 'UNCOMMITTED'}
                   {@const counts = JSON.parse(commit.body || '{}')}
                   {@const label = t('graph.uncommitted', { staged: counts.staged ?? 0, unstaged: counts.unstaged ?? 0 })}
-                  <span class="commit-subject truncate" use:tooltip={t('graph.clickToOpenScm')}>{label}</span>
+                  <!-- SNIPCODE-HOOK start: M2 — clicking this row now selects it
+                       (Staged | Unstaged in the bottom panel) instead of jumping
+                       to Source Control, so the stale "click to open Source
+                       Control" tooltip is replaced to match. -->
+                  <span class="commit-subject truncate" use:tooltip={t('graph.clickToViewChanges')}>{label}</span>
+                  <!-- SNIPCODE-HOOK end -->
                 {:else}
                   <span class="commit-subject truncate" use:tooltip={commit.subject}><LinkifiedText text={commit.subject} /></span>
                 {/if}

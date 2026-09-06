@@ -718,4 +718,11 @@ export const en: Record<string, string> = {
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
   'pr.into': 'into',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/graph */
+  // ui/graph
+  'graph.openSourceControl': 'Open Source Control',
+  'graph.selectForCompare': 'Select for compare…',
+  'graph.clickToViewChanges': 'Click to view staged and unstaged changes',
+  /* SNIPCODE-HOOK end */
 };

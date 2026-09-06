@@ -716,4 +716,11 @@ export const zh: Record<string, string> = {
   'pr.aheadInfo': '领先 {base} {count} 个提交',
   'pr.into': '合并到',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/graph */
+  // ui/graph
+  'graph.openSourceControl': '打开源代码管理',
+  'graph.selectForCompare': '选择以进行比较…',
+  'graph.clickToViewChanges': '点击查看暂存和未暂存的变更',
+  /* SNIPCODE-HOOK end */
 };
