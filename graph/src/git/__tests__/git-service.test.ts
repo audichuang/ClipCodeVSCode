@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GitService, GitError, binCommitTime, buildAmendCommandStr } from '../git-service';
+import { GitService, GitError, binCommitTime, buildAmendCommandStr, assertHunkStageable } from '../git-service';
 
 // Access private exec method via prototype for mocking
 function mockExec(service: GitService, fn: (args: string[]) => Promise<string>) {
@@ -1378,6 +1378,44 @@ describe('GitService', () => {
       expect(calls[0]).toContain('src/foo.ts');
     });
 
+    /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+    it('adds -M and BOTH paths when oldPath is given (staged) — the X3 fix', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.getUncommittedFileDiff('b.ts', true, 'a.ts');
+      // Without this, a renamed+modified staged file's diff is pathspec-limited
+      // to the NEW path only, so git can't pair the old path's deletion and
+      // renders the whole new content as an unrelated "new file" add.
+      expect(calls[0]).toEqual(['diff', '--no-color', '--cached', '-M', '--', 'a.ts', 'b.ts']);
+    });
+
+    it('adds -M and BOTH paths when oldPath is given (unstaged, tracked)', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => {
+        calls.push(args);
+        if (args[0] === 'ls-files') return ''; // tracked
+        return '';
+      });
+
+      await service.getUncommittedFileDiff('b.ts', false, 'a.ts');
+      expect(calls[calls.length - 1]).toEqual(['diff', '--no-color', '-M', '--', 'a.ts', 'b.ts']);
+    });
+
+    it('falls back to the plain single-path form when oldPath equals file (not actually renamed)', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.getUncommittedFileDiff('b.ts', true, 'b.ts');
+      expect(calls[0]).toEqual(['diff', '--no-color', '--cached', '--', 'b.ts']);
+    });
+
+    it('validates oldPath the same way as file (rejects a flag-injection attempt)', async () => {
+      mockExec(service, async () => '');
+      await expect(service.getUncommittedFileDiff('b.ts', true, '--evil')).rejects.toThrow();
+    });
+    /* SNIPCODE-HOOK end */
+
     it('rejects path starting with - for unstaged untracked file', async () => {
       // Untracked branch passes file directly to `git diff --no-index`; path
       // must be validated before reaching git so a malicious filename cannot
@@ -1392,6 +1430,52 @@ describe('GitService', () => {
       await expect(service.getUncommittedFileDiff('--evil', false)).rejects.toThrow();
     });
   });
+
+  /* SNIPCODE-HOOK start: ui/diff R5 assertHunkStageable */
+  describe('assertHunkStageable (R5)', () => {
+    it('blocks a rename (rename from/to headers) — the X3-fixed pathspec makes these reachable', () => {
+      // Real `git diff --cached -M -- old new` header shape for a renamed file.
+      const raw = [
+        'diff --git a/old.ts b/new.ts',
+        'similarity index 83%',
+        'rename from old.ts',
+        'rename to new.ts',
+        'index 4603f7c..279494b 100644',
+        '--- a/old.ts',
+        '+++ b/new.ts',
+        '@@ -1 +1 @@',
+        '-x',
+        '+y',
+      ].join('\n');
+      expect(() => assertHunkStageable(raw, 'new.ts')).toThrow(/mode or rename/);
+    });
+
+    it('blocks a pure mode change (old mode/new mode)', () => {
+      const raw = ['diff --git a/f.ts b/f.ts', 'old mode 100644', 'new mode 100755'].join('\n');
+      expect(() => assertHunkStageable(raw, 'f.ts')).toThrow(/mode or rename/);
+    });
+
+    it('does NOT block a whole new file (new file mode) — that single hunk IS the whole file', () => {
+      // Deliberate: per-hunk stage/unstage of a brand-new file is legitimate
+      // (equivalent to whole-file stage) and patch-builder already supports it
+      // (see patch-builder.test.ts). Widening this regex to catch "new file
+      // mode" would regress that, and can't distinguish a real new file from
+      // a rename the pathspec bug already collapsed into one (same header
+      // shape) — the actual fix for that ambiguity is the -M pathspec (X3),
+      // not this regex.
+      const raw = [
+        'diff --git a/n.ts b/n.ts',
+        'new file mode 100644',
+        'index 0000000..e69de29',
+        '--- /dev/null',
+        '+++ b/n.ts',
+        '@@ -0,0 +1 @@',
+        '+x',
+      ].join('\n');
+      expect(() => assertHunkStageable(raw, 'n.ts')).not.toThrow();
+    });
+  });
+  /* SNIPCODE-HOOK end */
 
   describe('stageFile', () => {
     it('passes -- before the path to prevent flag injection', async () => {

@@ -255,8 +255,14 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
     const isBinary = fileDiff.includes('Binary files');
     const isImage = /\.(png|jpg|jpeg|gif|bmp|svg|webp|ico)$/i.test(filePath);
 
+    /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+    const meta = parseDiffHeaderMeta(lines);
+    /* SNIPCODE-HOOK end */
+
     if (isBinary) {
-      results.push({ file: filePath, hunks: [], isBinary: true, isImage });
+      /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+      results.push({ file: filePath, hunks: [], isBinary: true, isImage, ...meta });
+      /* SNIPCODE-HOOK end */
       continue;
     }
 
@@ -331,7 +337,9 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
       }
     }
 
-    results.push({ file: filePath, hunks, isBinary: false, isImage });
+    /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+    results.push({ file: filePath, hunks, isBinary: false, isImage, ...meta });
+    /* SNIPCODE-HOOK end */
   }
 
   return results;
@@ -428,6 +436,44 @@ export function parseLfsLocks(raw: string): Array<{ path: string; owner: string;
     return { path: parts[0]?.trim() ?? '', owner: parts[1]?.trim() ?? '', id: parts[2]?.trim() ?? '' };
   });
 }
+
+/* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+/** Scan a single file diff's header lines (before the first `@@`) for the
+ *  rename/mode metadata git emits there. All optional — a plain modify diff
+ *  matches none of these and returns an empty object. */
+function parseDiffHeaderMeta(lines: string[]): {
+  oldPath?: string; similarity?: number; oldMode?: string; newMode?: string;
+  newFile?: boolean; deletedFile?: boolean;
+} {
+  const meta: ReturnType<typeof parseDiffHeaderMeta> = {};
+  for (const line of lines) {
+    if (line.startsWith('@@')) break;
+    if (line.startsWith('rename from ')) {
+      meta.oldPath = unescapeRenamePath(line.slice('rename from '.length));
+    } else if (line.startsWith('similarity index ')) {
+      const m = line.match(/^similarity index (\d+)%/);
+      if (m) meta.similarity = parseInt(m[1], 10);
+    } else if (line.startsWith('old mode ')) {
+      meta.oldMode = line.slice('old mode '.length).trim();
+    } else if (line.startsWith('new mode ')) {
+      meta.newMode = line.slice('new mode '.length).trim();
+    } else if (line.startsWith('new file mode ')) {
+      meta.newFile = true;
+    } else if (line.startsWith('deleted file mode ')) {
+      meta.deletedFile = true;
+    }
+  }
+  return meta;
+}
+
+/** `rename from`/`rename to` lines carry a bare path (no a/ b/ prefix),
+ *  quoted+escaped the same way +++/--- paths are when it contains unusual
+ *  characters. */
+function unescapeRenamePath(raw: string): string {
+  const s = raw.replace(/\r$/, '').trim();
+  return s.startsWith('"') ? unescapeGitPath(s) : s;
+}
+/* SNIPCODE-HOOK end */
 
 /** Resolve a file path from the +++/--- header lines of a single file diff.
  *  Prefers the post-image (+++) path; falls back to the pre-image (---) path

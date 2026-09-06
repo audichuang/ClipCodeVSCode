@@ -734,7 +734,12 @@ export class MainPanel {
         /* SNIPCODE-HOOK end */
         case 'getFileDiff': {
           const ticket = this.fileDiffSequence.issue();
-          const diffs = await this.gitService.showCommitDiff(message.payload.hash, message.payload.file);
+          /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+          // oldPath (when the caller knows the file was renamed at this commit)
+          // lets commitFileDiff pair it as a rename+modify instead of rendering
+          // it as an unrelated whole-file add — see git-service.ts commitFileDiff.
+          const diffs = await this.gitService.showCommitDiff(message.payload.hash, message.payload.file, message.payload.oldPath);
+          /* SNIPCODE-HOOK end */
           if (!this.fileDiffSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           this.post({
             type: 'fileDiffData',
@@ -1003,11 +1008,14 @@ export class MainPanel {
             await this.openCompareDiffInEditor(message.payload.file, message.payload.ref1, message.payload.ref2, message.payload.oldPath);
             /* SNIPCODE-HOOK end */
           } else {
+            /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
             await this.openDiffInEditor(
               message.payload.file,
               message.payload.staged ?? false,
               message.payload.commitHash,
+              message.payload.oldPath,
             );
+            /* SNIPCODE-HOOK end */
           }
           break;
         }
@@ -1991,29 +1999,38 @@ export class MainPanel {
     file: string,
     staged?: boolean,
     commitHash?: string,
+    /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+    oldPath?: string,
+    /* SNIPCODE-HOOK end */
   ): Promise<void> {
     // Validate that the webview-supplied path stays inside the repo before
     // we feed it to vscode.diff / build URIs. resolveRepoRelativePath throws
     // on traversal (`../etc/passwd`) and absolute paths.
     const fullPath = this.resolveRepoRelativePath(file, 'openDiff');
     const fileUri = vscode.Uri.file(fullPath);
+    /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec — mirrors
+       openCompareDiffInEditor's leftPath: a renamed file didn't exist under
+       its new name at the OLD (left) side, so that side must resolve from
+       oldPath or it reads as empty/missing instead of the prior content. */
+    const leftPath = oldPath ? this.resolveRepoRelativePath(oldPath, 'openDiff') : fullPath;
+    /* SNIPCODE-HOOK end */
 
     if (commitHash) {
       // Commit diff: parent vs commit. Resolve the parent to a full SHA — the
       // `<sha>~1` shorthand isn't understood by markdown-diff tooling (#51).
       const parentRef = await this.gitService.resolveDiffBaseRef(commitHash);
-      const leftUri = this.toGitUri(fullPath, parentRef);
+      const leftUri = this.toGitUri(leftPath, parentRef);
       const rightUri = this.toGitUri(fullPath, commitHash);
       const title = `${file} (${commitHash.substring(0, 7)})`;
       await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
     } else if (staged) {
       // Staged diff: HEAD vs index
-      const headUri = this.toGitUri(fullPath, 'HEAD');
+      const headUri = this.toGitUri(leftPath, 'HEAD');
       const indexUri = this.toGitUri(fullPath, '');
       await vscode.commands.executeCommand('vscode.diff', headUri, indexUri, `${file} (Staged)`);
     } else {
       // Unstaged diff: index vs working tree
-      const indexUri = this.toGitUri(fullPath, '');
+      const indexUri = this.toGitUri(leftPath, '');
       await vscode.commands.executeCommand('vscode.diff', indexUri, fileUri, `${file} (Working Tree)`);
     }
   }

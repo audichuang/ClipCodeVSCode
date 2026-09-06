@@ -719,4 +719,9 @@ export const ko: Record<string, string> = {
 
   // ui/diff
   'diff.noNewlineAtEof': '파일 끝에 줄바꿈 없음',
+  'diff.renamedFrom': '{oldPath}에서 이름 변경됨 (유사도 {similarity}%)',
+  'diff.modeChanged': '모드 {oldMode} → {newMode}',
+  'diff.noTextualChanges': '텍스트 변경 없음',
+  'diff.newFile': '새 파일',
+  'diff.deletedFile': '삭제된 파일',
 };

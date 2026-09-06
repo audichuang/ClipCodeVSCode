@@ -34,7 +34,9 @@ export type WebviewMessage =
   | { type: 'predictConflicts'; payload: { ours: string; theirs: string; mode?: 'rebase'; mergeBase?: string; requestId?: string } }
   | { type: 'checkout'; payload: { ref: string; pullAfter?: boolean; force?: boolean; merge?: boolean; stash?: boolean; stashUntracked?: boolean; clean?: boolean } }
   | { type: 'getCommitDiff'; payload: { hash: string } }
-  | { type: 'getFileDiff'; payload: { hash: string; file: string } }
+  /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+  | { type: 'getFileDiff'; payload: { hash: string; file: string; oldPath?: string } }
+  /* SNIPCODE-HOOK end */
   | { type: 'getCommitData'; payload: { hash: string } }
   | { type: 'getCommitSignature'; payload: { hash: string } }
   | { type: 'createBranch'; payload: { name: string; startPoint?: string; checkout?: boolean; publish?: boolean; stash?: boolean; stashUntracked?: boolean; force?: boolean; clean?: boolean; merge?: boolean } }
