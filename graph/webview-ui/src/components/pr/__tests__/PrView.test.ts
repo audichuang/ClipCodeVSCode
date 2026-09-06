@@ -1280,6 +1280,29 @@ describe('PrView — stats row and per-file +/- (P4/X2)', () => {
     });
   });
 
+  // SNIPCODE-HOOK start: PR tab (C4) — a pure rename (no content change) also
+  // has hunks: [] and isBinary: false, same shape as the binary logo.png case
+  // above, but showing "bin" for it reads wrong (see isPureRename()). Both
+  // the left-list row and the right-pane section header badge must say so.
+  it('shows a rename label (not "bin") for a pure rename with zero hunks, in both the file list and the diff-section header', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 1, behind: 0,
+      files: [{ path: 'src/renamed.ts', status: 'R', oldPath: 'src/original.ts' }],
+      diffs: [{ file: 'src/renamed.ts', isBinary: false, isImage: false, hunks: [] }],
+    });
+    await waitFor(() => {
+      const row = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('renamed.ts'))!;
+      expect(row.querySelector('.pr-file-stats')?.textContent).not.toContain('bin');
+      expect(row.querySelector('.pr-file-stats')?.textContent).toContain('renamed');
+      const header = container.querySelector('.pr-diff-section-header')!;
+      expect(header.querySelector('.pr-file-stats')?.textContent).not.toContain('bin');
+      expect(header.querySelector('.pr-file-stats')?.textContent).toContain('renamed');
+    });
+  });
+  // SNIPCODE-HOOK end
+
   it('clicking the merge-base hash copies the full hash via copyToClipboard', async () => {
     const { container } = setup();
     deliver('commitsBetween', {

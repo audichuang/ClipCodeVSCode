@@ -776,4 +776,8 @@ export const en: Record<string, string> = {
   'graph.selectForCompare': 'Select for compare…',
   'graph.clickToViewChanges': 'Click to view staged and unstaged changes',
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/cleanup */
+  // ui/cleanup
+  'pr.statsRenamed': 'renamed',
+  /* SNIPCODE-HOOK end */
 };

@@ -774,4 +774,8 @@ export const zh: Record<string, string> = {
   'graph.selectForCompare': '选择以进行比较…',
   'graph.clickToViewChanges': '点击查看暂存和未暂存的变更',
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/cleanup */
+  // ui/cleanup
+  'pr.statsRenamed': '重命名',
+  /* SNIPCODE-HOOK end */
 };
