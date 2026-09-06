@@ -651,3 +651,48 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });
   });
 });
+
+/* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+describe('FileDiffView no-newline-at-EOF marker', () => {
+  function noNewlineDiff(): DiffData {
+    return {
+      file: 'src/eof.ts',
+      isBinary: false,
+      isImage: false,
+      hunks: [{
+        header: '@@ -1,2 +1,2 @@',
+        oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+        lines: [
+          { type: 'context', content: 'line one', oldLineNumber: 1, newLineNumber: 1 },
+          { type: 'delete', content: 'line three', oldLineNumber: 2 },
+          { type: 'add', content: 'line three, no trailing newline', newLineNumber: 2, noNewline: true },
+        ],
+      }],
+    };
+  }
+
+  it('renders the pill only on the flagged line (inline mode)', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: noNewlineDiff(), diffMode: 'inline', hideModeToggle: true });
+    const pills = container.querySelectorAll('.no-newline-pill');
+    expect(pills.length).toBe(1);
+    expect(pills[0].textContent).toContain('No newline at end of file');
+    // The unflagged delete line must not get a pill of its own.
+    const deleteLine = container.querySelector('.diff-delete')!;
+    expect(deleteLine.querySelector('.no-newline-pill')).toBeNull();
+  });
+
+  it('renders the pill in side-by-side mode too', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: noNewlineDiff(), diffMode: 'side-by-side', hideModeToggle: true });
+    expect(container.querySelectorAll('.no-newline-pill').length).toBe(1);
+  });
+
+  it('renders no pill when nothing is flagged', () => {
+    const diff = noNewlineDiff();
+    diff.hunks[0].lines[2].noNewline = undefined;
+    const { container } = render(FileDiffView, { diff, diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelector('.no-newline-pill')).toBeNull();
+  });
+});
+/* SNIPCODE-HOOK end */

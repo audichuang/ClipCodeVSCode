@@ -453,6 +453,51 @@ new mode 100755`;
     expect(result[0].file).toBe('unknown');
   });
 
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  it('flags only the line that actually lost its trailing newline', () => {
+    // Real `git diff` output for a change that ONLY removes the final
+    // newline: git emits exactly one `\ No newline at end of file` marker,
+    // right after the `+` line (the old blob still had a trailing newline).
+    // Flagging both sides would misrepresent a still-newline-terminated old
+    // line as also missing one.
+    const raw = [
+      'diff --git a/scenario-b.ts b/scenario-b.ts',
+      'index 0c2aa38..4571ae8 100644',
+      '--- a/scenario-b.ts',
+      '+++ b/scenario-b.ts',
+      '@@ -1,3 +1,3 @@',
+      ' line one',
+      ' line two',
+      '-line three',
+      '+line three, no trailing newline',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    const del = lines.find(l => l.type === 'delete')!;
+    const add = lines.find(l => l.type === 'add')!;
+    expect(del.noNewline).toBeUndefined();
+    expect(add.noNewline).toBe(true);
+  });
+
+  it('flags both sides when neither blob ends in a newline', () => {
+    const raw = [
+      'diff --git a/f.ts b/f.ts',
+      '--- a/f.ts',
+      '+++ b/f.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '\\ No newline at end of file',
+      '+new',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    expect(lines.find(l => l.type === 'delete')!.noNewline).toBe(true);
+    expect(lines.find(l => l.type === 'add')!.noNewline).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('should parse multiple file diffs', () => {
     const raw = `diff --git a/file1.ts b/file1.ts
 --- a/file1.ts

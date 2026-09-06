@@ -718,4 +718,7 @@ export const en: Record<string, string> = {
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
   'pr.into': 'into',
   /* SNIPCODE-HOOK end */
+
+  // ui/diff
+  'diff.noNewlineAtEof': 'No newline at end of file',
 };

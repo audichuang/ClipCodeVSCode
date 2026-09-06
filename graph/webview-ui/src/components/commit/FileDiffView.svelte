@@ -512,6 +512,14 @@
   }
 </script>
 
+<!-- SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker -->
+{#snippet noNewlinePill(line: DiffLine)}
+  {#if line.noNewline}
+    <span class="no-newline-pill" title={t('diff.noNewlineAtEof')}>⏎ {t('diff.noNewlineAtEof')}</span>
+  {/if}
+{/snippet}
+<!-- SNIPCODE-HOOK end -->
+
 <div class="diff-wrapper" class:stacked>
   <div class="diff-toolbar">
     {#if heading}<div class="diff-commit-label" title={heading}>{heading}</div>{/if}
@@ -621,6 +629,7 @@
                 </span>
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <span class="line-content" onmousedown={(e) => { if (e.button === 0) lineSel = null; }}>{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                {@render noNewlinePill(line)}
               </div>
             {/each}
           </div>
@@ -660,6 +669,7 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
+                      {@render noNewlinePill(line)}
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
@@ -709,6 +719,7 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
+                      {@render noNewlinePill(line)}
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
@@ -1031,6 +1042,23 @@
     padding-left: 4px;
     padding-right: 24px;
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  .no-newline-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 0 5px;
+    font-size: 0.8em;
+    font-family: var(--vscode-font-family, sans-serif);
+    white-space: nowrap;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    opacity: 0.85;
+    user-select: none;
+  }
+  /* SNIPCODE-HOOK end */
 
   .diff-empty {
     padding: 20px;

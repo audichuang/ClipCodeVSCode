@@ -716,4 +716,7 @@ export const zh: Record<string, string> = {
   'pr.aheadInfo': '领先 {base} {count} 个提交',
   'pr.into': '合并到',
   /* SNIPCODE-HOOK end */
+
+  // ui/diff
+  'diff.noNewlineAtEof': '文件末尾无换行符',
 };
