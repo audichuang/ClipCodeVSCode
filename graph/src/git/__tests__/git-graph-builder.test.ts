@@ -550,3 +550,35 @@ describe('buildFullGraph HEAD-reachability highlighting (G2)', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G6 — HEAD-on-merge keeps the merge dot, adds isHead */
+describe('buildFullGraph HEAD-on-merge dot (G6)', () => {
+  it('keeps type "merge" but sets isHead when HEAD lands on a merge commit', () => {
+    const commits = [
+      makeCommit('merge', ['a', 'b'], [{ type: 'head', name: 'main' }]),
+      makeCommit('a', ['base']),
+      makeCommit('b', ['base']),
+      makeCommit('base', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].type).toBe('merge');
+    expect(graph.dots[0].isHead).toBe(true);
+  });
+
+  it('a plain (non-merge) HEAD commit still gets type "head"', () => {
+    const commits = [
+      makeCommit('h1', ['base'], [{ type: 'head', name: 'main' }]),
+      makeCommit('base', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].type).toBe('head');
+    expect(graph.dots[0].isHead).toBe(true);
+  });
+
+  it('a non-HEAD commit never sets isHead', () => {
+    const commits = [makeCommit('c1', [])];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].isHead).toBe(false);
+  });
+});
+/* SNIPCODE-HOOK end */
