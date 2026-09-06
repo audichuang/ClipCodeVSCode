@@ -53,6 +53,10 @@ export interface GraphPathData {
   points: Array<{ x: number; y: number }>;
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 — mirrors git-graph-builder.ts GraphPath */
+  highlighted: boolean;
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphLinkData {
@@ -61,6 +65,10 @@ export interface GraphLinkData {
   end: { x: number; y: number };
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 — mirrors git-graph-builder.ts GraphLink */
+  highlighted: boolean;
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphDotData {
@@ -70,6 +78,11 @@ export interface GraphDotData {
   type: 'default' | 'head' | 'merge';
   localOnly: boolean;
   remoteTip: boolean;
+  /* SNIPCODE-HOOK start: G2/G6/G7 — mirrors git-graph-builder.ts GraphDot */
+  highlighted: boolean;
+  isHead: boolean;
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface CommitGraphData {
