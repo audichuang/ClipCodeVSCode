@@ -147,6 +147,66 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
   });
 
+  /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+  it('sameGroup drops a nested-repo (status N) node from a mixed selection', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const nested: FileNode = { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' };
+    const normal = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.stage')!(normal, [normal, nested]);
+
+    expect(a.stagePaths).toHaveBeenCalledWith([normal]);
+  });
+
+  it('sameGroup drops a lone nested-repo node (single inline click) — nothing is staged', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const nested: FileNode = { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' };
+    await H.commands.get('snipcode.git.stage')!(nested, undefined);
+
+    expect(a.stagePaths).not.toHaveBeenCalled();
+  });
+
+  it('stageAll never `git add`s a nested repo directory', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [], unstaged: [{ path: 'src/foo.ts', status: 'M' }, { path: 'vendor-lib', status: 'N' }], conflict: [],
+      })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    await H.commands.get('snipcode.git.stageAll')!();
+
+    expect(a.stagePaths).toHaveBeenCalledWith([{ path: 'src/foo.ts', status: 'M' }]);
+  });
+
+  it('stageRepo (repo-node inline Stage All) never `git add`s a nested repo directory', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const repoNode = {
+      kind: 'repo', repoName: 'a', repoPath: '/a', branch: 'main', group: 'unstaged',
+      files: [
+        { kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' },
+        { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' },
+      ],
+    };
+    await H.commands.get('snipcode.git.stageRepo')!(repoNode);
+
+    expect(a.stagePaths).toHaveBeenCalledWith([{ kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' }]);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('routes staged copies through Git change copy with the index side preserved', async () => {
     const a = mkSvc();
     setRepos(['/a'], { '/a': a });
@@ -482,6 +542,40 @@ describe('Changes tree repo badges', () => {
     const provider = new ChangesTreeProvider(async () => status());
     await provider.refresh();
     expect(provider.getChildren()).toHaveLength(2);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: R4/S7 nested repo / untracked file rendering */
+  it('renders a nested repo (status N) with a repo icon and "(nested repo)" description', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'vendor-lib', status: 'N' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    const item = provider.getTreeItem(fileNode);
+    expect(item.description).toBe('(nested repo)');
+    expect((item.iconPath as { id: string }).id).toBe('repo');
+  });
+
+  it('marks an untracked file description with "untracked"', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'src/new.ts', status: 'U' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('src · untracked');
+  });
+
+  it('an untracked file at the repo root just says "untracked"', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'new.ts', status: 'U' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('untracked');
   });
   /* SNIPCODE-HOOK end */
 });

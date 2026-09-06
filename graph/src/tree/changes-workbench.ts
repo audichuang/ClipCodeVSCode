@@ -219,7 +219,10 @@ export class ChangesWorkbench implements vscode.Disposable {
   /** Stage every file of one repo (the repo node under Unstaged). */
   private async stageRepo(node: RepoNode): Promise<void> {
     /* SNIPCODE-HOOK start: Batch B retain rename source path */
-    if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(node.files));
+    /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+    const files = node.files.filter(f => f.status !== 'N');
+    /* SNIPCODE-HOOK end */
+    if (files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(files));
     /* SNIPCODE-HOOK end */
     await this.refresh();
   }
@@ -259,7 +262,10 @@ export class ChangesWorkbench implements vscode.Disposable {
   private async stageAll(): Promise<void> {
     for (const r of await this.loadStatus()) {
       /* SNIPCODE-HOOK start: Batch B retain rename source path */
-      if (r.unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(r.unstaged));
+      /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+      const unstaged = r.unstaged.filter(f => f.status !== 'N');
+      /* SNIPCODE-HOOK end */
+      if (unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(unstaged));
       /* SNIPCODE-HOOK end */
     }
     await this.refresh();
@@ -426,7 +432,11 @@ export class ChangesWorkbench implements vscode.Disposable {
       const clicked = n as FileNode;
       const all = sel<FileNode>(n, ns);
       const kept = all.filter(item =>
-        item.repoPath === clicked.repoPath && item.group === clicked.group);
+        item.repoPath === clicked.repoPath && item.group === clicked.group
+        /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+        && item.status !== 'N'
+        /* SNIPCODE-HOOK end */
+      );
       // Tell the user what a mixed selection dropped — silently ignoring the
       // other repo/side's items reads as "everything was staged".
       if (kept.length < all.length) {
