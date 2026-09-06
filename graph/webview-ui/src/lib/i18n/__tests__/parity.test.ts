@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { en } from '../en';
 import { ko } from '../ko';
 import { zh } from '../zh';
+/* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+import { zhTw } from '../zh-tw';
+/* SNIPCODE-HOOK end */
 
 // English is the source of truth: any key that ships in en.ts must have a
 // translation in ko.ts and zh.ts (and vice versa — leftover keys in a
@@ -12,6 +15,9 @@ import { zh } from '../zh';
 const enKeys = new Set(Object.keys(en));
 const koKeys = new Set(Object.keys(ko));
 const zhKeys = new Set(Object.keys(zh));
+/* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+const zhTwKeys = new Set(Object.keys(zhTw));
+/* SNIPCODE-HOOK end */
 
 function diff(a: Set<string>, b: Set<string>): string[] {
   return [...a].filter(k => !b.has(k)).sort();
@@ -26,6 +32,12 @@ describe('i18n key parity', () => {
     expect(diff(enKeys, zhKeys)).toEqual([]);
   });
 
+  /* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+  it('zh-tw has every key in en', () => {
+    expect(diff(enKeys, zhTwKeys)).toEqual([]);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('ko has no extra keys missing from en', () => {
     expect(diff(koKeys, enKeys)).toEqual([]);
   });
@@ -34,8 +46,16 @@ describe('i18n key parity', () => {
     expect(diff(zhKeys, enKeys)).toEqual([]);
   });
 
+  /* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+  it('zh-tw has no extra keys missing from en', () => {
+    expect(diff(zhTwKeys, enKeys)).toEqual([]);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('every value is a non-empty string', () => {
-    for (const [lang, dict] of [['en', en], ['ko', ko], ['zh', zh]] as const) {
+    /* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+    for (const [lang, dict] of [['en', en], ['ko', ko], ['zh', zh], ['zh-tw', zhTw]] as const) {
+    /* SNIPCODE-HOOK end */
       for (const [key, value] of Object.entries(dict)) {
         expect(typeof value, `${lang}/${key} should be string`).toBe('string');
         expect(value.trim().length, `${lang}/${key} should not be blank`).toBeGreaterThan(0);
@@ -52,7 +72,9 @@ describe('i18n key parity', () => {
     const tokenRe = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/g;
     for (const key of enKeys) {
       const enTokens = new Set(en[key].match(tokenRe) ?? []);
-      for (const [lang, dict] of [['ko', ko], ['zh', zh]] as const) {
+      /* SNIPCODE-HOOK start: X1-1 zh-tw dictionary joins the parity net */
+      for (const [lang, dict] of [['ko', ko], ['zh', zh], ['zh-tw', zhTw]] as const) {
+      /* SNIPCODE-HOOK end */
         const translated = dict[key];
         if (translated === undefined) continue;
         const otherTokens = translated.match(tokenRe) ?? [];
