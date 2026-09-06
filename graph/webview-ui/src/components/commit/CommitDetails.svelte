@@ -1518,19 +1518,14 @@
 {/if}
 
 {#if previewCommit && previewPos}
+  <!-- SNIPCODE-HOOK start: X7 — onNavigate removed (dead: CommitHoverCard never called it) -->
   <CommitHoverCard
     commit={previewCommit}
     x={previewPos.x}
     y={previewPos.y}
     onClose={handleParentMouseLeave}
-    onNavigate={() => {
-      if (previewCommit) {
-        uiStore.selectedCommitHash = previewCommit.hash;
-        vscode.postMessage({ type: 'searchByHash', payload: { hash: previewCommit.hash } });
-        handleParentMouseLeave();
-      }
-    }}
   />
+  <!-- SNIPCODE-HOOK end -->
 {/if}
 
 <style>

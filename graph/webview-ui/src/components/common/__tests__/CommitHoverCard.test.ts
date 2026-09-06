@@ -16,19 +16,19 @@ const commit: Commit = {
 
 describe('CommitHoverCard', () => {
   it('renders author name, email and short hash', () => {
-    const { container } = render(CommitHoverCard, { commit, x: 100, y: 100, onClose: vi.fn(), onNavigate: vi.fn() });
+    const { container } = render(CommitHoverCard, { commit, x: 100, y: 100, onClose: vi.fn() });
     expect(container.querySelector('.author-name')?.textContent).toBe('Alice');
     expect(container.querySelector('.author-email')?.textContent).toContain('alice@example.com');
     expect(container.querySelector('.commit-hash')?.textContent).toBe('abcdef1');
   });
 
   it('renders the commit subject', () => {
-    const { container } = render(CommitHoverCard, { commit, x: 0, y: 0, onClose: vi.fn(), onNavigate: vi.fn() });
+    const { container } = render(CommitHoverCard, { commit, x: 0, y: 0, onClose: vi.fn() });
     expect(container.querySelector('.commit-subject')?.textContent).toBe('fix: thing');
   });
 
   it('uses inline style with the provided coordinates', () => {
-    const { container } = render(CommitHoverCard, { commit, x: 100, y: 100, onClose: vi.fn(), onNavigate: vi.fn() });
+    const { container } = render(CommitHoverCard, { commit, x: 100, y: 100, onClose: vi.fn() });
     const card = container.querySelector<HTMLDivElement>('.commit-hover-card')!;
     expect(card.style.left).toMatch(/px$/);
     expect(card.style.top).toMatch(/px$/);
@@ -36,7 +36,7 @@ describe('CommitHoverCard', () => {
 
   it('mouseleave fires onClose', async () => {
     const onClose = vi.fn();
-    const { container } = render(CommitHoverCard, { commit, x: 50, y: 50, onClose, onNavigate: vi.fn() });
+    const { container } = render(CommitHoverCard, { commit, x: 50, y: 50, onClose });
     await fireEvent.mouseLeave(container.querySelector<HTMLDivElement>('.commit-hover-card')!);
     expect(onClose).toHaveBeenCalled();
   });
