@@ -309,6 +309,7 @@
        only recomputes the rest, so there's no reason to blank it here. */
     showFullDiff = false;
     lineSel = null;
+    /* SNIPCODE-HOOK end */
   });
 
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — `internalMode` is the

@@ -1053,8 +1053,10 @@ export class GitService {
   /* SNIPCODE-HOOK start: uncommitted per-file diff for the workbench/Diff tab.
    *  A git failure THROWS so callers can surface it — swallowing it here made the
    *  Diff tab render the affirmative "No changes" empty state on e.g. index.lock
-   *  contention or a broken repo. null strictly means "this side has no diff". */
-  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec */
+   *  contention or a broken repo. null strictly means "this side has no diff".
+   *  `oldPath` (ui/diff D3 rename-aware pathspec) lets a rename pair via -M
+   *  instead of rendering as an unrelated whole-file add — see
+   *  uncommittedDiffArgs above, which both diff routes share. */
   async getUncommittedFileDiff(file: string, staged: boolean, oldPath?: string): Promise<DiffData | null> {
     this.assertSafePath(file, 'diff');
     if (oldPath) this.assertSafePath(oldPath, 'diff');
@@ -1086,7 +1088,6 @@ export class GitService {
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   }
-  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   private diffFingerprint(raw: string | Buffer): string {
