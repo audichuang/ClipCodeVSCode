@@ -26,6 +26,7 @@
     "onCommand:clipcode.blame.toggle"
   ],
   "main": "./dist/extension.js",
+  "l10n": "./graph/l10n",
   "contributes": {
     "commands": [
       {
