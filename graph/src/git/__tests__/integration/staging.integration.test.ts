@@ -91,6 +91,31 @@ describe('GitService integration — real staging (stagePaths/unstagePaths/commi
     await expect(svc.commitIndex('空提交')).rejects.toThrow(/nothing staged/i);
   });
 
+  /* SNIPCODE-HOOK start: R3/S3 real merge conflict classification */
+  it('a real merge conflict lands in `conflict`, not staged/unstaged, and stagePaths (Mark Resolved) clears it', async () => {
+    runGit(repo.path, ['checkout', '-b', 'feature']);
+    writeFile(repo.path, 'a.txt', 'from feature\n');
+    runGit(repo.path, ['commit', '-am', 'feature edit']);
+    runGit(repo.path, ['checkout', 'main']);
+    writeFile(repo.path, 'a.txt', 'from main\n');
+    runGit(repo.path, ['commit', '-am', 'main edit']);
+    try {
+      runGit(repo.path, ['merge', 'feature']);
+    } catch { /* merge conflict exits non-zero — expected */ }
+
+    const diff = await svc.getUncommittedDiff();
+    expect(diff.conflict).toEqual([{ path: 'a.txt', status: '!' }]);
+    expect(diff.staged.map(e => e.path)).not.toContain('a.txt');
+    expect(diff.unstaged.map(e => e.path)).not.toContain('a.txt');
+
+    // "Mark Resolved" = git add, same as stagePaths.
+    await svc.stagePaths(['a.txt']);
+    const afterResolve = await svc.getUncommittedDiff();
+    expect(afterResolve.conflict).toEqual([]);
+    expect(afterResolve.staged.map(e => e.path)).toContain('a.txt');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('unstagePaths under an unborn HEAD (no commits) unstages via rm --cached', async () => {
     const fresh = createTempRepo();
     try {

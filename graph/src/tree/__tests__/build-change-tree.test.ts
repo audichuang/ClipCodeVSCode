@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildChangeTree, type RepoStatus } from '../build-change-tree';
 
 const repo = (over: Partial<RepoStatus>): RepoStatus => ({
-  repoName: 'r', repoPath: '/r', branch: 'main', staged: [], unstaged: [], ...over,
+  repoName: 'r', repoPath: '/r', branch: 'main', staged: [], unstaged: [], conflict: [], ...over,
 });
 
 describe('buildChangeTree', () => {
@@ -50,4 +50,28 @@ describe('buildChangeTree', () => {
     expect(staged.repos[0].files[0].status).toBe('R');
     expect(unstaged.repos[0].files[0].status).toBe('U');
   });
+
+  /* SNIPCODE-HOOK start: R3/S3 conflict group */
+  it('omits the Merge Conflicts group entirely when nothing is unmerged', () => {
+    const groups = buildChangeTree([repo({})]);
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.group)).toEqual(['staged', 'unstaged']);
+  });
+
+  it('puts unmerged files in a trailing Merge Conflicts group, not staged/unstaged', () => {
+    const groups = buildChangeTree([
+      repo({ conflict: [{ path: 'both.ts', status: '!' }], staged: [{ path: 'clean.ts', status: 'M' }] }),
+    ]);
+    expect(groups).toHaveLength(3);
+    const conflict = groups[2];
+    expect(conflict.group).toBe('conflict');
+    expect(conflict.label).toBe('Merge Conflicts');
+    expect(conflict.count).toBe(1);
+    expect(conflict.repos[0].files[0]).toMatchObject({ path: 'both.ts', status: '!', group: 'conflict' });
+    // The conflicted file must not also appear under Staged/Unstaged.
+    const [staged, unstaged] = groups;
+    expect(staged.repos[0].files.map((f) => f.path)).toEqual(['clean.ts']);
+    expect(unstaged.repos).toEqual([]);
+  });
+  /* SNIPCODE-HOOK end */
 });

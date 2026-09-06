@@ -950,10 +950,13 @@ export class GitService {
   }
 
   /* SNIPCODE-HOOK start: Batch B retain rename source path */
-  async getUncommittedDiff(): Promise<{ staged: StatusChange[]; unstaged: StatusChange[] }> {
+  async getUncommittedDiff(): Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }> {
     const raw = await this.exec(['status', '--porcelain', '-z', '-uall']);
     const staged: StatusChange[] = [];
     const unstaged: StatusChange[] = [];
+    /* SNIPCODE-HOOK start: R3/S3 route unmerged entries to a third conflict array */
+    const conflict: StatusChange[] = [];
+    /* SNIPCODE-HOOK end */
     for (const entry of this.parseStatusPorcelainZ(raw)) {
       const { x, y } = entry;
       let { path } = entry;
@@ -963,11 +966,25 @@ export class GitService {
       // so the UI can show a meaningful label instead of an empty diff.
       const isNestedRepo = x === '?' && y === '?' && path.endsWith('/');
       if (isNestedRepo) path = path.slice(0, -1);
+      /* SNIPCODE-HOOK start: R3/S3 route unmerged entries to a third conflict array
+         Standard porcelain unmerged pairs: DD, AU, UD, UA, DU, AA, UU — any pair
+         where either side is 'U', or both sides agree on 'A'/'D'. These used to
+         land in BOTH staged and unstaged (status letter collided with untracked
+         'U'), so a conflicted file looked like a normal stageable change and
+         Commit failed with an opaque "unmerged files" error. Route them here
+         instead, with a distinct status letter ('!') so the tree/decoration
+         layer never confuses a conflict with an untracked file. */
+      const isConflict = x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D');
+      if (isConflict) {
+        conflict.push({ path, status: '!', ...(entry.oldPath ? { oldPath: entry.oldPath } : {}) });
+        continue;
+      }
+      /* SNIPCODE-HOOK end */
       if (x !== ' ' && x !== '?') staged.push({ path, status: x, ...((x === 'R' || x === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
       if (y !== ' ' && y !== '?') unstaged.push({ path, status: y, ...((y === 'R' || y === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
       if (x === '?' && y === '?') unstaged.push({ path, status: isNestedRepo ? 'N' : 'U' });
     }
-    return { staged, unstaged };
+    return { staged, unstaged, conflict };
   }
   /* SNIPCODE-HOOK end */
 
