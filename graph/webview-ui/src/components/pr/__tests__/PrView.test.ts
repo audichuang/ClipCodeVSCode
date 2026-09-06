@@ -1366,3 +1366,96 @@ describe('PrView — file list dir/base + rename display (P6)', () => {
   });
 });
 // SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P7) self-made diff section header — replaces
+// `heading={file.path}` (which duplicated the path FileDiffView already
+// renders in its own toolbar, with no status letter or rename old -> new) and
+// hides FileDiffView's own toolbar via :global(.diff-toolbar){display:none}.
+// The chevron introduced here (collapsedFiles/toggleCollapse) is a P7/P8
+// shared mechanism — bulk Collapse all/Expand all lands separately in P8.
+describe('PrView — diff section header (P7)', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ type: 'add', content: line, newLineNumber: 1 }] }],
+    };
+  }
+
+  function setup(files: Array<{ path: string; status: string; oldPath?: string }>, diffs: DiffData[]) {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0, files, diffs,
+    });
+    return utils;
+  }
+
+  it('renders one section header (no duplicate path) with status, dir/base, rename, and per-file +/- for a normal inline diff', async () => {
+    const { container } = setup(
+      [{ path: 'src/new/a.ts', status: 'R', oldPath: 'src/old/a.ts' }],
+      [diffFixture('src/new/a.ts', 'hello')],
+    );
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="src/new/a.ts"]');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    // FileDiffView's own heading (.diff-commit-label) is gone — no `heading` prop passed.
+    expect(section.querySelector('.diff-commit-label')).toBeNull();
+    const header = section.querySelector('.pr-diff-section-header')!;
+    expect(header.textContent).toContain('src/old/a.ts → src/new/a.ts');
+    expect(header.querySelector('.pr-file-stats')?.textContent).toContain('+1');
+    expect(header.querySelector('.pr-open-native-btn')).toBeTruthy();
+    // The inline diff itself still renders below the header.
+    expect(section.querySelector('.diff-hunk')).toBeTruthy();
+  });
+
+  it('the chevron collapses/expands the inline diff without hiding the header', async () => {
+    const { container } = setup([{ path: 'src/a.ts', status: 'M' }], [diffFixture('src/a.ts', 'hello')]);
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="src/a.ts"]');
+      expect(el?.querySelector('.diff-hunk')).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const toggle = section.querySelector<HTMLButtonElement>('.pr-diff-toggle')!;
+    expect(toggle.disabled).toBe(false);
+    await fireEvent.click(toggle);
+    expect(section.querySelector('.diff-hunk')).toBeNull();
+    expect(section.querySelector('.pr-diff-section-header')).toBeTruthy(); // header stays
+    await fireEvent.click(toggle);
+    expect(section.querySelector('.diff-hunk')).toBeTruthy();
+  });
+
+  it('a placeholder-eligible file (binary/no hunks) has a disabled toggle (no chevron) and still shows the header + Open native diff', async () => {
+    const { container } = setup(
+      [{ path: 'assets/logo.png', status: 'M' }],
+      [{ file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    );
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="assets/logo.png"]');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const toggle = section.querySelector<HTMLButtonElement>('.pr-diff-toggle')!;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.querySelector('.codicon-chevron-down, .codicon-chevron-right')).toBeNull();
+    expect(section.querySelector('.pr-file-stats')?.textContent).toContain('bin');
+    expect(section.querySelector('.pr-open-native-btn')).toBeTruthy();
+  });
+
+  it('the header\'s Open native diff button works for a file with a normal inline diff too (not just the old placeholder-only case)', async () => {
+    const { container } = setup([{ path: 'src/a.ts', status: 'M' }], [diffFixture('src/a.ts', 'hello')]);
+    const btn = await waitFor(() => {
+      const el = container.querySelector<HTMLButtonElement>('[data-pr-file="src/a.ts"] .pr-open-native-btn');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.click(btn);
+    const req = lastMessageOf('openDiff');
+    expect(req?.payload).toEqual({ file: 'src/a.ts', oldPath: undefined, ref1: 'mb', ref2: 'feat' });
+  });
+});
+// SNIPCODE-HOOK end

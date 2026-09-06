@@ -731,5 +731,6 @@ export const en: Record<string, string> = {
   'pr.statsFiles': '{count} files',
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': 'Copy merge-base hash',
+  'pr.openNativeDiff': 'Open native diff',
   /* SNIPCODE-HOOK end */
 };
