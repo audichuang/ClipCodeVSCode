@@ -79,7 +79,7 @@ export class BlameController {
       this.clearDecorations(editor);
     } else {
       if (editor.document.lineCount > MAX_LINES) {
-        void vscode.window.showInformationMessage('檔案過大，暫不標註');
+        void vscode.window.showInformationMessage(vscode.l10n.t('File too large; blame annotation skipped'));
         return;
       }
       this.enabled.add(key);
@@ -263,16 +263,16 @@ export class BlameController {
       if (zeroIdx < 0 || zeroIdx >= editor.document.lineCount) continue;
       const c = line.commit;
       const label = c.isUncommitted
-        ? '你 · 未提交'
+        ? vscode.l10n.t('You · Uncommitted')
         : `${c.author} · ${formatRelativeTime(c.authorTime, nowSec)}`;
       const bucket = c.isUncommitted ? 0 : ageBucket(c.authorTime, nowSec);
       const hover = new vscode.MarkdownString();
       hover.isTrusted = { enabledCommands: ['clipcode.blame.revealCommit'] };
       if (c.isUncommitted) {
-        hover.appendMarkdown('尚未提交');
+        hover.appendMarkdown(vscode.l10n.t('Not committed yet'));
       } else {
         const args = encodeURIComponent(JSON.stringify([c.sha]));
-        hover.appendMarkdown(`**${c.sha.slice(0, 8)}** · ${c.author}\n\n${c.summary}\n\n[在 Graph 開啟此 commit](command:clipcode.blame.revealCommit?${args})`);
+        hover.appendMarkdown(`**${c.sha.slice(0, 8)}** · ${c.author}\n\n${c.summary}\n\n[${vscode.l10n.t('Open this commit in Graph')}](command:clipcode.blame.revealCommit?${args})`);
       }
       const range = new vscode.Range(zeroIdx, 0, zeroIdx, 0);
       buckets[bucket].push({
