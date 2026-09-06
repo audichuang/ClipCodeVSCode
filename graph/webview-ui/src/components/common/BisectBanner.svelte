@@ -1,6 +1,9 @@
 <script lang="ts">
   import { t } from '../../lib/i18n/index.svelte';
   import { getVsCodeApi } from '../../lib/vscode-api';
+  /* SNIPCODE-HOOK start: live-QA-6 shared bisect-result predicate */
+  import { isBisectFinished, isBisectResultLine } from '../../lib/utils/bisect-result';
+  /* SNIPCODE-HOOK end */
 
   interface Props {
     message: string;
@@ -11,9 +14,9 @@
 
   const vscode = getVsCodeApi();
 
-  // Parse bisect result message. Git output is forced to English via LC_ALL=C
-  // in GitService.exec, so a single English match is sufficient regardless of UI locale.
-  const isFinished = $derived(message.includes('is the first bad commit'));
+  // Parse bisect result message. The predicate lives in lib/utils/bisect-result
+  // because git quotes the term on newer versions and the term is configurable.
+  const isFinished = $derived(isBisectFinished(message));
 
   // Extract remaining steps from message like "Bisecting: 3 revisions left to test after this (roughly 2 steps)"
   const remainingSteps = $derived.by(() => {
@@ -47,7 +50,7 @@
         continue;
       }
       if (trimmed === '' && pastHeaders) continue;
-      if (pastHeaders && trimmed.length > 0 && !trimmed.includes('is the first bad commit')) {
+      if (pastHeaders && trimmed.length > 0 && !isBisectResultLine(trimmed)) {
         return trimmed;
       }
     }

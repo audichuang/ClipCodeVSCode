@@ -5,6 +5,12 @@ import { TempRepo, commit, createTempRepo, head, runGit } from './helpers';
 describe('GitService integration — bisect', () => {
   let repo: TempRepo;
   let svc: GitService;
+  /* SNIPCODE-HOOK start: live-QA-6 git 2.55 quotes the term ("is the first
+     'bad' commit"), 2.43 does not; a literal match here left this loop running
+     to its cap on a newer git. Mirrors webview-ui/src/lib/utils/bisect-result.ts,
+     which is what the banner reads. */
+  const FIRST_BAD = /\bis the first (?:'[^']*'|[^\s']+) commit\b/;
+  /* SNIPCODE-HOOK end */
   // A linear history where commit #3 is the "first bad". Each test rebuilds
   // it; bisect mutates HEAD heavily so we want strict isolation.
   let goodSha: string;
@@ -36,10 +42,10 @@ describe('GitService integration — bisect', () => {
       if (hash === culpritSha || subject === 'introduce bug' || subject.startsWith('g3') || subject.startsWith('g4')) {
         // This commit (or anything after it) is bad.
         const out = await svc.bisectBad();
-        if (/is the first bad commit/.test(out)) break;
+        if (FIRST_BAD.test(out)) break;
       } else {
         const out = await svc.bisectGood();
-        if (/is the first bad commit/.test(out)) break;
+        if (FIRST_BAD.test(out)) break;
       }
     }
 

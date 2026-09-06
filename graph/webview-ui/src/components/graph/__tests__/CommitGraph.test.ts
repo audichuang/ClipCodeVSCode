@@ -7,6 +7,9 @@ import { branchStore } from '../../../lib/stores/branches.svelte';
 import { uiStore } from '../../../lib/stores/ui.svelte';
 import { i18n } from '../../../lib/i18n/index.svelte';
 import type { Commit, CommitGraphData } from '../../../lib/types';
+/* SNIPCODE-HOOK start: live-QA-6 */
+import { bisectCulpritHash } from '../../../lib/utils/bisect-result';
+/* SNIPCODE-HOOK end */
 
 function makeCommit(hash: string, subject: string, parents: string[] = []): Commit {
   return {
@@ -61,6 +64,29 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+/* SNIPCODE-HOOK start: live-QA-6 the bisect culprit row. App computes this prop
+   with lib/utils/bisect-result, which tolerates git 2.55's quoted term; feed the
+   prop the same way so banner and row can't disagree about a finished bisect. */
+describe('CommitGraph bisect culprit', () => {
+  it('marks the culprit row from the hash the shared parser extracts', async () => {
+    commitStore.setData(makeGraphData([
+      makeCommit('abc1234def0000000000000000000000000000000', 'broke it'),
+      makeCommit('bbb2222def0000000000000000000000000000000', 'innocent'),
+    ]));
+    for (const line of [
+      'abc1234 is the first bad commit',
+      "abc1234 is the first 'bad' commit",
+    ]) {
+      const { container } = render(CommitGraph, { bisectActive: true, bisectCulpritHash: bisectCulpritHash(line) });
+      await tick();
+      const marked = container.querySelectorAll('.commit-row.bisect-culprit');
+      expect(marked.length).toBe(1);
+      expect(marked[0].textContent).toContain('broke it');
+      cleanup();
+    }
+  });
+});
 
 describe('CommitGraph smoke', () => {
   it('renders without crashing when commits are empty', () => {

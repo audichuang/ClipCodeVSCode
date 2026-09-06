@@ -6,6 +6,9 @@
   import { branchStore } from './lib/stores/branches.svelte';
   import { uiStore, BOTTOM_PANEL_DEFAULT_RATIO, BOTTOM_PANEL_MIN_RATIO, BOTTOM_PANEL_MAX_RATIO } from './lib/stores/ui.svelte';
   import { i18n, t } from './lib/i18n/index.svelte';
+  /* SNIPCODE-HOOK start: live-QA-6 shared bisect-result predicate */
+  import { bisectCulpritHash } from './lib/utils/bisect-result';
+  /* SNIPCODE-HOOK end */
   import CommitGraph from './components/graph/CommitGraph.svelte';
   import BottomPanel from './components/layout/BottomPanel.svelte';
   import Toolbar from './components/layout/Toolbar.svelte';
@@ -541,7 +544,7 @@ import RewordModal from './components/modals/RewordModal.svelte';
       {/if}
       {#if !uiStore.commitDetailFullscreen}
         <div class="graph-area">
-          <CommitGraph {searchMatchedHashes} {searchNavigateHash} {searchNavigateNonce} headJumpNonce={headJumpNonce} onHeadOffscreenChange={(v) => headOffscreen = v} bisectActive={bisectMessage !== null} bisectCulpritHash={bisectMessage?.includes('is the first bad commit') ? bisectMessage.match(/^([a-f0-9]{7,40})/)?.[1] ?? null : null} {remoteFilter} />
+          <CommitGraph {searchMatchedHashes} {searchNavigateHash} {searchNavigateNonce} headJumpNonce={headJumpNonce} onHeadOffscreenChange={(v) => headOffscreen = v} bisectActive={bisectMessage !== null} bisectCulpritHash={bisectCulpritHash(bisectMessage)} {remoteFilter} />
         </div>
       {/if}
       {#if uiStore.showBottomPanel && (uiStore.selectedCommitHash || uiStore.comparing)}

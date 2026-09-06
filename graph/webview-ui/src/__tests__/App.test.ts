@@ -212,6 +212,22 @@ describe('App — message handling', () => {
     });
   });
 
+  /* SNIPCODE-HOOK start: live-QA-6 git 2.55 quotes the term in the line that
+     ends a bisect. App drives BOTH the banner and the graph's culprit prop from
+     that line, so a literal match left a finished bisect looking unfinished.
+     The row highlight itself is pinned in CommitGraph.test.ts. */
+  it('reaches the finished banner for both git wordings of the result line', async () => {
+    for (const line of ['abcdef1 is the first bad commit', "abcdef1 is the first 'bad' commit"]) {
+      const { container } = render(App);
+      postMsg('bisectResult', { message: line });
+      await waitFor(() => {
+        expect(container.querySelector('.bisect-banner.finished')).not.toBeNull();
+      });
+      cleanup();
+    }
+  });
+  /* SNIPCODE-HOOK end */
+
   it('bisectResult hides the search bar (replaced by banner)', async () => {
     const { container } = render(App);
     // SearchBar is visible by default
