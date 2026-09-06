@@ -2148,6 +2148,16 @@
     background: var(--bg-hover);
   }
 
+  /* SNIPCODE-HOOK start: G6 — HEAD row gets a subtle, always-visible ambient
+     marker (independent of hover/selection) so the current commit is findable
+     at a glance while scrolling. --head-lane-color is set inline per-row to
+     the dot's own resolved lane color. Placed before .selected/.compare-* so
+     those still win the background/box-shadow when combined with this row. */
+  .commit-row.head-row {
+    box-shadow: inset 3px 0 0 var(--head-lane-color);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+  }
+  /* SNIPCODE-HOOK end */
   .commit-row.compare-base {
     background: rgba(99, 176, 244, 0.12);
     box-shadow: inset 3px 0 0 #63b0f4;
@@ -2301,6 +2311,12 @@
   /* No focus ring on click/keyboard focus. */
   .meta-row:focus-visible { outline: none; }
 
+  /* SNIPCODE-HOOK start: G6 — mirrors .commit-row.head-row for the pinned
+     overlay (horizontal-scroll mode) so the HEAD marker isn't message-side only. */
+  .meta-row.head-row {
+    background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+  }
+  /* SNIPCODE-HOOK end */
   .meta-row.hovered { background-color: var(--bg-hover); }
   .meta-row.selected { background-color: var(--bg-selected); }
   .meta-row.selected .col-author,

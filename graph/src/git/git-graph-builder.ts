@@ -515,10 +515,20 @@ export function buildFullGraph(
     const dotColorOverride = major?.path.colorOverride ?? tipColorMap.get(commit.hash);
     const isRemoteOnly = remoteOnlySet.has(commit.hash);
     const isLocalOnly = !pushedSet.has(commit.hash);
+    /* SNIPCODE-HOOK start: G6 — isHead independent of type so a HEAD commit
+       that is also a merge keeps its merge dot rendering (type stays
+       'merge') while still carrying the flag the webview needs to also draw
+       the HEAD ring around it. */
+    const isHead = commit.refs.some(r => r.type === 'head');
     let dotType: GraphDot['type'] = 'default';
-    if (commit.refs.some(r => r.type === 'head')) dotType = 'head';
-    else if (commit.parents.length > 1) dotType = 'merge';
-    result.dots.push({ center: position, color: dotColor, colorOverride: dotColorOverride, type: dotType, localOnly: isLocalOnly, remoteTip: isRemoteOnly });
+    if (commit.parents.length > 1) dotType = 'merge';
+    else if (isHead) dotType = 'head';
+    result.dots.push({
+      center: position, color: dotColor, colorOverride: dotColorOverride, type: dotType,
+      localOnly: isLocalOnly, remoteTip: isRemoteOnly,
+      highlighted: isHighlighted(commit.hash), isHead, pathIndex: major?.path.pathIndex ?? -1,
+    });
+    /* SNIPCODE-HOOK end */
     dotPaths.push(major);
 
     // Merge parents - skip for remote-tip commits unless they are merge commits
