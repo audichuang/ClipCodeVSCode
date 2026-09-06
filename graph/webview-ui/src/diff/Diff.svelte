@@ -1,5 +1,6 @@
 <!-- graph/webview-ui/src/diff/Diff.svelte -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { diffStore, type DiffSide } from './diff-store.svelte';
   import { postStageHunk, postStageLines, postOpenSide } from './messaging';
   import { t } from '../lib/i18n/index.svelte';
@@ -51,6 +52,11 @@
   function setMode(next: 'inline' | 'side-by-side'): void {
     mode = next;
     getVsCodeApi().setState({ ...(getVsCodeApi().getState() as DiffState | undefined), diffMode: next });
+    /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+    // Inline and SBS render entirely different DOM for "the same" hunk, so a
+    // stale index/element reference from the other mode must not carry over.
+    resetHunkNav();
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
 
@@ -69,8 +75,58 @@
     if (key !== lastKey) {
       lastKey = key;
       collapsed = { staged: false, unstaged: false };
+      /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+      resetHunkNav();
+      /* SNIPCODE-HOOK end */
     }
   });
+
+  /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+  // DOM-query based (PrView.svelte's pattern, PrView.svelte:387-395) rather
+  // than plumbing hunk identity through FileDiffView's props: currentHunk is
+  // a plain index into the flattened, currently-rendered hunk list. -1 means
+  // "no jump made yet" so the first "next" lands on hunk 0 and "prev" at/above
+  // index 0 is a no-op instead of wrapping.
+  let sectionsEl = $state<HTMLElement | undefined>();
+  let currentHunk = $state(-1);
+  let currentHunkEl: HTMLElement | null = null;
+
+  function resetHunkNav(): void {
+    currentHunkEl?.classList.remove('current-hunk');
+    currentHunkEl = null;
+    currentHunk = -1;
+  }
+
+  function jumpHunk(dir: 1 | -1): void {
+    const container = sectionsEl;
+    if (!container) return;
+    // Side-by-side renders every logical hunk twice (once per pane, scroll-
+    // synced) - scope to .sbs-left so inline and SBS both yield one entry per
+    // logical hunk.
+    const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-left .sbs-hunk')];
+    if (hunks.length === 0) return;
+    if (dir === 1) {
+      currentHunk = Math.min(currentHunk + 1, hunks.length - 1);
+    } else {
+      if (currentHunk <= 0) return;
+      currentHunk = currentHunk - 1;
+    }
+    currentHunkEl?.classList.remove('current-hunk');
+    currentHunkEl = hunks[currentHunk] ?? null;
+    currentHunkEl?.classList.add('current-hunk');
+    currentHunkEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  onMount(() => {
+    const onKeydown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); jumpHunk(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); jumpHunk(-1); }
+    };
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  });
+  /* SNIPCODE-HOOK end */
 
   // Section presence keys off diff !== null (NOT empty hunks — a binary/rename
   // side is non-null with empty hunks and must still show its section).
@@ -122,12 +178,24 @@
         <span class="file-base">{fileBase}</span>
       </span>
       <!-- SNIPCODE-HOOK end -->
+      <!-- SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav -->
+      <div class="hunk-nav">
+        <button class="hunk-nav-btn" aria-label={t('diff.prevHunk')} title={`${t('diff.prevHunk')} (Alt+↑)`} onclick={() => jumpHunk(-1)}>
+          <span class="codicon codicon-arrow-up"></span>
+        </button>
+        <button class="hunk-nav-btn" aria-label={t('diff.nextHunk')} title={`${t('diff.nextHunk')} (Alt+↓)`} onclick={() => jumpHunk(1)}>
+          <span class="codicon codicon-arrow-down"></span>
+        </button>
+      </div>
+      <!-- SNIPCODE-HOOK end -->
       <div class="diff-mode-toggle">
         <button class:active={mode === 'inline'} onclick={() => setMode('inline')}>{t('details.inline')}</button>
         <button class:active={mode === 'side-by-side'} onclick={() => setMode('side-by-side')}>{t('details.sideBySide')}</button>
       </div>
     </div>
-    <div class="sections">
+    <!-- SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav -->
+    <div class="sections" bind:this={sectionsEl}>
+    <!-- SNIPCODE-HOOK end -->
       <!-- SNIPCODE-HOOK start: Batch B image component identity -->
       <!-- SNIPCODE-HOOK start: D7 stop remounting the section on every stage.
            `generation` used to be part of the key, so EVERY stage/unstage
@@ -225,6 +293,17 @@
   .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; }
   .file-base { flex-shrink: 0; font-weight: 600; }
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+  .hunk-nav { display: flex; gap: 2px; flex-shrink: 0; }
+  .hunk-nav-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0; border-radius: 3px;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--vscode-descriptionForeground);
+  }
+  .hunk-nav-btn:hover { background: rgba(128,128,128,0.15); color: var(--vscode-foreground); }
+  .hunk-nav-btn .codicon { font-size: 14px; }
+  /* SNIPCODE-HOOK end */
   .diff-mode-toggle { display: flex; gap: 2px; background: rgba(128,128,128,0.15); border-radius: 3px; padding: 1px; }
   .diff-mode-toggle button {
     padding: 2px 8px; font-size: 0.75em; border-radius: 2px;
@@ -293,6 +372,17 @@
     position: sticky;
     top: var(--section-h, 0);
     z-index: 2;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+  /* Same outline FileDiffView already uses for :hover (.diff-hunk.reversible,
+     .sbs-hunk.hunk-hover) — reused here for "this is the hunk jumpHunk landed
+     on", scoped to Diff.svelte's own sections so it can't leak into
+     CommitDetails/PrView's copies of FileDiffView. */
+  .diff-section :global(.current-hunk) {
+    outline: 1px solid var(--vscode-focusBorder, rgba(120, 120, 255, 0.4));
+    outline-offset: -1px;
   }
   /* SNIPCODE-HOOK end */
 </style>
