@@ -716,4 +716,30 @@ export const zh: Record<string, string> = {
   'pr.aheadInfo': '领先 {base} {count} 个提交',
   'pr.into': '合并到',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': '请选择要比较的基础分支。',
+  'pr.emptyDetached': 'HEAD 处于 detached 状态 — 请先检出一个分支再进行比较。',
+  'pr.emptyError': '无法加载比较结果：{message}',
+  'pr.emptySameRef': '{base} 与 {head} 是同一个 ref，没有可比较的内容。',
+  'pr.emptyUpToDate': '{head} 已经完全合并到 {base} 中。',
+  'pr.statsAhead': '领先 {count} 个',
+  'pr.statsBehind': '落后 {count} 个',
+  'pr.statsFiles': '{count} 个文件',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': '复制 merge-base 哈希',
+  'pr.openNativeDiff': '打开原生 diff',
+  'pr.collapseAll': '全部折叠',
+  'pr.expandAll': '全部展开',
+  'pr.filterBranches': '筛选分支…',
+  'pr.noMatchingBranches': '没有匹配的分支',
+  'pr.swapBaseHead': '交换 base 和 head',
+  'pr.prevChange': '上一个变更',
+  'pr.nextChange': '下一个变更',
+  'pr.copyFullSource': '复制完整源码',
+  'pr.loading': '正在加载比较结果',
+  'pr.localBranches': '本地',
+  'pr.remoteBranches': '远程',
+  /* SNIPCODE-HOOK end */
 };

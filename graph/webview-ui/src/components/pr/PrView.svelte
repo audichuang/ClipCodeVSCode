@@ -13,7 +13,7 @@
   import { tooltip } from '../../lib/actions/tooltip';
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — stacked FileDiffView
      per changed file, reusing Task D1's diffMode/hideModeToggle prop. */
-  import type { DiffData } from '../../lib/types';
+  import type { DiffData, BranchInfo } from '../../lib/types';
   import FileDiffView from '../commit/FileDiffView.svelte';
   /* SNIPCODE-HOOK end */
 
@@ -57,6 +57,38 @@
     branchStore.branches.filter((b) => !b.detached && b.name.toLowerCase().includes(headFilter.trim().toLowerCase()))
   );
 
+  /* SNIPCODE-HOOK start: PR tab (P-P2) dropdown Local/Remote grouping — the
+     dropdown used to be one flat alphabetical list (`git branch -a` order)
+     with no indication of local vs. remote and the current branch buried
+     wherever its name sorted. Groups by remote (Local first, since that's
+     almost always the one being picked as head) with the current branch
+     pinned to the top of its own group — pure $derived over the already-
+     filtered list, no new state. */
+  interface BranchGroup { label: string; branches: BranchInfo[] }
+
+  function groupBranches(list: BranchInfo[]): BranchGroup[] {
+    const cur = branchStore.currentBranch;
+    const pinCurrent = (arr: BranchInfo[]): BranchInfo[] => {
+      if (!cur) return arr;
+      const idx = arr.findIndex((b) => b.name === cur.name);
+      if (idx <= 0) return arr;
+      const copy = arr.slice();
+      const [item] = copy.splice(idx, 1);
+      copy.unshift(item);
+      return copy;
+    };
+    const local = pinCurrent(list.filter((b) => !b.remote));
+    const remote = pinCurrent(list.filter((b) => !!b.remote));
+    const groups: BranchGroup[] = [];
+    if (local.length) groups.push({ label: t('pr.localBranches'), branches: local });
+    if (remote.length) groups.push({ label: t('pr.remoteBranches'), branches: remote });
+    return groups;
+  }
+
+  let groupedBaseBranches = $derived.by(() => groupBranches(filteredBaseBranches));
+  let groupedHeadBranches = $derived.by(() => groupBranches(filteredHeadBranches));
+  /* SNIPCODE-HOOK end */
+
   function closeBaseDropdown() {
     showBaseDropdown = false;
     baseFilter = '';
@@ -94,10 +126,18 @@
 
   let files = $state<PrFile[]>([]);
   let loadingFiles = $state(false);
+  /* SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — the last host
+     error for the in-flight/most-recent getCommitsBetween request, shown
+     inline in .pr-empty instead of relying solely on the global error bar
+     (which auto-dismisses after a few seconds — App.svelte's ui store timer). */
+  let lastError = $state<string | null>(null);
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — parsed diffs for the
      current compare (Task D1's commitsBetween.diffs) plus the shared
      inline/side-by-side mode every stacked FileDiffView renders with, and a
-     ref to the scrolling `.pr-content` pane for prev/next-change nav.
+     ref to the scrolling diff pane for prev/next-change nav — (P5) this is now
+     `.pr-diff-stack` specifically, not the outer `.pr-content`, since the
+     Files sub-tab's file list and diff stack scroll independently.
      currentHunk (fix: index-based prev/next nav) is a plain index into the
      flattened hunk list jumpChange walks; -1 means "no jump made yet" so the
      first "next" press lands on the first hunk (index 0) instead of skipping
@@ -124,14 +164,25 @@
   /* SNIPCODE-HOOK end */
 
   // Default base: current branch's upstream, else a remote branch literally
-  // named "origin/main", else the first remote branch, else null (dropdown
-  // stays unselected — no remotes configured).
+  // named "origin/main", else the first remote branch, else (P0-2/P2) a
+  // conventional local mainline branch (main/master/develop, in that order),
+  // else null (dropdown stays unselected — nothing sensible to default to).
+  // The local fallback matters for a repo with no remote configured at all —
+  // without it, `base` (and so any getCommitsBetween request) never fires and
+  // the Files/Commits tabs are permanently stuck on "pickBase".
   function defaultBase(): string | null {
     const cur = branchStore.currentBranch;
     if (cur?.upstream && !cur.upstreamGone) return cur.upstream;
     const originMain = branchStore.remoteBranches.find((b) => b.name === 'origin/main');
     if (originMain) return originMain.name;
-    return branchStore.remoteBranches[0]?.name ?? null;
+    if (branchStore.remoteBranches[0]) return branchStore.remoteBranches[0].name;
+    /* SNIPCODE-HOOK start: PR tab (P2) local-branch fallback */
+    for (const name of ['main', 'master', 'develop']) {
+      const local = branchStore.localBranches.find((b) => b.name === name && b.name !== cur?.name);
+      if (local) return local.name;
+    }
+    /* SNIPCODE-HOOK end */
+    return null;
   }
 
   function loadCommits(newBase: string, newHead: string) {
@@ -143,13 +194,21 @@
     /* SNIPCODE-HOOK end */
     loadingCommits = true;
     loadingFiles = true;
-    commits = [];
-    mergeBase = null;
-    ahead = 0;
-    behind = 0;
-    files = [];
-    diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
-    currentHunk = -1; // SNIPCODE-HOOK: PR tab prev/next-change nav (fix) — new compare, new hunk list
+    /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — do NOT clear
+       commits/mergeBase/ahead/behind/files/diffs here. This function now also
+       runs as a background refresh (see the branchStore.branches effect
+       below) while the previous compare's data is still on screen; clearing
+       it immediately would flash the view to empty/spinner on every commit,
+       fetch, or checkout while the PR tab is open. The requestId + base echo
+       guard in the commitsBetween handler already makes it safe to keep the
+       stale values until the fresh response lands and replaces them
+       atomically. (The `error` handler below still clears them, so a failed
+       refresh doesn't leave stale data on screen looking current.) */
+    currentHunk = -1; // new compare, new hunk list
+    lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — clear any previous error for this new attempt
+    collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — new compare, fresh collapse state
+    selectedFile = null; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — new compare, nothing selected yet
+    /* SNIPCODE-HOOK end */
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
 
@@ -263,6 +322,9 @@
       behind = 0;
       loadingCommits = false;
       loadingFiles = false;
+      lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — an old repo's error must not leak into the new repo's empty state
+      collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — repo switch, fresh collapse state
+      selectedFile = null; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — repo switch, nothing selected yet
     }
   });
 
@@ -270,12 +332,22 @@
   // repo arrives (branchStore.setData reassigns the array); that's our signal
   // the switch has completed, so clear the flag and let the default-base effect
   // pick from the new list.
+  /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — a commit, fetch,
+     pull, or checkout while the PR tab is open triggers a host fullRefresh,
+     which re-posts branchData and so reassigns branchStore.branches even
+     when there was no repo switch. That's also our only signal that fresh ref
+     data has landed, so once a compare is already configured (base && head
+     both selected — this is NOT a repo switch, that path resets both to null
+     first, see the effect above) re-request the same compare to pick up any
+     new commits/ahead-behind/diff instead of silently going stale. */
   $effect(() => {
     if (branchStore.branches !== lastBranchesRef) {
       lastBranchesRef = branchStore.branches;
       awaitingBranches = false;
+      if (base && head) loadCommits(base, head);
     }
   });
+  /* SNIPCODE-HOOK end */
 
   // Pick a default base once branch data has arrived. Guarded on base===null
   // so this only ever fires once per repo (selectBase always sets a non-null
@@ -354,6 +426,49 @@
     });
   }
 
+  /* SNIPCODE-HOOK start: PR tab (P7/P8) per-file collapse — a plain Set is not
+     itself reactive (Svelte 5's proxy wraps objects/arrays, not Set/Map), so
+     every mutation reassigns a NEW Set (mirrors CommitDetails.svelte's
+     expandedDirs pattern) rather than calling .add/.delete on the existing
+     one in place. */
+  let collapsedFiles = $state<Set<string>>(new Set());
+
+  function toggleCollapse(path: string) {
+    const next = new Set(collapsedFiles);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    collapsedFiles = next;
+  }
+
+  function fileHasDiff(file: PrFile): boolean {
+    const d = diffs.find((x) => x.file === file.path);
+    return !!d && !d.isBinary && d.hunks.length > 0;
+  }
+
+  /* SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all — bulk
+     controls over the same collapsedFiles Set the per-file chevron (P7)
+     already toggles. Only files with an actual inline diff to hide are ever
+     added — collapsing a placeholder-eligible file (no chevron, nothing
+     rendered below its header anyway) would be a no-op forever stuck in the
+     Set. */
+  function collapseAll() {
+    collapsedFiles = new Set(files.filter(fileHasDiff).map((f) => f.path));
+  }
+
+  function expandAll() {
+    collapsedFiles = new Set();
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (P8) left-column current-file highlight — the
+     minimal fallback the plan calls out (over an IntersectionObserver, which
+     happy-dom/vitest can't exercise and adds scroll-driven state that's
+     harder to reason about): a click on a file's left-list row highlights it
+     in both columns until a different file is clicked or the compare
+     changes. */
+  let selectedFile = $state<string | null>(null);
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file-list click
      now scrolls to that file's stacked FileDiffView section instead of
      opening the native diff editor (the inline diff replaces that need; a
@@ -362,6 +477,7 @@
      rather than a CSS.escape'd attribute selector, since file paths can
      contain characters `querySelector` would otherwise choke on. */
   function scrollToFile(file: PrFile) {
+    selectedFile = file.path; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight
     const target = prContentEl
       ? [...prContentEl.querySelectorAll<HTMLElement>('[data-pr-file]')].find((el) => el.dataset.prFile === file.path)
       : undefined;
@@ -408,6 +524,8 @@
   }
 
   function statusColor(s?: string): string {
+    // SNIPCODE-HOOK: PR tab (P-P2) — 'N' (nested repo) case, matching
+    // CommitDetails.svelte's statusColor so the two don't drift.
     if (document.body.classList.contains('vscode-light')) {
       switch (s) {
         case 'A': return '#2e7d32';
@@ -415,6 +533,7 @@
         case 'D': return '#b71c1c';
         case 'R': return '#1565c0';
         case 'C': return '#6a1b9a';
+        case 'N': return '#616161';
         default: return 'var(--text-secondary)';
       }
     }
@@ -424,6 +543,7 @@
       case 'D': return '#f44336';
       case 'R': return '#2196f3';
       case 'C': return '#9c27b0';
+      case 'N': return '#9e9e9e';
       default: return 'var(--text-secondary)';
     }
   }
@@ -435,6 +555,7 @@
       case 'D': return t('status.deleted');
       case 'R': return t('status.renamed');
       case 'C': return t('status.copied');
+      case 'N': return t('details.nestedRepoLabel'); // SNIPCODE-HOOK: PR tab (P-P2) — reuses CommitDetails' existing key
       default: return '';
     }
   }
@@ -443,6 +564,100 @@
     const d = new Date(dateStr);
     return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString();
   }
+
+  /* SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — "No changed
+     files" / "No commits" used to be the single shared message for four very
+     different situations (nothing selected yet, detached HEAD, a host error,
+     and a genuine no-diff compare), which reads as "there is nothing here"
+     even when the real reason is "you haven't picked a base yet" or
+     "something failed". Plain functions (not $derived) so they react like the
+     existing statusColor/statusLabel above — called from the template, which
+     re-evaluates whenever the $state they read changes.
+     Precedence: an in-flight error always wins (freshest signal); then a
+     detached HEAD (a real, distinct situation — not just "no ref picked");
+     then no base/head picked yet; then same ref; then a real compare with
+     nothing new on head (ahead === 0); 'noDiff' is the leftover Files-tab-only
+     case where there ARE commits ahead but the diff nets to nothing (e.g. an
+     empty commit) — Commits tab can't hit it, ahead>0 implies commits.length>0. */
+  type EmptyReason = 'pickBase' | 'detached' | 'error' | 'sameRef' | 'upToDate' | 'noDiff';
+
+  function emptyReason(kind: 'files' | 'commits'): EmptyReason | null {
+    if (lastError !== null) return 'error';
+    if (branchStore.currentBranch?.detached) return 'detached';
+    if (base === null || head === null) return 'pickBase';
+    if (base === head) return 'sameRef';
+    if (ahead === 0) return 'upToDate';
+    if (kind === 'files' && files.length === 0) return 'noDiff';
+    return null;
+  }
+
+  function emptyReasonText(kind: 'files' | 'commits'): string {
+    switch (emptyReason(kind)) {
+      case 'error': return t('pr.emptyError', { message: lastError ?? '' });
+      case 'detached': return t('pr.emptyDetached');
+      case 'pickBase': return t('pr.emptyPickBase');
+      case 'sameRef': return t('pr.emptySameRef', { base: base ?? '', head: head ?? '' });
+      case 'upToDate': return t('pr.emptyUpToDate', { head: head ?? '', base: base ?? '' });
+      case 'noDiff': return t('pr.noFiles');
+      default: return kind === 'files' ? t('pr.noFiles') : t('pr.noCommits');
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) +/- stats — computed straight from the
+     already-in-memory parsed diffs (diffs[].hunks[].lines), so no host/wire
+     change is needed for a "close enough to git" total. Only exact parity
+     with `git diff --numstat` would require a host round-trip; not needed
+     here. A file with no countable diff (binary, or missing from `diffs` —
+     the same placeholder-eligible set the Files sub-tab already falls back
+     for) returns null so callers can show "bin" instead of a false "+0 -0". */
+  function diffStats(d: DiffData | undefined): { add: number; del: number } | null {
+    if (!d || d.isBinary || d.hunks.length === 0) return null;
+    let add = 0;
+    let del = 0;
+    for (const h of d.hunks) {
+      for (const l of h.lines) {
+        if (l.type === 'add') add++;
+        else if (l.type === 'delete') del++;
+      }
+    }
+    return { add, del };
+  }
+
+  function fileStats(file: PrFile): { add: number; del: number } | null {
+    return diffStats(diffs.find((x) => x.file === file.path));
+  }
+
+  let totalStats = $derived.by(() => {
+    let add = 0;
+    let del = 0;
+    for (const f of files) {
+      const s = fileStats(f);
+      if (s) { add += s.add; del += s.del; }
+    }
+    return { add, del };
+  });
+
+  function copyMergeBase() {
+    if (!mergeBase) return;
+    vscode.postMessage({ type: 'copyToClipboard', payload: { text: mergeBase } });
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (P6) dir/base path split — mirrors
+     FileDiffView.svelte's .diff-dir/.diff-base split (dimmed directory
+     prefix, bold filename) instead of a single flat path with a trailing
+     ellipsis that hides the filename first at narrow widths. */
+  function fileDir(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx === -1 ? '' : path.substring(0, idx + 1);
+  }
+
+  function fileBaseName(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx === -1 ? path : path.substring(idx + 1);
+  }
+  /* SNIPCODE-HOOK end */
 
   onMount(() => {
     function handleMessage(event: MessageEvent) {
@@ -467,6 +682,7 @@
         filesRepoRoot = uiStore.activeRepo;
         loadingCommits = false;
         loadingFiles = false;
+        lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — a success clears any earlier error
         /* SNIPCODE-HOOK end */
       }
       /* SNIPCODE-HOOK start: Minor 1 — a host error while a getCommitsBetween
@@ -477,6 +693,21 @@
       if (msg.type === 'error' && msg.payload?.source === 'getCommitsBetween') {
         loadingCommits = false;
         loadingFiles = false;
+        lastError = msg.payload?.message ?? ''; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine
+        /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — since
+           loadCommits no longer clears commits/files/diffs/mergeBase/ahead/
+           behind up front (see above), a failed refresh must clear them here
+           instead — otherwise a background refresh that errors (e.g. an
+           invalid ref after a branch was deleted) would silently leave the
+           PREVIOUS compare's data on screen looking current, with no
+           indication anything went wrong. */
+        commits = [];
+        files = [];
+        diffs = [];
+        mergeBase = null;
+        ahead = 0;
+        behind = 0;
+        /* SNIPCODE-HOOK end */
       }
       /* SNIPCODE-HOOK end */
     }
@@ -506,7 +737,7 @@
           <input
             type="text"
             class="dropdown-filter-input"
-            placeholder="Filter branches…"
+            placeholder={t('pr.filterBranches')}
             bind:value={headFilter}
             use:focusInput
             onkeydown={(e) => {
@@ -518,18 +749,23 @@
               }
             }}
           />
-          {#each filteredHeadBranches as b (b.name)}
-            <button
-              class="repo-dropdown-item"
-              class:active={head === b.name}
-              onclick={() => selectHead(b.name)}
-            >
-              <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
-              <span class="repo-dropdown-item-name">{b.name}</span>
-            </button>
+          <!-- SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping -->
+          {#each groupedHeadBranches as group (group.label)}
+            <div class="repo-dropdown-group-label">{group.label}</div>
+            {#each group.branches as b (b.name)}
+              <button
+                class="repo-dropdown-item"
+                class:active={head === b.name}
+                onclick={() => selectHead(b.name)}
+              >
+                <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+                <span class="repo-dropdown-item-name">{b.name}</span>
+              </button>
+            {/each}
           {:else}
-            <div class="repo-dropdown-empty">No matching branches</div>
+            <div class="repo-dropdown-empty">{t('pr.noMatchingBranches')}</div>
           {/each}
+          <!-- SNIPCODE-HOOK end -->
         </div>
       {/if}
     </div>
@@ -553,7 +789,7 @@
           <input
             type="text"
             class="dropdown-filter-input"
-            placeholder="Filter branches…"
+            placeholder={t('pr.filterBranches')}
             bind:value={baseFilter}
             use:focusInput
             onkeydown={(e) => {
@@ -565,39 +801,54 @@
               }
             }}
           />
-          {#each filteredBaseBranches as b (b.name)}
-            <button
-              class="repo-dropdown-item"
-              class:active={base === b.name}
-              onclick={() => selectBase(b.name)}
-            >
-              <i class="codicon {base === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
-              <span class="repo-dropdown-item-name">{b.name}</span>
-            </button>
+          <!-- SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping -->
+          {#each groupedBaseBranches as group (group.label)}
+            <div class="repo-dropdown-group-label">{group.label}</div>
+            {#each group.branches as b (b.name)}
+              <button
+                class="repo-dropdown-item"
+                class:active={base === b.name}
+                onclick={() => selectBase(b.name)}
+              >
+                <i class="codicon {base === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+                <span class="repo-dropdown-item-name">{b.name}</span>
+              </button>
+            {/each}
           {:else}
-            <div class="repo-dropdown-empty">No matching branches</div>
+            <div class="repo-dropdown-empty">{t('pr.noMatchingBranches')}</div>
           {/each}
+          <!-- SNIPCODE-HOOK end -->
         </div>
       {/if}
     </div>
-    <button class="pr-swap-btn" aria-label="Swap base and head" onclick={swap} use:tooltip={'Swap base and head'}>
+    <button class="pr-swap-btn" aria-label={t('pr.swapBaseHead')} onclick={swap} use:tooltip={t('pr.swapBaseHead')}>
       <i class="codicon codicon-arrow-swap"></i>
     </button>
     <!-- SNIPCODE-HOOK end -->
   </div>
 
-  {#if behind > 0}
-    <div class="pr-banner pr-banner-warning">
-      <i class="codicon codicon-warning"></i>
-      {t('pr.behindWarning', { count: behind, base: base ?? '' })}
+  <!-- SNIPCODE-HOOK start: PR tab (P4/X2) merged stats row — replaces the two
+       separate ahead/behind banners (each its own full-width row, and the
+       ahead count duplicated the Commits sub-tab's own counter) with one
+       compact line: ahead/behind/merge-base/file-count/total +/-. Gated on
+       mergeBase !== null (only cleared on a fresh request or a host error —
+       see loadCommits/the error handler) so it disappears exactly when there
+       is no real compare loaded, and (P1/R7) stays up during a background
+       refresh instead of flickering. -->
+  {#if mergeBase !== null}
+    <div class="pr-stats-row">
+      {#if ahead > 0}<span class="pr-stat pr-stat-ahead"><i class="codicon codicon-arrow-up"></i>{t('pr.statsAhead', { count: ahead })}</span>{/if}
+      {#if behind > 0}<span class="pr-stat pr-stat-behind"><i class="codicon codicon-arrow-down"></i>{t('pr.statsBehind', { count: behind })}</span>{/if}
+      <button class="pr-stat pr-merge-base" onclick={copyMergeBase} use:tooltip={t('pr.copyMergeBase')}>
+        <i class="codicon codicon-git-commit"></i>{mergeBase.slice(0, 7)}
+      </button>
+      <span class="pr-stat">{t('pr.statsFiles', { count: files.length })}</span>
+      {#if totalStats.add > 0 || totalStats.del > 0}
+        <span class="pr-stat pr-stat-add">+{totalStats.add}</span><span class="pr-stat pr-stat-del">−{totalStats.del}</span>
+      {/if}
     </div>
   {/if}
-  {#if ahead > 0}
-    <div class="pr-banner pr-banner-info">
-      <i class="codicon codicon-arrow-up"></i>
-      {t('pr.aheadInfo', { count: ahead, base: base ?? '' })}
-    </div>
-  {/if}
+  <!-- SNIPCODE-HOOK end -->
 
   <div class="pr-subtabs">
     <button class="pr-subtab" class:active={subTab === 'files'} onclick={() => { subTab = 'files'; }}>
@@ -619,31 +870,51 @@
         <button class:active={diffMode === 'inline'} onclick={() => { diffMode = 'inline'; currentHunk = -1; }}>{t('details.inline')}</button>
         <button class:active={diffMode === 'side-by-side'} onclick={() => { diffMode = 'side-by-side'; currentHunk = -1; }}>{t('details.sideBySide')}</button>
       </div>
-      <button class="pr-jump-btn pr-jump-prev" aria-label="Previous change" onclick={() => jumpChange(-1)} use:tooltip={'Previous change'}>
+      <button class="pr-jump-btn pr-jump-prev" aria-label={t('pr.prevChange')} onclick={() => jumpChange(-1)} use:tooltip={t('pr.prevChange')}>
         <i class="codicon codicon-arrow-up"></i>
       </button>
-      <button class="pr-jump-btn pr-jump-next" aria-label="Next change" onclick={() => jumpChange(1)} use:tooltip={'Next change'}>
+      <button class="pr-jump-btn pr-jump-next" aria-label={t('pr.nextChange')} onclick={() => jumpChange(1)} use:tooltip={t('pr.nextChange')}>
         <i class="codicon codicon-arrow-down"></i>
       </button>
       <!-- SNIPCODE-HOOK end -->
-      <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={'Copy Full Source'}>
+      <!-- SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all -->
+      <button class="pr-jump-btn" aria-label={t('pr.collapseAll')} onclick={collapseAll} use:tooltip={t('pr.collapseAll')}>
+        <i class="codicon codicon-collapse-all"></i>
+      </button>
+      <button class="pr-jump-btn" aria-label={t('pr.expandAll')} onclick={expandAll} use:tooltip={t('pr.expandAll')}>
+        <i class="codicon codicon-expand-all"></i>
+      </button>
+      <!-- SNIPCODE-HOOK end -->
+      <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={t('pr.copyFullSource')}>
         <i class="codicon codicon-copy"></i>
-        Copy Full Source
+        {t('pr.copyFullSource')}
       </button>
     {/if}
   </div>
 
-  <div class="pr-content" bind:this={prContentEl}>
+  <!-- SNIPCODE-HOOK: PR tab (P5) — pr-content-files switches this pane from a
+       single scrolling container (Commits tab / empty states) to a plain flex
+       row host for two independently-scrolling columns (see .pr-files-layout
+       below); bind:this moved to .pr-diff-stack, the pane jumpChange/
+       scrollToFile actually need. -->
+  <div class="pr-content" class:pr-content-files={subTab === 'files'}>
     {#if subTab === 'files'}
       <!-- SNIPCODE-HOOK: Minor 1 — files come from the same commitsBetween
            response as commits, so a commit list still loading means the
            Files tab isn't ready either; without loadingCommits here this
            briefly rendered "No changed files" before commits arrived. -->
-      {#if loadingCommits || loadingFiles}
-        <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
+      <!-- SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — only show
+           the spinner when there's nothing on screen yet (first ever load).
+           A background refresh (loadingFiles true with files already
+           populated from the previous compare) keeps showing that stale
+           content instead of blanking to a spinner; it's replaced in place
+           once the fresh response lands. -->
+      {#if (loadingCommits || loadingFiles) && files.length === 0}
+        <div class="pr-empty"><span class="spinner"></span> {t('pr.loading')}</div>
       {:else if files.length === 0}
-        <div class="pr-empty">{t('pr.noFiles')}</div>
+        <div class="pr-empty">{emptyReasonText('files')}</div>
       {:else}
+      <!-- SNIPCODE-HOOK end -->
         <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file
              list (click scrolls to the matching section at right) + right
              stacked FileDiffView per changed file, reusing Task D1's
@@ -653,9 +924,19 @@
         <div class="pr-files-layout">
           <div class="pr-file-list" style="width: {fileListWidth}px; flex-shrink: 0;">
             {#each files as file (file.path)}
-              <button class="pr-file-row" onclick={() => scrollToFile(file)}>
+              {@const s = fileStats(file)}
+              <button class="pr-file-row" class:selected={selectedFile === file.path} onclick={() => scrollToFile(file)}>
                 <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
-                <span class="pr-file-path">{file.path}</span>
+                <!-- SNIPCODE-HOOK start: PR tab (P6) dir/base path split + rename
+                     old -> new. No whitespace between the dir/base spans (all on
+                     one line, nothing between tags) so "src/" + "b.ts" reads as
+                     "src/b.ts" in textContent, not "src/ b.ts". -->
+                <span class="pr-file-path" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>{#if file.oldPath}<span class="pr-rename-old">{file.oldPath}</span>{' → '}{/if}{#if fileDir(file.path)}<span class="pr-dir">{fileDir(file.path)}</span>{/if}<span class="pr-base">{fileBaseName(file.path)}</span></span>
+                <!-- SNIPCODE-HOOK end -->
+                <!-- SNIPCODE-HOOK: PR tab (P4/X2) per-file +/- stats -->
+                <span class="pr-file-stats">
+                  {#if s}<span class="pr-stat-add">+{s.add}</span><span class="pr-stat-del">−{s.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                </span>
               </button>
             {/each}
           </div>
@@ -669,49 +950,74 @@
             aria-orientation="vertical"
           ></div>
           <!-- SNIPCODE-HOOK end -->
-          <div class="pr-diff-stack">
+          <div class="pr-diff-stack" bind:this={prContentEl}>
             {#each files as file (file.path)}
               {@const d = diffs.find((x) => x.file === file.path)}
-              <div class="pr-diff-file" data-pr-file={file.path}>
+              {@const hasDiff = !!d && !d.isBinary && d.hunks.length > 0}
+              {@const fs = fileStats(file)}
+              <!-- SNIPCODE-HOOK start: PR tab (P7) self-made section header —
+                   replaces the old `heading={file.path}` prop (FileDiffView
+                   already renders its own `.diff-file-name`, so the path used
+                   to show twice with no status letter, no rename old -> new).
+                   `:global(.diff-toolbar){display:none}` below hides
+                   FileDiffView's own toolbar entirely (mirrors
+                   diff/Diff.svelte's identical technique for its
+                   Staged/Unstaged sections) since this header now owns path +
+                   status + stats + open-native-diff; FileDiffView's own
+                   inline/side-by-side toggle stays hidden via hideModeToggle
+                   same as before (PrView drives one shared toggle for every
+                   file — see .pr-diff-mode-toggle above).
+                   (P7/P8) The chevron doubles as the collapse toggle
+                   introduced this same change — collapsedFiles/toggleCollapse
+                   above; a file with nothing to show (hasDiff false) gets no
+                   chevron since there's nothing to expand/collapse. -->
+              <div class="pr-diff-file" class:selected={selectedFile === file.path} data-pr-file={file.path}>
+                <div class="pr-diff-section-header">
+                  <button
+                    class="pr-diff-toggle"
+                    disabled={!hasDiff}
+                    aria-expanded={hasDiff && !collapsedFiles.has(file.path)}
+                    onclick={() => toggleCollapse(file.path)}
+                  >
+                    {#if hasDiff}<i class="codicon {collapsedFiles.has(file.path) ? 'codicon-chevron-right' : 'codicon-chevron-down'}"></i>{/if}
+                    <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
+                    <span class="pr-file-path" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>{#if file.oldPath}<span class="pr-rename-old">{file.oldPath}</span>{' → '}{/if}{#if fileDir(file.path)}<span class="pr-dir">{fileDir(file.path)}</span>{/if}<span class="pr-base">{fileBaseName(file.path)}</span></span>
+                  </button>
+                  <span class="pr-file-stats">
+                    {#if fs}<span class="pr-stat-add">+{fs.add}</span><span class="pr-stat-del">−{fs.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                  </span>
+                  <button class="pr-open-native-btn" onclick={() => openFile(file)}>
+                    <i class="codicon codicon-diff"></i> {t('pr.openNativeDiff')}
+                  </button>
+                </div>
                 <!-- SNIPCODE-HOOK: PR tab inline diff (Task D2 fix, blocking review
-                     finding) — binary diffs (incl. images) fall through to the
-                     placeholder instead of FileDiffView. FileDiffView's
+                     finding) — binary diffs (incl. images) fall through to no
+                     inline body instead of FileDiffView. FileDiffView's
                      isBinary&&isImage branch renders <ImageDiff> with no
                      commitHash prop here (PrView has no single commit — it's a
                      base..head range), which defaults ImageDiff to comparing the
                      index against the working tree, not the PR's mergeBase->head.
-                     The placeholder's "Open native diff" button (openFile) posts
-                     the correct ref1=mergeBase/ref2=head via openDiff instead. -->
-                <!-- SNIPCODE-HOOK start: PR tab (Minor) — pure renames,
-                     mode-only changes, and empty add/delete parse to a
-                     DiffData entry that is NOT binary but has hunks: [], so
-                     the old `d && !d.isBinary` guard rendered an empty
-                     FileDiffView with nothing to show and no escape hatch.
-                     Requiring d.hunks.length > 0 routes these to the same
-                     placeholder + "Open native diff" fallback already used
-                     for binary/image files. -->
-                {#if d && !d.isBinary && d.hunks.length > 0}
-                  <FileDiffView diff={d} stacked diffMode={diffMode} hideModeToggle heading={file.path} />
-                {:else}
-                  <div class="pr-diff-placeholder">
-                    <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
-                    <span class="pr-file-path">{file.path}</span>
-                    <button class="pr-open-native-btn" onclick={() => openFile(file)}>
-                      <i class="codicon codicon-diff"></i> Open native diff
-                    </button>
-                  </div>
+                     The header's "Open native diff" button (openFile) posts
+                     the correct ref1=mergeBase/ref2=head via openDiff instead.
+                     (Minor, folded in) pure renames, mode-only changes, and
+                     empty add/delete parse to a DiffData entry that is NOT
+                     binary but has hunks: [] — hasDiff (above) requires
+                     d.hunks.length > 0 so these also get no inline body rather
+                     than an empty FileDiffView with nothing to show. -->
+                {#if hasDiff && !collapsedFiles.has(file.path)}
+                  <FileDiffView diff={d!} stacked diffMode={diffMode} hideModeToggle />
                 {/if}
-                <!-- SNIPCODE-HOOK end -->
               </div>
+              <!-- SNIPCODE-HOOK end -->
             {/each}
           </div>
         </div>
         <!-- SNIPCODE-HOOK end -->
       {/if}
-    {:else if loadingCommits}
-      <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
+    {:else if loadingCommits && commits.length === 0}
+      <div class="pr-empty"><span class="spinner"></span> {t('pr.loading')}</div>
     {:else if commits.length === 0}
-      <div class="pr-empty">{t('pr.noCommits')}</div>
+      <div class="pr-empty">{emptyReasonText('commits')}</div>
     {:else}
       <div class="pr-commit-list">
         {#each commits as c (c.hash)}
@@ -738,6 +1044,7 @@
   .pr-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* SNIPCODE-HOOK: PR tab (P-P2) — don't overflow at ~600px */
     gap: 8px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
@@ -859,6 +1166,15 @@
     color: var(--text-secondary);
     text-align: center;
   }
+
+  /* SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping */
+  .repo-dropdown-group-label {
+    padding: 6px 10px 2px;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+  }
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab two-sided compare */
@@ -890,28 +1206,54 @@
   }
   /* SNIPCODE-HOOK end */
 
-  .pr-banner {
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) merged stats row */
+  .pr-stats-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 4px 14px;
     padding: 8px 14px;
     font-size: inherit;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
   }
 
-  .pr-banner-warning {
-    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #ff9800) 12%, transparent);
-    color: var(--vscode-editorWarning-foreground, #ff9800);
+  .pr-stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: inherit;
+    font-family: var(--vscode-editor-font-family, monospace);
+    padding: 0;
   }
 
-  .pr-banner-info {
-    background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 12%, transparent);
+  .pr-stat-ahead { color: var(--vscode-button-background, #0e639c); }
+  .pr-stat-behind { color: var(--vscode-editorWarning-foreground, #ff9800); }
+
+  .pr-merge-base {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  .pr-merge-base:hover {
+    background: rgba(128, 128, 128, 0.15);
     color: var(--text-primary);
   }
+
+  .pr-stat-add { color: #4caf50; }
+  .pr-stat-del { color: #f44336; }
+  .pr-stat-bin { opacity: 0.6; }
+  /* SNIPCODE-HOOK end */
 
   .pr-subtabs {
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* SNIPCODE-HOOK: PR tab (P-P2) — don't overflow at ~600px */
     gap: 4px;
     padding: 6px 14px;
     border-bottom: 1px solid var(--border-color);
@@ -999,16 +1341,30 @@
   .pr-content {
     flex: 1;
     overflow-y: auto;
+    min-height: 0;
   }
 
-  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — two-pane Files
-     layout: sticky file list at left (click scrolls the right pane to that
-     file), stacked FileDiffViews at right. Both scroll together inside the
-     single .pr-content pane so jumpChange only has one scroll container to
-     read hunk positions from. */
+  /* SNIPCODE-HOOK start: PR tab (P5) — the Files sub-tab used to be one
+     scrolling container holding a `position: sticky` file list; sticky has no
+     max-height/own scrollbar, so once the file list was taller than the
+     viewport its lower rows were only reachable by scrolling the right-hand
+     diff stack all the way down first (100+ file PRs). Now the two columns
+     scroll independently: `.pr-content-files` turns this pane into a plain
+     (non-scrolling) flex row host, and each column gets its own
+     `overflow-y: auto`. min-height: 0 on every flex link in this chain is
+     required or a flex child's default `min-height: auto` refuses to shrink
+     below its content height and neither column's overflow ever kicks in. */
+  .pr-content.pr-content-files {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
   .pr-files-layout {
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
   }
 
   .pr-files-layout .pr-file-list {
@@ -1016,22 +1372,20 @@
        driven by the inline style (fileListWidth, clamped 120-600px); no
        fixed flex-basis here so that inline width takes effect. */
     flex-shrink: 0;
-    position: sticky;
-    top: 0;
+    overflow-y: auto;
     border-right: 1px solid var(--border-color);
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
      CommitDetails.svelte's .resize-handle (:1826-1836). */
   .pr-resize-handle {
-    /* SNIPCODE-HOOK: PR tab resize handle (review fix) — .pr-files-layout is
-       align-items: flex-start (so the sticky .pr-file-list doesn't stretch to
-       the full diff-stack height); without align-self here the handle's own
-       cross-size collapsed to ~0px and couldn't be grabbed. align-self:
-       stretch pulls just this element back to the row's full height.
-       border-right dropped too — .pr-file-list already draws one divider
-       line; keeping both drew two ~5px apart. The hover/active background
-       below is still the drag affordance. */
+    /* SNIPCODE-HOOK: PR tab resize handle — .pr-files-layout is now
+       align-items: stretch (P5), so this is redundant for cross-size but kept
+       explicit for clarity/robustness against a future layout change.
+       border-right dropped — .pr-file-list already draws one divider line;
+       keeping both drew two ~5px apart. The hover/active background below is
+       still the drag affordance. */
     width: 5px;
     align-self: stretch;
     flex-shrink: 0;
@@ -1049,21 +1403,67 @@
   .pr-diff-stack {
     flex: 1;
     min-width: 0;
+    overflow-y: auto; /* SNIPCODE-HOOK: PR tab (P5) — own scroll, independent of the file list */
   }
 
-  .pr-diff-placeholder {
+  /* SNIPCODE-HOOK start: PR tab (P7) self-made diff section header — mirrors
+     diff/Diff.svelte's .section-header/.section-toggle pattern. */
+  .pr-diff-section-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 4px 10px;
+    background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.08));
     border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  /* SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — right
+     side; the left .pr-file-row.selected rule lives with the rest of
+     .pr-file-row below. */
+  .pr-diff-file.selected .pr-diff-section-header {
+    background: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
+  }
+
+  .pr-diff-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .pr-diff-toggle:disabled {
+    cursor: default;
+  }
+
+  .pr-diff-toggle .codicon {
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+
+  /* FileDiffView renders its own sticky filename toolbar (path + inline/
+     side-by-side toggle). In this stacked-per-file layout that toolbar would
+     duplicate the path already shown in .pr-diff-section-header above and
+     sticky-overlap it — hide it, same technique as diff/Diff.svelte's
+     `.diff-section :global(.diff-toolbar){display:none}`. */
+  .pr-diff-file :global(.diff-toolbar) {
+    display: none;
   }
 
   .pr-open-native-btn {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
+    flex-shrink: 0;
     padding: 3px 10px;
     font-size: 0.85em;
     border-radius: 4px;
@@ -1106,6 +1506,11 @@
     background: var(--bg-hover);
   }
 
+  /* SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight */
+  .pr-file-row.selected {
+    background: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
+  }
+
   .file-status {
     width: 14px;
     flex-shrink: 0;
@@ -1114,13 +1519,55 @@
     font-family: var(--vscode-editor-font-family, monospace);
   }
 
+  /* SNIPCODE-HOOK start: PR tab (P6) dir/base path split — copies
+     FileDiffView.svelte's three .diff-file-name/.diff-dir/.diff-base rules:
+     the directory prefix truncates first (dimmed, shrinks), the filename
+     itself never truncates (bold, fixed). A flat path + trailing ellipsis
+     hid the filename first at a narrow column width — the opposite of what a
+     reviewer needs to identify a changed file. */
   .pr-file-path {
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: baseline;
+    gap: 0;
   }
+
+  .pr-dir {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.55;
+    font-weight: normal;
+  }
+
+  .pr-base {
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  .pr-rename-old {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) per-file +/- stats */
+  .pr-file-stats {
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+    font-size: 0.85em;
+    font-family: var(--vscode-editor-font-family, monospace);
+  }
+  /* SNIPCODE-HOOK end */
 
   .pr-commit-row {
     display: flex;

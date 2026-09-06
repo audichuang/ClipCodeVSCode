@@ -83,6 +83,39 @@ describe('PrView — default base selection', () => {
     // head pill is now first (GitHub-style "head into base" layout)
     expect(pills[0].textContent).toContain('HEAD');
   });
+
+  // SNIPCODE-HOOK start: PR tab (P0-2/P2) local-branch fallback — a repo with
+  // no remote configured at all used to leave `base` permanently null (the
+  // "pickBase" empty state forever); falls back to a conventional local
+  // mainline branch instead.
+  it('falls back to a local "develop" branch when there is no upstream and no remotes at all', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true }),
+      branch({ name: 'develop' }),
+    ];
+    render(PrView);
+    const req = lastMessageOf('getCommitsBetween');
+    expect(req?.payload).toEqual({ base: 'develop', head: 'feat', requestId: currentRequestId() });
+  });
+
+  it('prefers "main" over "develop" when both exist locally (no upstream/remotes)', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true }),
+      branch({ name: 'develop' }),
+      branch({ name: 'main' }),
+    ];
+    render(PrView);
+    const req = lastMessageOf('getCommitsBetween');
+    expect(req?.payload).toEqual({ base: 'main', head: 'feat', requestId: currentRequestId() });
+  });
+
+  it('does not fall back to the current branch itself even if it is named "main"', () => {
+    branchStore.branches = [branch({ name: 'main', current: true })];
+    const { container } = render(PrView);
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+    expect(container.textContent).toContain('Select a base branch to compare against.');
+  });
+  // SNIPCODE-HOOK end
 });
 
 describe('PrView — commits, ahead/behind, and Files (Important 1: files come from commitsBetween itself)', () => {
@@ -94,14 +127,22 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     return render(PrView);
   }
 
-  it('shows the behind banner and ahead info once counts arrive', async () => {
+  // SNIPCODE-HOOK: PR tab (P4/X2) — replaces the old two-separate-banners
+  // assertion ("N commit(s) behind/ahead of ...") now that both banners are
+  // merged into one .pr-stats-row (ahead/behind/merge-base/file-count/+-).
+  it('shows a merged ahead/behind/merge-base/files stats row once counts arrive', async () => {
     const { container } = setup();
     deliver('commitsBetween', {
-      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 2, behind: 3, files: [],
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 2, behind: 3,
+      files: [{ path: 'a.ts', status: 'M' }],
     });
     await waitFor(() => {
-      expect(container.textContent).toContain('3 commit(s) behind origin/main');
-      expect(container.textContent).toContain('2 commit(s) ahead of origin/main');
+      const row = container.querySelector('.pr-stats-row');
+      expect(row).toBeTruthy();
+      expect(row!.textContent).toContain('2 ahead');
+      expect(row!.textContent).toContain('3 behind');
+      expect(row!.textContent).toContain('abcdef1'); // merge-base, sliced to 7 chars
+      expect(row!.textContent).toContain('1 files');
     });
   });
 
@@ -148,7 +189,9 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     });
     await new Promise((r) => setTimeout(r, 0));
     expect(container.textContent).not.toContain('stale.ts');
-    expect(container.textContent).not.toContain('5 commit(s) behind');
+    // SNIPCODE-HOOK: PR tab (P4/X2) — mergeBase (and so .pr-stats-row) never
+    // got set from the stale/mismatched response, so the row shouldn't exist.
+    expect(container.querySelector('.pr-stats-row')).toBeNull();
   });
 
   it('discards a commitsBetween response for a base no longer selected (defense in depth)', async () => {
@@ -171,6 +214,59 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     });
   });
 });
+
+// SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — a commit, fetch,
+// pull, or checkout while the PR tab is open re-posts branchData (host
+// fullRefresh), which reassigns branchStore.branches to a new array even
+// though there was no repo switch. Once a compare is already configured
+// (base && head both selected) that must re-request the same compare instead
+// of leaving the PR tab showing stale commits/files/ahead-behind forever.
+describe('PrView — stale-data refresh (P1/R7)', () => {
+  it('reassigning branchStore.branches (a host branchData/fullRefresh arrival) re-requests getCommitsBetween for the current compare', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+    const firstReqId = currentRequestId();
+
+    globalThis.__postedMessages = [];
+    // New array reference, same content — this is exactly what
+    // branchStore.setData() does on every fullRefresh, repo switch or not.
+    branchStore.branches = [...branchStore.branches];
+
+    await waitFor(() => {
+      const req = lastMessageOf('getCommitsBetween');
+      expect(req?.payload).toEqual({ base: 'origin/main', head: 'feat', requestId: currentRequestId() });
+      expect(req?.payload.requestId).not.toBe(firstReqId);
+    });
+  });
+
+  it('does not clear the currently-shown files while a background refresh is in flight (no flicker)', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb1', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }],
+    });
+    await waitFor(() => expect(container.textContent).toContain('src/a.ts'));
+
+    globalThis.__postedMessages = [];
+    branchStore.branches = [...branchStore.branches]; // triggers the background refresh
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+
+    // The refresh request is now in flight (no response delivered yet), but
+    // the previous compare's file must still be visible — no spinner, no
+    // "No changed files" flash.
+    expect(container.textContent).toContain('src/a.ts');
+    expect(document.querySelector('.spinner')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end
 
 describe('PrView — Copy Full Source', () => {
   function setupWithFiles() {
@@ -430,6 +526,77 @@ describe('PrView — head selectable + swap', () => {
     expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: undefined, ref1: 'mb', ref2: 'dev' });
   });
 });
+
+// SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — "No changed
+// files"/"No commits" used to be shared by four unrelated situations
+// (nothing picked yet, detached HEAD, a host error, a genuine no-diff
+// compare); each now gets its own message via PrView's emptyReason().
+describe('PrView — empty-state machine (P0-2/P2)', () => {
+  it('"pickBase": no current branch marked and no remotes/local-mainline fallback — shows the pick-a-base message', async () => {
+    branchStore.branches = [branch({ name: 'some-topic-branch' })];
+    const { container } = render(PrView);
+    await waitFor(() => {
+      expect(container.textContent).toContain('Select a base branch to compare against.');
+    });
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+  });
+
+  it('"detached": HEAD detached — shows the detached message even though other local branches exist', async () => {
+    branchStore.branches = [
+      branch({ name: '(HEAD detached at abc1234)', current: true, detached: true }),
+      branch({ name: 'develop' }),
+      branch({ name: 'main' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => {
+      expect(container.textContent).toContain('HEAD is detached');
+    });
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+  });
+
+  it('"error": a host error while a compare is configured — shows the error message inline instead of "No changed files"', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+    deliver('error', { message: 'unknown revision', source: 'getCommitsBetween' });
+    await waitFor(() => {
+      expect(container.textContent).toContain('Could not load comparison: unknown revision');
+      expect(container.textContent).not.toContain('No changed files');
+    });
+  });
+
+  it('"sameRef": base and head selected to the same branch — shows the same-ref message, not "No changed files"', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+
+    // Pick 'origin/main' (the current base) as head too, via the head dropdown.
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]); // head pill is first
+    const sameRefItem = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.repo-dropdown-item'))
+        .find((b) => b.textContent?.includes('origin/main'));
+      expect(btn).toBeDefined();
+      return btn!;
+    });
+    await fireEvent.click(sameRefItem);
+
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'origin/main', ahead: 0, behind: 0, files: [],
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain('are the same ref');
+      expect(container.textContent).not.toContain('No changed files');
+    });
+  });
+});
+// SNIPCODE-HOOK end
 
 // SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — both the base
 // and head dropdowns gain a filter input at the top; typing narrows the list
@@ -1065,6 +1232,363 @@ describe('PrView — resizable file-list/diff splitter', () => {
     expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
     expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
     removeSpy.mockRestore();
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P4/X2) +/- stats — the merged
+// ahead/behind/merge-base/files/total-+- row (replacing the two separate
+// banners) and per-file +/- computed client-side from the already-parsed
+// diffs, with "bin" for a file that has no countable diff (binary, or a
+// hunkless placeholder-eligible entry).
+describe('PrView — stats row and per-file +/- (P4/X2)', () => {
+  function diffWithLines(file: string, adds: number, dels: number): DiffData {
+    const lines: Array<{ type: 'add' | 'delete' | 'context'; content: string }> = [];
+    for (let i = 0; i < adds; i++) lines.push({ type: 'add', content: `add${i}` });
+    for (let i = 0; i < dels; i++) lines.push({ type: 'delete', content: `del${i}` });
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: dels, newStart: 1, newLines: adds, lines }],
+    };
+  }
+
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    return render(PrView);
+  }
+
+  it('shows per-file +/- from the parsed diff, "bin" for a binary file, and a matching total in the stats row', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }, { path: 'assets/logo.png', status: 'M' }],
+      diffs: [diffWithLines('src/a.ts', 2, 1), { file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    });
+    await waitFor(() => {
+      const rows = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'));
+      const aRow = rows.find((b) => b.textContent?.includes('src/a.ts'))!;
+      expect(aRow.querySelector('.pr-file-stats')?.textContent).toContain('+2');
+      expect(aRow.querySelector('.pr-file-stats')?.textContent).toContain('−1');
+      const binRow = rows.find((b) => b.textContent?.includes('logo.png'))!;
+      expect(binRow.querySelector('.pr-file-stats')?.textContent).toContain('bin');
+      const statsRow = container.querySelector('.pr-stats-row')!;
+      expect(statsRow.textContent).toContain('+2');
+      expect(statsRow.textContent).toContain('−1');
+    });
+  });
+
+  it('clicking the merge-base hash copies the full hash via copyToClipboard', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 1, behind: 0, files: [],
+    });
+    const btn = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.pr-merge-base');
+      expect(b).toBeTruthy();
+      expect(b!.textContent).toContain('abcdef1');
+      return b!;
+    });
+    await fireEvent.click(btn);
+    const req = lastMessageOf('copyToClipboard');
+    expect(req?.payload).toEqual({ text: 'abcdef1234' });
+  });
+
+  it('the stats row disappears (no mergeBase) before any compare has loaded', () => {
+    branchStore.branches = [branch({ name: 'some-topic-branch' })];
+    const { container } = render(PrView);
+    expect(container.querySelector('.pr-stats-row')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P6) file-list dir/base path split + rename
+describe('PrView — file list dir/base + rename display (P6)', () => {
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    return render(PrView);
+  }
+
+  it('splits a nested path into a dimmed dir prefix and a bold base name (no space between them)', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/components/graph/CommitGraph.svelte', status: 'M' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('CommitGraph.svelte'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-dir')?.textContent).toBe('src/components/graph/');
+    expect(row.querySelector('.pr-base')?.textContent).toBe('CommitGraph.svelte');
+    // No space introduced between the two spans.
+    expect(row.querySelector('.pr-file-path')?.textContent).toContain('src/components/graph/CommitGraph.svelte');
+  });
+
+  it('a top-level file (no "/") renders with no .pr-dir span', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'README.md', status: 'M' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('README.md'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-dir')).toBeNull();
+    expect(row.querySelector('.pr-base')?.textContent).toBe('README.md');
+  });
+
+  it('shows "old → new" for a rename, with the old path struck through', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/new/a.ts', status: 'R', oldPath: 'src/old/a.ts' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('a.ts'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-rename-old')?.textContent).toBe('src/old/a.ts');
+    expect(row.querySelector('.pr-base')?.textContent).toBe('a.ts');
+    expect(row.textContent).toContain('src/old/a.ts → src/new/a.ts');
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P7) self-made diff section header — replaces
+// `heading={file.path}` (which duplicated the path FileDiffView already
+// renders in its own toolbar, with no status letter or rename old -> new) and
+// hides FileDiffView's own toolbar via :global(.diff-toolbar){display:none}.
+// The chevron introduced here (collapsedFiles/toggleCollapse) is a P7/P8
+// shared mechanism — bulk Collapse all/Expand all lands separately in P8.
+describe('PrView — diff section header (P7)', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ type: 'add', content: line, newLineNumber: 1 }] }],
+    };
+  }
+
+  function setup(files: Array<{ path: string; status: string; oldPath?: string }>, diffs: DiffData[]) {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0, files, diffs,
+    });
+    return utils;
+  }
+
+  it('renders one section header (no duplicate path) with status, dir/base, rename, and per-file +/- for a normal inline diff', async () => {
+    const { container } = setup(
+      [{ path: 'src/new/a.ts', status: 'R', oldPath: 'src/old/a.ts' }],
+      [diffFixture('src/new/a.ts', 'hello')],
+    );
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="src/new/a.ts"]');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    // FileDiffView's own heading (.diff-commit-label) is gone — no `heading` prop passed.
+    expect(section.querySelector('.diff-commit-label')).toBeNull();
+    const header = section.querySelector('.pr-diff-section-header')!;
+    expect(header.textContent).toContain('src/old/a.ts → src/new/a.ts');
+    expect(header.querySelector('.pr-file-stats')?.textContent).toContain('+1');
+    expect(header.querySelector('.pr-open-native-btn')).toBeTruthy();
+    // The inline diff itself still renders below the header.
+    expect(section.querySelector('.diff-hunk')).toBeTruthy();
+  });
+
+  it('the chevron collapses/expands the inline diff without hiding the header', async () => {
+    const { container } = setup([{ path: 'src/a.ts', status: 'M' }], [diffFixture('src/a.ts', 'hello')]);
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="src/a.ts"]');
+      expect(el?.querySelector('.diff-hunk')).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const toggle = section.querySelector<HTMLButtonElement>('.pr-diff-toggle')!;
+    expect(toggle.disabled).toBe(false);
+    await fireEvent.click(toggle);
+    expect(section.querySelector('.diff-hunk')).toBeNull();
+    expect(section.querySelector('.pr-diff-section-header')).toBeTruthy(); // header stays
+    await fireEvent.click(toggle);
+    expect(section.querySelector('.diff-hunk')).toBeTruthy();
+  });
+
+  it('a placeholder-eligible file (binary/no hunks) has a disabled toggle (no chevron) and still shows the header + Open native diff', async () => {
+    const { container } = setup(
+      [{ path: 'assets/logo.png', status: 'M' }],
+      [{ file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    );
+    const section = await waitFor(() => {
+      const el = container.querySelector('[data-pr-file="assets/logo.png"]');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const toggle = section.querySelector<HTMLButtonElement>('.pr-diff-toggle')!;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.querySelector('.codicon-chevron-down, .codicon-chevron-right')).toBeNull();
+    expect(section.querySelector('.pr-file-stats')?.textContent).toContain('bin');
+    expect(section.querySelector('.pr-open-native-btn')).toBeTruthy();
+  });
+
+  it('the header\'s Open native diff button works for a file with a normal inline diff too (not just the old placeholder-only case)', async () => {
+    const { container } = setup([{ path: 'src/a.ts', status: 'M' }], [diffFixture('src/a.ts', 'hello')]);
+    const btn = await waitFor(() => {
+      const el = container.querySelector<HTMLButtonElement>('[data-pr-file="src/a.ts"] .pr-open-native-btn');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.click(btn);
+    const req = lastMessageOf('openDiff');
+    expect(req?.payload).toEqual({ file: 'src/a.ts', oldPath: undefined, ref1: 'mb', ref2: 'feat' });
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all + left-column
+// current-file highlight — bulk controls over the same collapsedFiles Set
+// the per-file chevron (P7) toggles, plus a click-based `class:selected` on
+// both columns (the plan's explicitly-sanctioned minimal fallback over an
+// IntersectionObserver, which happy-dom/vitest can't exercise anyway).
+describe('PrView — Collapse all / Expand all + current-file highlight (P8)', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ type: 'add', content: line, newLineNumber: 1 }] }],
+    };
+  }
+
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }, { path: 'src/b.ts', status: 'M' }, { path: 'assets/logo.png', status: 'M' }],
+      diffs: [diffFixture('src/a.ts', 'hello-a'), diffFixture('src/b.ts', 'hello-b'), { file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    });
+    return utils;
+  }
+
+  it('Collapse all hides every inline diff (skipping the placeholder-eligible binary file); Expand all brings them all back', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    const collapseBtn = container.querySelector<HTMLButtonElement>('[aria-label="Collapse all"]')!;
+    await fireEvent.click(collapseBtn);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(0);
+    // Headers (including the binary file's) stay — collapsing hides the body, not the row.
+    expect(container.querySelectorAll('.pr-diff-section-header').length).toBe(3);
+
+    const expandBtn = container.querySelector<HTMLButtonElement>('[aria-label="Expand all"]')!;
+    await fireEvent.click(expandBtn);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(2);
+  });
+
+  it('clicking a file in the left list highlights it (class:selected) in both the left row and the right section', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    const rowB = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/b.ts'))!;
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    await fireEvent.click(rowB);
+
+    expect(rowB.classList.contains('selected')).toBe(true);
+    const rowA = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/a.ts'))!;
+    expect(rowA.classList.contains('selected')).toBe(false);
+
+    const sectionB = container.querySelector('[data-pr-file="src/b.ts"]')!;
+    expect(sectionB.classList.contains('selected')).toBe(true);
+    const sectionA = container.querySelector('[data-pr-file="src/a.ts"]')!;
+    expect(sectionA.classList.contains('selected')).toBe(false);
+  });
+
+  it('resets the highlight and collapse state when the compare changes (swap)', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const rowB = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/b.ts'))!;
+    await fireEvent.click(rowB);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Collapse all"]')!);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(0);
+
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.pr-swap-btn')!);
+    deliver('commitsBetween', {
+      base: 'feat', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/c.ts', status: 'M' }],
+      diffs: [diffFixture('src/c.ts', 'hello-c')],
+    });
+    await waitFor(() => expect(container.textContent).toContain('hello-c'));
+    // The new compare's file starts expanded and unselected, not carrying
+    // over the previous compare's collapse/selection state.
+    expect(container.querySelector('.diff-hunk')).toBeTruthy();
+    expect(container.querySelector('.pr-file-row.selected')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P-P2) dropdown Local/Remote grouping + loading text
+describe('PrView — dropdown Local/Remote grouping (P-P2)', () => {
+  it('groups the branch list under Local/Remote headers with the current branch pinned to the top of its group', async () => {
+    branchStore.branches = [
+      branch({ name: 'zzz-topic' }), // sorts after 'feat' alphabetically but must not come before it once pinned
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+      branch({ name: 'origin/develop', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]); // head dropdown
+
+    await waitFor(() => {
+      const groupLabels = Array.from(container.querySelectorAll('.repo-dropdown-group-label')).map((e) => e.textContent);
+      expect(groupLabels).toEqual(['Local', 'Remote']);
+    });
+    // Within the Local group, 'feat' (current) is pinned first even though
+    // 'zzz-topic' sorts after it alphabetically it was listed first in branchStore.
+    const localGroup = container.querySelector('.repo-dropdown-group-label')!;
+    const localItems: string[] = [];
+    let el = localGroup.nextElementSibling;
+    while (el && el.classList.contains('repo-dropdown-item')) {
+      localItems.push(el.querySelector('.repo-dropdown-item-name')!.textContent!);
+      el = el.nextElementSibling;
+    }
+    expect(localItems[0]).toBe('feat');
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P-P2) hardcoded-string i18n fixes
+describe('PrView — i18n text (P-P2)', () => {
+  it('uses a dedicated pr.loading key instead of borrowing reflog.loading', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    expect(container.textContent).toContain('Loading comparison');
+    expect(container.textContent).not.toContain('Loading reflog');
   });
 });
 // SNIPCODE-HOOK end

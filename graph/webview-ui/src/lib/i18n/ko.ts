@@ -716,4 +716,30 @@ export const ko: Record<string, string> = {
   'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
   'pr.into': '→',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': '비교할 기준 브랜치를 선택하세요.',
+  'pr.emptyDetached': 'HEAD가 detached 상태입니다 — 비교하려면 브랜치를 checkout 하세요.',
+  'pr.emptyError': '비교 결과를 불러오지 못했습니다: {message}',
+  'pr.emptySameRef': '{base}와(과) {head}가 동일한 ref입니다 — 비교할 내용이 없습니다.',
+  'pr.emptyUpToDate': '{head}는(은) 이미 {base}에 완전히 병합되어 있습니다.',
+  'pr.statsAhead': '{count}개 앞섬',
+  'pr.statsBehind': '{count}개 뒤처짐',
+  'pr.statsFiles': '파일 {count}개',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': 'merge-base 해시 복사',
+  'pr.openNativeDiff': '기본 diff 열기',
+  'pr.collapseAll': '모두 접기',
+  'pr.expandAll': '모두 펼치기',
+  'pr.filterBranches': '브랜치 필터…',
+  'pr.noMatchingBranches': '일치하는 브랜치 없음',
+  'pr.swapBaseHead': 'base와 head 바꾸기',
+  'pr.prevChange': '이전 변경',
+  'pr.nextChange': '다음 변경',
+  'pr.copyFullSource': '전체 소스 복사',
+  'pr.loading': '비교 결과 불러오는 중',
+  'pr.localBranches': '로컬',
+  'pr.remoteBranches': '리모트',
+  /* SNIPCODE-HOOK end */
 };
