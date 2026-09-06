@@ -138,9 +138,15 @@ export async function ensureLanguage(h: HighlighterCore, lang: string): Promise<
 /** Theme that matches the current VS Code color theme, so highlighted tokens
  *  sit correctly on the diff background (dark-plus on dark, light-plus on light). */
 export function activeShikiTheme(): 'dark-plus' | 'light-plus' {
-  return typeof document !== 'undefined' && document.body.classList.contains('vscode-light')
+  /* SNIPCODE-HOOK start: ui/diff D14 High Contrast Light is light, not dark */
+  // VS Code puts `vscode-high-contrast-light` (NOT `vscode-light`) on body for
+  // the HC-light theme; without this it fell through to dark-plus tokens on a
+  // white background.
+  const classes = typeof document !== 'undefined' ? document.body.classList : undefined;
+  return classes?.contains('vscode-light') || classes?.contains('vscode-high-contrast-light')
     ? 'light-plus'
     : 'dark-plus';
+  /* SNIPCODE-HOOK end */
 }
 
 function escapeHtml(text: string): string {
