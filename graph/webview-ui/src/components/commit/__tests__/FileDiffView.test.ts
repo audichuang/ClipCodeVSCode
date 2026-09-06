@@ -696,3 +696,43 @@ describe('FileDiffView no-newline-at-EOF marker', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation */
+describe('FileDiffView rename/mode-only empty-hunks explanation', () => {
+  beforeEach(() => i18n.setLocale('en'));
+
+  function emptyDiff(extra: Partial<DiffData>): DiffData {
+    return { file: 'new.ts', isBinary: false, isImage: false, hunks: [], ...extra };
+  }
+
+  it('shows "Renamed from X (similarity N%)" instead of a blank body', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({ oldPath: 'old.ts', similarity: 97 }) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('Renamed from old.ts (similarity 97%)');
+  });
+
+  it('shows "Mode X → Y" for a pure mode-only change', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({ oldMode: '100644', newMode: '100755' }) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('Mode 100644 → 100755');
+  });
+
+  it('shows both a rename and a mode change when a file was renamed AND rechmodded', () => {
+    const { container } = render(FileDiffView, {
+      diff: emptyDiff({ oldPath: 'old.ts', similarity: 100, oldMode: '100644', newMode: '100755' }),
+    });
+    const text = container.querySelector('.diff-empty-meta')!.textContent!;
+    expect(text).toContain('Renamed from old.ts');
+    expect(text).toContain('Mode 100644 → 100755');
+  });
+
+  it('falls back to "No textual changes" when there is no rename/mode/new/delete metadata', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({}) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('No textual changes');
+  });
+
+  it('still renders normal hunks (no empty-state branch) when hunks are non-empty', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.diff-empty-meta')).toBeNull();
+    expect(container.querySelectorAll('.diff-content .diff-line').length).toBeGreaterThan(0);
+  });
+});
+/* SNIPCODE-HOOK end */

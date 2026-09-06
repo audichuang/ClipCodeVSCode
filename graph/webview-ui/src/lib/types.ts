@@ -140,6 +140,14 @@ export interface DiffData {
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   fingerprint?: string;
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+  oldPath?: string;
+  similarity?: number;
+  oldMode?: string;
+  newMode?: string;
+  newFile?: boolean;
+  deletedFile?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface DiffHunk {

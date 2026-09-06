@@ -719,4 +719,9 @@ export const zh: Record<string, string> = {
 
   // ui/diff
   'diff.noNewlineAtEof': '文件末尾无换行符',
+  'diff.renamedFrom': '从 {oldPath} 重命名而来（相似度 {similarity}%）',
+  'diff.modeChanged': '权限 {oldMode} → {newMode}',
+  'diff.noTextualChanges': '没有文本变更',
+  'diff.newFile': '新文件',
+  'diff.deletedFile': '已删除的文件',
 };

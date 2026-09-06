@@ -572,6 +572,30 @@
       {/if}
     {:else if diff.isBinary}
       <div class="diff-empty">{t('details.binaryFile')}</div>
+    <!-- SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation -->
+    {:else if renderHunks.length === 0}
+      <!-- A rename-only / mode-only / already-empty-file diff has no content
+           hunks — previously this rendered as a blank body with no text at
+           all, indistinguishable from "still loading". Say what actually
+           happened instead. -->
+      <div class="diff-empty diff-empty-meta">
+        {#if diff.oldPath}
+          <div>{t('diff.renamedFrom', { oldPath: diff.oldPath, similarity: diff.similarity ?? 100 })}</div>
+        {/if}
+        {#if diff.oldMode && diff.newMode}
+          <div>{t('diff.modeChanged', { oldMode: diff.oldMode, newMode: diff.newMode })}</div>
+        {/if}
+        {#if !diff.oldPath && !diff.oldMode}
+          {#if diff.newFile}
+            <div>{t('diff.newFile')}</div>
+          {:else if diff.deletedFile}
+            <div>{t('diff.deletedFile')}</div>
+          {:else}
+            <div>{t('diff.noTextualChanges')}</div>
+          {/if}
+        {/if}
+      </div>
+    <!-- SNIPCODE-HOOK end -->
     {:else if mode === 'inline'}
       <div class="diff-content">
         {#each renderHunks as hunk, hunkIdx}
@@ -1065,6 +1089,14 @@
     text-align: center;
     color: var(--text-secondary);
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation */
+  .diff-empty-meta div {
+    margin: 2px 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+  }
+  /* SNIPCODE-HOOK end */
 
   .diff-truncated-banner {
     display: flex;

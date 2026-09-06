@@ -164,6 +164,22 @@ describe('MainPanel message routing', () => {
     expect(leftRef).not.toContain('~1');
   });
 
+  /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+  it('openDiff for a renamed file resolves the LEFT (parent) URI from oldPath, not the new path', async () => {
+    const vscode = await import('vscode');
+    H.git.resolveDiffBaseRef.mockResolvedValue('1111111111111111111111111111111111111111');
+
+    await dispatch({ type: 'openDiff', payload: { file: 'new.ts', commitHash: '2222222', oldPath: 'old.ts' } });
+
+    const diffCall = (vscode.commands.executeCommand as ReturnType<typeof vi.fn>).mock.calls
+      .find(c => c[0] === 'vscode.diff')!;
+    const leftUri = diffCall[1] as { query: string };
+    expect(JSON.parse(leftUri.query).path).toMatch(/old\.ts$/);
+    const rightUri = diffCall[2] as { query: string };
+    expect(JSON.parse(rightUri.query).path).toMatch(/new\.ts$/);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('getBranches posts branchData with all the sidebar collections', async () => {
     await dispatch({ type: 'getBranches' });
     const data = postedOfType('branchData').at(-1)!;
@@ -370,6 +386,14 @@ describe('MainPanel orchestration logic', () => {
     expect(diffs).toHaveLength(1);
     expect(diffs[0].payload!.file).toBe('b.ts');
   });
+
+  /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
+  it('getFileDiff forwards oldPath to showCommitDiff so a rename can be paired', async () => {
+    H.git.showCommitDiff.mockResolvedValueOnce([{ file: 'new.ts', hunks: [], oldPath: 'old.ts' }] as never);
+    await dispatch({ type: 'getFileDiff', payload: { hash: 'h', file: 'new.ts', oldPath: 'old.ts' } });
+    expect(H.git.showCommitDiff).toHaveBeenCalledWith('h', 'new.ts', 'old.ts');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('discards a stale getLog from the previous repo after switching repos', async () => {
     // Two repos so the switchRepo allow-list check passes.

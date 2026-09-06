@@ -721,4 +721,9 @@ export const en: Record<string, string> = {
 
   // ui/diff
   'diff.noNewlineAtEof': 'No newline at end of file',
+  'diff.renamedFrom': 'Renamed from {oldPath} (similarity {similarity}%)',
+  'diff.modeChanged': 'Mode {oldMode} → {newMode}',
+  'diff.noTextualChanges': 'No textual changes',
+  'diff.newFile': 'New file',
+  'diff.deletedFile': 'Deleted file',
 };
