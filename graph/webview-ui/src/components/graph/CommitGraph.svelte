@@ -342,7 +342,12 @@
   // Right-side columns (author + sha + date) and the minimum width we always
   // reserve for the commit message. These mirror the fixed column widths in the
   // CSS below.
-  const RIGHT_COLS_WIDTH = 120 + 75 + 150;
+  /* SNIPCODE-HOOK start: M8 — author widened 120 -> 160 (flex basis; CSS below
+     lets it shrink to 100 min instead of a hard 120px truncation cliff). This
+     constant sizes the h-scroll pinned meta overlay/spacer, so it must track
+     the CSS column width or the overlay misaligns with the scrolling header. */
+  const RIGHT_COLS_WIDTH = 160 + 75 + 150;
+  /* SNIPCODE-HOOK end */
   const MIN_MESSAGE_WIDTH = 120;
 
   // In huge repos (e.g. nixpkgs) hundreds of concurrent branches make the graph
@@ -2483,15 +2488,20 @@
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: M8 — was a hard `width:120px` that truncated most
+     names ("Bob Martí…"); flex-basis 160 with a 100 floor gives real names
+     room while still yielding to a squeezed viewport. Keep in sync with
+     RIGHT_COLS_WIDTH above. */
   .col-author {
-    width: 120px;
-    flex-shrink: 0;
+    flex: 0 1 160px;
+    min-width: 100px;
     padding: 0 10px;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
   }
+  /* SNIPCODE-HOOK end */
 
   /* Wraps avatar + name so the author-name tooltip is scoped to them only;
      the signature icon sits outside as a sibling so hovering it doesn't also
