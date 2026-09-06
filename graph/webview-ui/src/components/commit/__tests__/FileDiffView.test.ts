@@ -736,3 +736,48 @@ describe('FileDiffView rename/mode-only empty-hunks explanation', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+describe('FileDiffView CRLF marker', () => {
+  function mixedCrDiff(): DiffData {
+    return {
+      file: 'src/eol.ts',
+      isBinary: false,
+      isImage: false,
+      hunks: [{
+        header: '@@ -1,2 +1,2 @@',
+        oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+        lines: [
+          { type: 'delete', content: 'alpha', oldLineNumber: 1 },
+          { type: 'add', content: 'alpha', newLineNumber: 1, cr: true },
+        ],
+      }],
+    };
+  }
+
+  it('marks only the CR-flagged line when the diff has mixed line endings (inline)', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: mixedCrDiff(), diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelectorAll('.cr-marker').length).toBe(1);
+    const deleteLine = container.querySelector('.diff-delete')!;
+    expect(deleteLine.querySelector('.cr-marker')).toBeNull();
+  });
+
+  it('marks it in side-by-side mode too', () => {
+    const { container } = render(FileDiffView, { diff: mixedCrDiff(), diffMode: 'side-by-side', hideModeToggle: true });
+    expect(container.querySelectorAll('.cr-marker').length).toBe(1);
+  });
+
+  it('renders no marker when the whole file is consistently CRLF (not mixed)', () => {
+    const diff = mixedCrDiff();
+    diff.hunks[0].lines[0].cr = true; // both sides CRLF now — not mixed
+    const { container } = render(FileDiffView, { diff, diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelector('.cr-marker')).toBeNull();
+  });
+
+  it('renders no marker on an ordinary LF-only diff', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.cr-marker')).toBeNull();
+  });
+});
+/* SNIPCODE-HOOK end */

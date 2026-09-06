@@ -169,6 +169,9 @@ export interface DiffLine {
    *  of file` marker — i.e. this line has no trailing newline in that blob. */
   noNewline?: boolean;
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  cr?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface WorktreeInfo {

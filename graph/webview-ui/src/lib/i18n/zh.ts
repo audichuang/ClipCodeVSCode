@@ -724,4 +724,5 @@ export const zh: Record<string, string> = {
   'diff.noTextualChanges': '没有文本变更',
   'diff.newFile': '新文件',
   'diff.deletedFile': '已删除的文件',
+  'diff.mixedLineEndings': '此行以 CRLF 结尾，与文件其余部分不同',
 };

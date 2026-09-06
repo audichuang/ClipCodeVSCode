@@ -726,4 +726,5 @@ export const en: Record<string, string> = {
   'diff.noTextualChanges': 'No textual changes',
   'diff.newFile': 'New file',
   'diff.deletedFile': 'Deleted file',
+  'diff.mixedLineEndings': 'This line ends in CRLF, unlike the rest of the file',
 };
