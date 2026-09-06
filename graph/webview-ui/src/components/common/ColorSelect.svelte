@@ -257,11 +257,13 @@
   }
 
   /* ---- Light theme overrides ---- */
-  :global(body.vscode-light) .warning-icon {
+  :global(body.vscode-light) .warning-icon,
+  :global(body.vscode-high-contrast-light) .warning-icon {
     color: #9a6700;
   }
 
-  :global(body.vscode-light) .warning-message {
+  :global(body.vscode-light) .warning-message,
+  :global(body.vscode-high-contrast-light) .warning-message {
     background: rgba(200, 120, 0, 0.08);
     border-color: rgba(200, 120, 0, 0.3);
     color: #9a6700;

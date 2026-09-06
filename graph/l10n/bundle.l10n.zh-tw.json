@@ -126,6 +126,7 @@
   "Discard changes to {0} file(s) in {1}? This cannot be undone.": "丟棄 {1} 中 {0} 個檔案的變更？此動作無法復原。",
   "Skipped repo(s) with unresolved conflicts: {0}": "已略過含未解決衝突的儲存庫：{0}",
   "No repo checked to commit (or nothing staged)": "沒有勾選要提交的儲存庫（或沒有已暫存的變更）",
+  "Cannot commit: unresolved conflicts in {0}. Resolve them, then stage the files.": "無法提交：{0} 有未解決的衝突。請先解決衝突並暫存檔案。",
   "No git repo detected": "沒有偵測到 git 儲存庫",
   "Snipcode Git: which repos to show": "Snipcode Git：顯示哪些儲存庫",
   "Check the repos to show (all checked = show all)": "勾選要顯示的儲存庫（全選＝顯示全部）",

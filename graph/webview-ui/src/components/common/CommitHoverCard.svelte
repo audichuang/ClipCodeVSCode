@@ -97,7 +97,8 @@
     transition: transform 0.1s ease-out, opacity 0.1s ease-out;
   }
 
-  :global(body.vscode-light) .commit-hover-card {
+  :global(body.vscode-light) .commit-hover-card,
+  :global(body.vscode-high-contrast-light) .commit-hover-card {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   }
 

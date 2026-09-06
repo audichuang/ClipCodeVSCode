@@ -376,6 +376,18 @@ export class ChangesWorkbench implements vscode.Disposable {
       /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: live-QA-3 name the real reason when conflicts are it.
+       Everything checked was filtered out just above, so the generic "nothing
+       staged" text contradicted what the user could see: their repo WAS checked
+       and DID have staged files. The tree message alone (set above) is easy to
+       miss — it sits in a different surface from the error toast. */
+    if (status.length === 0 && blocked.length > 0) {
+      throw new Error(vscode.l10n.t(
+        'Cannot commit: unresolved conflicts in {0}. Resolve them, then stage the files.',
+        blocked.map(r => r.repoName).join(', '),
+      ));
+    }
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
     if (status.length === 0) throw new Error(vscode.l10n.t('No repo checked to commit (or nothing staged)'));
     /* SNIPCODE-HOOK end */
@@ -434,9 +446,11 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  stageHunks/unstageHunks re-fetch (same git diff command per side).
    *  Throws on git failure — null strictly means "this side has no diff",
    *  so the panel can tell an error apart from an empty state. */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  async fileDiffData(repoPath: string, file: string, side: ChangeGroup, oldPath?: string): Promise<DiffData | null> {
-    return this.svcFor(repoPath).getUncommittedFileDiff(file, side === 'staged', oldPath);
+  /* SNIPCODE-HOOK start: live-QA-2 no oldPath argument — GitService resolves the
+     rename source for THIS side from git status; a caller here would only know
+     the side the user happened to click. */
+  async fileDiffData(repoPath: string, file: string, side: ChangeGroup): Promise<DiffData | null> {
+    return this.svcFor(repoPath).getUncommittedFileDiff(file, side === 'staged');
   }
   /* SNIPCODE-HOOK end */
 
@@ -456,18 +470,17 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
     if (!node) return;
     /* SNIPCODE-HOOK end */
-    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-    this.diffPanel?.show(node.repoPath, node.path, undefined, node.oldPath);
+    /* SNIPCODE-HOOK start: live-QA-2 the clicked node's oldPath is deliberately
+       NOT forwarded: it belongs to one side, and the Diff tab shows both. */
+    this.diffPanel?.show(node.repoPath, node.path);
     /* SNIPCODE-HOOK end */
   }
 
   /** Stage the selected hunks of one unstaged file, then refresh the tree and
    *  re-render the file's (now smaller) unstaged diff in the panel. */
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint, oldPath));
-    /* SNIPCODE-HOOK end */
+  async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint));
     await this.refresh();
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
@@ -476,29 +489,23 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
    *  file's remaining staged diff. */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint, oldPath));
-    /* SNIPCODE-HOOK end */
+  async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint));
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
   /** Stage the selected changed lines of one hunk of an unstaged file. */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint, oldPath));
-    /* SNIPCODE-HOOK end */
+  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint));
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /** Unstage the selected changed lines of one hunk of a staged file. */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint, oldPath));
-    /* SNIPCODE-HOOK end */
+  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint));
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }

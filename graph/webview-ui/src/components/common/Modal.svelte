@@ -97,7 +97,8 @@
     outline: none;
   }
 
-  :global(body.vscode-light) .modal {
+  :global(body.vscode-light) .modal,
+  :global(body.vscode-high-contrast-light) .modal {
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.08);
   }
 
@@ -221,15 +222,19 @@
   :global(.modal-pill--stash)  { --pill-color: #888; background: color-mix(in srgb, #888 28%, transparent); }
 
   /* Light theme overrides */
-  :global(body.vscode-light .modal-pill) {
+  :global(body.vscode-light .modal-pill),
+  :global(body.vscode-high-contrast-light .modal-pill) {
     background: rgba(0, 0, 0, 0.04);
     color: #000;
     border: 1px solid rgba(0, 0, 0, 0.15);
   }
 
   :global(body.vscode-light .modal-pill--danger) { background: color-mix(in srgb, #f44336 18%, #fff); }
+  :global(body.vscode-high-contrast-light .modal-pill--danger) { background: color-mix(in srgb, #f44336 18%, #fff); }
   :global(body.vscode-light .modal-pill--tag)    { background: color-mix(in srgb, #f0c040 20%, #fff); }
+  :global(body.vscode-high-contrast-light .modal-pill--tag)    { background: color-mix(in srgb, #f0c040 20%, #fff); }
   :global(body.vscode-light .modal-pill--stash)  { background: color-mix(in srgb, #888 28%, #fff); }
+  :global(body.vscode-high-contrast-light .modal-pill--stash)  { background: color-mix(in srgb, #888 28%, #fff); }
 
   :global(.modal-label) {
     font-size: 11px;
@@ -398,7 +403,8 @@
     margin: 0 0 6px;
   }
 
-  :global(body.vscode-light .modal-warning) {
+  :global(body.vscode-light .modal-warning),
+  :global(body.vscode-high-contrast-light .modal-warning) {
     background: rgba(200, 120, 0, 0.08);
     border-color: rgba(200, 120, 0, 0.3);
     color: #9a6700;

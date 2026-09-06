@@ -1899,11 +1899,19 @@
   /* SNIPCODE-HOOK end */
 
   /* High contrast overrides */
-  :global(body.vscode-high-contrast) .ref-badge {
+  /* SNIPCODE-HOOK start: live-QA-1 HC DARK only. This block sits after the light
+     rules with equal specificity, so without the exclusion it won the cascade in
+     HC Light too and painted white text on the white badge — the branch name
+     vanished, leaving only its colored outline. `.badge-head` survived by being
+     one class more specific, which is why only ordinary branches looked broken.
+     The exclusion is a no-op wherever `vscode-high-contrast-light` is absent, so
+     HC Dark is untouched either way. */
+  :global(body.vscode-high-contrast:not(.vscode-high-contrast-light)) .ref-badge {
     background: transparent;
     color: #fff;
     border: 1px solid var(--badge-color);
   }
+  /* SNIPCODE-HOOK end */
 
   .ref-icon {
     font-size: 1em;
@@ -1921,7 +1929,8 @@
     border: 1px solid rgba(128, 128, 128, 0.1);
   }
 
-  :global(body.vscode-light) .message-section {
+  :global(body.vscode-light) .message-section,
+  :global(body.vscode-high-contrast-light) .message-section {
     background: rgba(0, 0, 0, 0.03);
     border-color: rgba(0, 0, 0, 0.08);
   }
@@ -2143,12 +2152,14 @@
     color: #ff9800;
   }
 
-  :global(body.vscode-light) .lfs-badge {
+  :global(body.vscode-light) .lfs-badge,
+  :global(body.vscode-high-contrast-light) .lfs-badge {
     background: rgba(106, 27, 154, 0.1);
     color: #6a1b9a;
   }
 
-  :global(body.vscode-light) .lfs-badge.locked {
+  :global(body.vscode-light) .lfs-badge.locked,
+  :global(body.vscode-high-contrast-light) .lfs-badge.locked {
     background: rgba(200, 100, 0, 0.1);
     color: #e65100;
   }

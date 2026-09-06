@@ -43,11 +43,15 @@ export class DiffPanel {
   /** The file currently shown; drives retitle + refreshIfCurrent. Both sides
    *  (staged + unstaged) are pushed together, so this is keyed by file only. */
   /* SNIPCODE-HOOK start: Batch B image request identity */
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  // oldPath rides along with the SAME lifetime as file/generation: it's only
-  // valid for whatever file is currently shown, so it's reset (implicitly,
-  // via reassigning `current`) exactly when file navigation happens.
-  private current: { repoPath: string; file: string; generation: number; oldPath?: string } | undefined;
+  /* SNIPCODE-HOOK start: live-QA-2 no oldPath here — it is per-SIDE, and this
+     tab renders BOTH sides of one file. A staged rename with a further edit is
+     `R` (with oldPath) on the staged side and `M` (none) on the unstaged one,
+     so one remembered value cannot be right for both: it used to be taken from
+     whichever tree node was clicked, which rendered the staged side of a
+     rename opened from Unstaged as a whole-file add. GitService resolves each
+     side's rename source from git status instead — below both the display and
+     the patch-builder routes, so their args still match for the fingerprint. */
+  private current: { repoPath: string; file: string; generation: number } | undefined;
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
   /** Set once the webview's listener has confirmed it's installed (`diffReady`).
@@ -115,9 +119,7 @@ export class DiffPanel {
   private pendingOpId: string | undefined;
   /* SNIPCODE-HOOK end */
 
-  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-  show(repoPath: string, file: string, operationId?: string, oldPath?: string): void {
-  /* SNIPCODE-HOOK end */
+  show(repoPath: string, file: string, operationId?: string): void {
     const ticket = this.seq.issue();
     /* SNIPCODE-HOOK start: loading state only on navigation */
     // A same-file refresh (post-stage / post-error) keeps the current body
@@ -130,9 +132,7 @@ export class DiffPanel {
     this.pendingOpId = effectiveOpId;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B image request identity */
-    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-    this.current = { repoPath, file, generation: ticket, oldPath };
-    /* SNIPCODE-HOOK end */
+    this.current = { repoPath, file, generation: ticket };
     /* SNIPCODE-HOOK end */
     if (!this.panel) { this.createPanel(); }
     /* SNIPCODE-HOOK start: D6/X2 tab title carries the dir too — basename-only
@@ -170,12 +170,7 @@ export class DiffPanel {
   /* SNIPCODE-HOOK start: Batch B stage operation correlation */
   refreshIfCurrent(repoPath: string, file: string, operationId?: string): void {
     if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
-      /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-      // Carry the remembered oldPath forward — the caller here (workbench's
-      // stageHunks/unstageHunks/etc, or the StaleDiffError recovery below)
-      // doesn't know it; only `this.current` does.
-      this.show(repoPath, file, operationId, this.current.oldPath);
-      /* SNIPCODE-HOOK end */
+      this.show(repoPath, file, operationId);
     }
   }
   /* SNIPCODE-HOOK end */
@@ -271,18 +266,11 @@ export class DiffPanel {
         const idx = Number(hunkIndex);
         const lines = Array.isArray(lineIndices) ? lineIndices.map(Number) : [];
         try {
-          /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-          // isCurrentTarget above already confirmed this.current matches
-          // repoPath/file, so its oldPath is the one this diff was rendered
-          // with — must match what the raw fetch inside stageLines/
-          // unstageLines uses, or the fingerprint check spuriously fails.
-          const oldPath = this.current?.oldPath;
           if (side === 'unstaged') {
-            await this.workbench.stageLines(String(repoPath), String(file), idx, lines, fingerprint, operationId === undefined ? undefined : String(operationId), oldPath);
+            await this.workbench.stageLines(String(repoPath), String(file), idx, lines, fingerprint, operationId === undefined ? undefined : String(operationId));
           } else {
-            await this.workbench.unstageLines(String(repoPath), String(file), idx, lines, fingerprint, operationId === undefined ? undefined : String(operationId), oldPath);
+            await this.workbench.unstageLines(String(repoPath), String(file), idx, lines, fingerprint, operationId === undefined ? undefined : String(operationId));
           }
-          /* SNIPCODE-HOOK end */
           // stageLines/unstageLines call refreshIfCurrent → re-push the new diff.
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -313,14 +301,11 @@ export class DiffPanel {
         return;
       }
       try {
-        /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-        const oldPath = this.current?.oldPath;
         if (side === 'unstaged') {
-          await this.workbench.stageHunks(String(repoPath), String(file), [Number(hunkIndex)], fingerprint, operationId === undefined ? undefined : String(operationId), oldPath);
+          await this.workbench.stageHunks(String(repoPath), String(file), [Number(hunkIndex)], fingerprint, operationId === undefined ? undefined : String(operationId));
         } else {
-          await this.workbench.unstageHunks(String(repoPath), String(file), [Number(hunkIndex)], fingerprint, operationId === undefined ? undefined : String(operationId), oldPath);
+          await this.workbench.unstageHunks(String(repoPath), String(file), [Number(hunkIndex)], fingerprint, operationId === undefined ? undefined : String(operationId));
         }
-        /* SNIPCODE-HOOK end */
         // stageHunks/unstageHunks call refreshIfCurrent → re-push the new diff.
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -348,9 +333,7 @@ export class DiffPanel {
 
   private async push(
     /* SNIPCODE-HOOK start: Batch B image request identity */
-    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-    target: { repoPath: string; file: string; generation: number; oldPath?: string },
-    /* SNIPCODE-HOOK end */
+    target: { repoPath: string; file: string; generation: number },
     /* SNIPCODE-HOOK end */
     ticket: number,
     /* SNIPCODE-HOOK start: Batch B stage operation correlation */
@@ -359,9 +342,7 @@ export class DiffPanel {
   ): Promise<void> {
     if (!this.panel) { return; }
     /* SNIPCODE-HOOK start: Batch B image request identity */
-    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
-    const { repoPath, file, generation, oldPath } = target;
-    /* SNIPCODE-HOOK end */
+    const { repoPath, file, generation } = target;
     /* SNIPCODE-HOOK end */
     // One ticket for the combined fetch: both sides resolve, then a single
     // isCurrent() check + single post, so rapid file navigation stays latest-wins
@@ -370,12 +351,10 @@ export class DiffPanel {
     let unstagedDiff = null;
     let fetchError: string | null = null;
     try {
-      /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
       [stagedDiff, unstagedDiff] = await Promise.all([
-        this.workbench.fileDiffData(repoPath, file, 'staged', oldPath),
-        this.workbench.fileDiffData(repoPath, file, 'unstaged', oldPath),
+        this.workbench.fileDiffData(repoPath, file, 'staged'),
+        this.workbench.fileDiffData(repoPath, file, 'unstaged'),
       ]);
-      /* SNIPCODE-HOOK end */
     } catch (err) {
       // Surface it: null sides + fetchError renders as an error banner, never as
       // the affirmative "No changes" empty state.

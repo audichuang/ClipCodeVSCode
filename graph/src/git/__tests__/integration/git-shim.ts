@@ -2,7 +2,7 @@
 // real-git race control, see docs/research/2026-07-11-e2e-test-strategy.md §2.2).
 
 import { execSync } from 'child_process';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -37,6 +37,12 @@ export interface GitShim {
   cleanup(): void;
 }
 
+/** Symlink-resolved form of a spawn cwd, so the shim's `pwd -P` can match it. */
+function physicalPath(dir: string | undefined): string {
+  if (!dir) { return ''; }
+  try { return realpathSync(dir); } catch { return dir; }
+}
+
 export function createGitShim(opts: { subcommand: string; cwd?: string }): GitShim {
   const realGit = execSync('command -v git', { encoding: 'utf-8', shell: '/bin/bash' }).trim();
   const ctrlDir = mkdtempSync(join(tmpdir(), 'ggp-shim-'));
@@ -46,7 +52,7 @@ export function createGitShim(opts: { subcommand: string; cwd?: string }): GitSh
 CTRL=${shellQuote(ctrlDir)}
 REAL=${shellQuote(realGit)}
 TARGET=${shellQuote(opts.subcommand)}
-TARGET_CWD=${shellQuote(opts.cwd ?? '')}
+TARGET_CWD=${shellQuote(physicalPath(opts.cwd))}
 
 sub=""
 sub2=""
@@ -67,7 +73,12 @@ case "$TARGET" in
   *" "*) match="$sub $sub2" ;;
 esac
 
-if [ "$match" = "$TARGET" ] && { [ -z "$TARGET_CWD" ] || [ "$PWD" = "$TARGET_CWD" ]; } \\
+# 'pwd -P' here and realpathSync on the TS side both resolve symlinks: on macOS
+# the repo lives under the LOGICAL /var/folders/... that mkdtemp reports, while
+# a spawned shell sees the PHYSICAL /private/var/folders/... — comparing the two
+# raw strings never matched, so the shim silently let every invocation through
+# and the race tests waited forever for an intercept that could not happen.
+if [ "$match" = "$TARGET" ] && { [ -z "$TARGET_CWD" ] || [ "$(pwd -P)" = "$TARGET_CWD" ]; } \\
    && ! [ -e "$CTRL/consumed" ]; then
   : > "$CTRL/consumed"
   : > "$CTRL/entered"

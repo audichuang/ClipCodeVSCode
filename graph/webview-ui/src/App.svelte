@@ -948,7 +948,8 @@ import RewordModal from './components/modals/RewordModal.svelte';
   }
 
   /* ---- Light theme overrides (rebase pause) ---- */
-  :global(body.vscode-light) .rebase-pause-banner {
+  :global(body.vscode-light) .rebase-pause-banner,
+  :global(body.vscode-high-contrast-light) .rebase-pause-banner {
     background: rgba(123, 31, 162, 0.07);
     border-color: rgba(123, 31, 162, 0.3);
     color: #7b1fa2;
@@ -1150,25 +1151,30 @@ import RewordModal from './components/modals/RewordModal.svelte';
   }
 
   /* ---- Light theme overrides ---- */
-  :global(body.vscode-light) .conflict-icon {
+  :global(body.vscode-light) .conflict-icon,
+  :global(body.vscode-high-contrast-light) .conflict-icon {
     color: #9a6700;
   }
 
-  :global(body.vscode-light) .conflict-count {
-    color: #9a6700;
-    background: rgba(200, 120, 0, 0.12);
-  }
-
-  :global(body.vscode-light) .unresolved-icon {
+  :global(body.vscode-light) .conflict-count,
+  :global(body.vscode-high-contrast-light) .conflict-count {
     color: #9a6700;
     background: rgba(200, 120, 0, 0.12);
   }
 
-  :global(body.vscode-light) .conflict-stage-hint {
+  :global(body.vscode-light) .unresolved-icon,
+  :global(body.vscode-high-contrast-light) .unresolved-icon {
+    color: #9a6700;
+    background: rgba(200, 120, 0, 0.12);
+  }
+
+  :global(body.vscode-light) .conflict-stage-hint,
+  :global(body.vscode-high-contrast-light) .conflict-stage-hint {
     color: #2e7d32;
   }
 
-  :global(body.vscode-light) .resolved-icon {
+  :global(body.vscode-light) .resolved-icon,
+  :global(body.vscode-high-contrast-light) .resolved-icon {
     color: #2e7d32;
     background: rgba(46, 125, 50, 0.12);
   }

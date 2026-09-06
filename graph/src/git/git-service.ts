@@ -1050,6 +1050,37 @@ export class GitService {
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: live-QA-2 per-SIDE rename source, resolved from git */
+  /** The rename source for ONE side of a file's uncommitted diff, read from git
+   *  status instead of taken from whichever tree node the user clicked.
+   *
+   *  The two sides do NOT share an oldPath: a staged rename that also has a
+   *  working-tree edit is `R` (with oldPath) on the staged side and plain `M`
+   *  (no oldPath) on the unstaged one. The mistake is asymmetric — handing the
+   *  staged side's oldPath to the unstaged side is harmless, because the old
+   *  name is in neither the index nor the working tree so `-M -- old new`
+   *  degenerates to `-- new`, while handing the unstaged side's MISSING oldPath
+   *  to the staged side drops `-M` and renders the rename as an unrelated
+   *  whole-file add.
+   *
+   *  Resolving here — below every display route AND every patch-builder route,
+   *  which all reach uncommittedDiffArgs through this — is what keeps the args
+   *  identical on both, so the fingerprint the webview rendered still matches
+   *  the bytes a later stage click reverses. Resolving in a panel instead would
+   *  fix only the panel that did it. An explicitly supplied oldPath wins: the
+   *  graph's uncommitted view already picks it from the correct side's list. */
+  private async resolveOldPath(file: string, staged: boolean, given?: string): Promise<string | undefined> {
+    if (given) { return given; }
+    // Full status, not `status -- <file>`: whether a pathspec-filtered status
+    // still reports the rename pair is not worth betting the diff on, and the
+    // tree runs this same read continuously anyway.
+    const { staged: s, unstaged: u } = await this.getUncommittedDiff();
+    const entry = (staged ? s : u).find(f => f.path === file);
+    if (entry?.oldPath) { this.assertSafePath(entry.oldPath, 'diff'); }
+    return entry?.oldPath;
+  }
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: uncommitted per-file diff for the workbench/Diff tab.
    *  A git failure THROWS so callers can surface it — swallowing it here made the
    *  Diff tab render the affirmative "No changes" empty state on e.g. index.lock
@@ -1060,6 +1091,9 @@ export class GitService {
   async getUncommittedFileDiff(file: string, staged: boolean, oldPath?: string): Promise<DiffData | null> {
     this.assertSafePath(file, 'diff');
     if (oldPath) this.assertSafePath(oldPath, 'diff');
+    /* SNIPCODE-HOOK start: live-QA-2 per-SIDE rename source, resolved from git */
+    oldPath = await this.resolveOldPath(file, staged, oldPath);
+    /* SNIPCODE-HOOK end */
     if (staged) {
       /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
       const raw = await this.exec(this.uncommittedDiffArgs(true, file, oldPath), { encoding: 'buffer' });
@@ -2591,6 +2625,9 @@ export class GitService {
   private async workingFileDiffRaw(file: string, oldPath?: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
     if (oldPath) this.assertSafePath(oldPath, 'diff');
+    /* SNIPCODE-HOOK start: live-QA-2 per-SIDE rename source, resolved from git */
+    oldPath = await this.resolveOldPath(file, false, oldPath);
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B surface raw diff failures */
     const isTracked = await this.isTrackedFile(file);
     if (!isTracked) {
@@ -2611,6 +2648,9 @@ export class GitService {
   private async stagedFileDiffRaw(file: string, oldPath?: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
     if (oldPath) this.assertSafePath(oldPath, 'diff');
+    /* SNIPCODE-HOOK start: live-QA-2 per-SIDE rename source, resolved from git */
+    oldPath = await this.resolveOldPath(file, true, oldPath);
+    /* SNIPCODE-HOOK end */
     return this.exec(this.uncommittedDiffArgs(true, file, oldPath), { encoding: 'buffer' });
   }
   /* SNIPCODE-HOOK end */

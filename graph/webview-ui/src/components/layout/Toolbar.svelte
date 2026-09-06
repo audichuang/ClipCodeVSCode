@@ -497,7 +497,8 @@
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   }
 
-  :global(body.vscode-light) .repo-dropdown {
+  :global(body.vscode-light) .repo-dropdown,
+  :global(body.vscode-high-contrast-light) .repo-dropdown {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   }
 
@@ -726,7 +727,8 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
-  :global(body.vscode-light) .flow-dropdown {
+  :global(body.vscode-light) .flow-dropdown,
+  :global(body.vscode-high-contrast-light) .flow-dropdown {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 
@@ -787,7 +789,8 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
-  :global(body.vscode-light) .flow-submenu {
+  :global(body.vscode-light) .flow-submenu,
+  :global(body.vscode-high-contrast-light) .flow-submenu {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 
