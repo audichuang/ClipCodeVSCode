@@ -62,6 +62,17 @@ export const zh: Record<string, string> = {
   'sidebar.pushAllTags': '推送所有标签',
   'sidebar.deleteRemoteTag': '从远程仓库删除',
 
+  /* SNIPCODE-HOOK start: X1-5 Commit workbench webview i18n */
+  // Commit workbench (the small webview above the Changes tree)
+  'workbench.commitTimeout': '提交超时，未收到结果，请刷新后确认状态。',
+  'workbench.committedCount': '已提交 {count} 个仓库',
+  'workbench.messagePlaceholder': '提交信息（共用一则，应用到所有已暂存的仓库）',
+  'workbench.commit': '提交',
+  'workbench.amend': '修正',
+  'workbench.amendTitle': '修正上一次提交（仅单一仓库；信息为空时会先带入旧信息）',
+  'workbench.amendPushedWarning': '该提交已推送到远程。amend 会改写已推送的历史。',
+  /* SNIPCODE-HOOK end */
+
   // Create branch modal
   'createBranch.title': '创建分支',
   'createBranch.desc': '创建新分支',
