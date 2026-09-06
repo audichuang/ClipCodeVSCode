@@ -23,12 +23,21 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
 
     /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
     const postCommitState = () => {
+      /* SNIPCODE-HOOK start: X1-5 workbench locale (same auto/vscode.env.language
+         pattern as MainPanel/DiffPanel) rides this existing boot/refresh message
+         instead of a new message type */
+      const localeSetting = vscode.workspace.getConfiguration('gitGraphPlus').get<string>('locale', 'auto');
+      const locale = localeSetting === 'auto' ? (vscode.env.language || 'en') : localeSetting;
+      /* SNIPCODE-HOOK end */
       void view.webview.postMessage({
         type: 'workbenchCommitState',
         payload: {
           stagedRepoCount: this.workbench.tree.getStagedRepoCount(),
           /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
           amendTargetPushed: this.workbench.tree.getAmendTargetPushed(),
+          /* SNIPCODE-HOOK end */
+          /* SNIPCODE-HOOK start: X1-5 workbench locale */
+          locale,
           /* SNIPCODE-HOOK end */
         },
       });
@@ -62,7 +71,9 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
           type: 'error',
           payload: { source: 'workbenchCommit', message: err instanceof Error ? err.message : String(err) },
         });
-        void vscode.window.showErrorMessage(`提交失敗：${err instanceof Error ? err.message : String(err)}`);
+        /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+        void vscode.window.showErrorMessage(vscode.l10n.t('Commit failed: {0}', err instanceof Error ? err.message : String(err)));
+        /* SNIPCODE-HOOK end */
       }
     });
   }

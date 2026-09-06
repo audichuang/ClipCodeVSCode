@@ -22,7 +22,6 @@ graph/webview-ui/**
 graph/node_modules/**
 graph/**/node_modules/**
 graph/.github/**
-graph/l10n/**
 graph/resources/**
 graph/*.md
 graph/*.mjs

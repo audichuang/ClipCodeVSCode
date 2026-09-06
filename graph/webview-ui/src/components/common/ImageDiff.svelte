@@ -144,7 +144,7 @@
             {/if}
           </div>
         {:else}
-          <div class="no-image">No image</div>
+          <div class="no-image">{t('image.noImage')}</div>
         {/if}
       </div>
       <div class="sbs-panel">
@@ -157,7 +157,7 @@
             {/if}
           </div>
         {:else}
-          <div class="no-image">No image</div>
+          <div class="no-image">{t('image.noImage')}</div>
         {/if}
       </div>
     </div>
