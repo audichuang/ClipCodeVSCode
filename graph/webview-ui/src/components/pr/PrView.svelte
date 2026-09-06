@@ -143,13 +143,18 @@
     /* SNIPCODE-HOOK end */
     loadingCommits = true;
     loadingFiles = true;
-    commits = [];
-    mergeBase = null;
-    ahead = 0;
-    behind = 0;
-    files = [];
-    diffs = []; // SNIPCODE-HOOK: PR tab inline diff (Task D2)
-    currentHunk = -1; // SNIPCODE-HOOK: PR tab prev/next-change nav (fix) — new compare, new hunk list
+    /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — do NOT clear
+       commits/mergeBase/ahead/behind/files/diffs here. This function now also
+       runs as a background refresh (see the branchStore.branches effect
+       below) while the previous compare's data is still on screen; clearing
+       it immediately would flash the view to empty/spinner on every commit,
+       fetch, or checkout while the PR tab is open. The requestId + base echo
+       guard in the commitsBetween handler already makes it safe to keep the
+       stale values until the fresh response lands and replaces them
+       atomically. (The `error` handler below still clears them, so a failed
+       refresh doesn't leave stale data on screen looking current.) */
+    currentHunk = -1; // new compare, new hunk list
+    /* SNIPCODE-HOOK end */
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
 
@@ -270,12 +275,22 @@
   // repo arrives (branchStore.setData reassigns the array); that's our signal
   // the switch has completed, so clear the flag and let the default-base effect
   // pick from the new list.
+  /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — a commit, fetch,
+     pull, or checkout while the PR tab is open triggers a host fullRefresh,
+     which re-posts branchData and so reassigns branchStore.branches even
+     when there was no repo switch. That's also our only signal that fresh ref
+     data has landed, so once a compare is already configured (base && head
+     both selected — this is NOT a repo switch, that path resets both to null
+     first, see the effect above) re-request the same compare to pick up any
+     new commits/ahead-behind/diff instead of silently going stale. */
   $effect(() => {
     if (branchStore.branches !== lastBranchesRef) {
       lastBranchesRef = branchStore.branches;
       awaitingBranches = false;
+      if (base && head) loadCommits(base, head);
     }
   });
+  /* SNIPCODE-HOOK end */
 
   // Pick a default base once branch data has arrived. Guarded on base===null
   // so this only ever fires once per repo (selectBase always sets a non-null
@@ -477,6 +492,20 @@
       if (msg.type === 'error' && msg.payload?.source === 'getCommitsBetween') {
         loadingCommits = false;
         loadingFiles = false;
+        /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — since
+           loadCommits no longer clears commits/files/diffs/mergeBase/ahead/
+           behind up front (see above), a failed refresh must clear them here
+           instead — otherwise a background refresh that errors (e.g. an
+           invalid ref after a branch was deleted) would silently leave the
+           PREVIOUS compare's data on screen looking current, with no
+           indication anything went wrong. */
+        commits = [];
+        files = [];
+        diffs = [];
+        mergeBase = null;
+        ahead = 0;
+        behind = 0;
+        /* SNIPCODE-HOOK end */
       }
       /* SNIPCODE-HOOK end */
     }
@@ -639,11 +668,18 @@
            response as commits, so a commit list still loading means the
            Files tab isn't ready either; without loadingCommits here this
            briefly rendered "No changed files" before commits arrived. -->
-      {#if loadingCommits || loadingFiles}
+      <!-- SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — only show
+           the spinner when there's nothing on screen yet (first ever load).
+           A background refresh (loadingFiles true with files already
+           populated from the previous compare) keeps showing that stale
+           content instead of blanking to a spinner; it's replaced in place
+           once the fresh response lands. -->
+      {#if (loadingCommits || loadingFiles) && files.length === 0}
         <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
       {:else if files.length === 0}
         <div class="pr-empty">{t('pr.noFiles')}</div>
       {:else}
+      <!-- SNIPCODE-HOOK end -->
         <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file
              list (click scrolls to the matching section at right) + right
              stacked FileDiffView per changed file, reusing Task D1's
@@ -708,7 +744,7 @@
         </div>
         <!-- SNIPCODE-HOOK end -->
       {/if}
-    {:else if loadingCommits}
+    {:else if loadingCommits && commits.length === 0}
       <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
     {:else if commits.length === 0}
       <div class="pr-empty">{t('pr.noCommits')}</div>

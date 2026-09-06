@@ -172,6 +172,59 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
   });
 });
 
+// SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — a commit, fetch,
+// pull, or checkout while the PR tab is open re-posts branchData (host
+// fullRefresh), which reassigns branchStore.branches to a new array even
+// though there was no repo switch. Once a compare is already configured
+// (base && head both selected) that must re-request the same compare instead
+// of leaving the PR tab showing stale commits/files/ahead-behind forever.
+describe('PrView — stale-data refresh (P1/R7)', () => {
+  it('reassigning branchStore.branches (a host branchData/fullRefresh arrival) re-requests getCommitsBetween for the current compare', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+    const firstReqId = currentRequestId();
+
+    globalThis.__postedMessages = [];
+    // New array reference, same content — this is exactly what
+    // branchStore.setData() does on every fullRefresh, repo switch or not.
+    branchStore.branches = [...branchStore.branches];
+
+    await waitFor(() => {
+      const req = lastMessageOf('getCommitsBetween');
+      expect(req?.payload).toEqual({ base: 'origin/main', head: 'feat', requestId: currentRequestId() });
+      expect(req?.payload.requestId).not.toBe(firstReqId);
+    });
+  });
+
+  it('does not clear the currently-shown files while a background refresh is in flight (no flicker)', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb1', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }],
+    });
+    await waitFor(() => expect(container.textContent).toContain('src/a.ts'));
+
+    globalThis.__postedMessages = [];
+    branchStore.branches = [...branchStore.branches]; // triggers the background refresh
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+
+    // The refresh request is now in flight (no response delivered yet), but
+    // the previous compare's file must still be visible — no spinner, no
+    // "No changed files" flash.
+    expect(container.textContent).toContain('src/a.ts');
+    expect(document.querySelector('.spinner')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end
+
 describe('PrView — Copy Full Source', () => {
   function setupWithFiles() {
     branchStore.branches = [
