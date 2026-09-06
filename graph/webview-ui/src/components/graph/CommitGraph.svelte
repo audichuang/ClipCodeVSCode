@@ -677,6 +677,13 @@
     return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
   }
 
+  /* SNIPCODE-HOOK start: R1 — double-click on a row no longer checks out a
+     branch with zero confirmation (R1). This function had no other caller
+     once the row's `ondblclick` is removed; the badge's own dblclick handler
+     (which still offers the same fast-forward/checkout, with its own
+     tooltip warning) is the only remaining double-click checkout entry
+     point, so this dead handler is removed rather than left unreachable. */
+  /* SNIPCODE-HOOK end */
 
   function selectCommit(hash: string) {
     navPath = [];
