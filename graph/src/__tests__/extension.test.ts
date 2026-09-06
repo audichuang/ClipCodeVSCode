@@ -204,4 +204,39 @@ describe('activate', () => {
       defaultPath: '/repos/project.worktrees',
     });
   });
+
+  /* SNIPCODE-HOOK start: S16 branch/tag QuickPick filtering */
+  it('showBranchMenu hides Checkout/Delete for the current branch', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showBranchMenu']({ branch: { name: 'main', current: true } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).not.toContain('checkout');
+    expect(items.map((i) => i.id)).not.toContain('delete');
+    expect(items.map((i) => i.id)).toContain('rename'); // still allowed on the current branch
+  });
+
+  it('showBranchMenu keeps Checkout/Delete for a non-current branch', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showBranchMenu']({ branch: { name: 'feature/x', current: false } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).toContain('checkout');
+    expect(items.map((i) => i.id)).toContain('delete');
+  });
+
+  it('showTagMenu offers a Checkout option', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showTagMenu']({ tag: { name: 'v1.0.0' } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).toContain('checkout');
+  });
+  /* SNIPCODE-HOOK end */
 });

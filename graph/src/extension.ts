@@ -778,15 +778,19 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('gitGraphPlus.showBranchMenu', (branchItem) => {
       const branch = branchItem?.branch;
       if (branch) {
+        /* SNIPCODE-HOOK start: S16 hide Checkout/Delete for the current branch */
+        // Checking out or deleting the branch you're already on makes no sense
+        // (the context menu already excludes both for `branch-current`).
         vscode.window.showQuickPick([
-          { label: `Checkout ${branch.name}`, id: 'checkout' },
+          ...(branch.current ? [] : [{ label: `Checkout ${branch.name}`, id: 'checkout' }]),
           { label: `Merge into current branch...`, id: 'merge' },
           /* SNIPCODE-HOOK start: whole-branch copy */
           { label: `Copy all commits on ${branch.name}`, id: 'copySeries' },
           /* SNIPCODE-HOOK end */
           { label: `Rename ${branch.name}...`, id: 'rename' },
-          { label: `Delete ${branch.name}...`, id: 'delete' },
+          ...(branch.current ? [] : [{ label: `Delete ${branch.name}...`, id: 'delete' }]),
         ]).then(selected => {
+          /* SNIPCODE-HOOK end */
           if (!selected) return;
           switch (selected.id) {
             case 'checkout': vscode.commands.executeCommand('gitGraphPlus.checkoutBranch', branchItem); break;
@@ -804,12 +808,23 @@ export function activate(context: vscode.ExtensionContext) {
       const tag = tagItem?.tag;
       if (tag) {
         vscode.window.showQuickPick([
+          /* SNIPCODE-HOOK start: S16 Tag QuickPick gets a Checkout option too (context menu already has one) */
+          { label: `Checkout ${tag.name}`, id: 'checkout' },
+          /* SNIPCODE-HOOK end */
           { label: `Push ${tag.name} to remote`, id: 'push' },
           { label: `Delete tag ${tag.name}`, id: 'delete' },
           { label: `Delete remote tag ${tag.name}`, id: 'deleteRemote' },
         ]).then(selected => {
           if (!selected) return;
           switch (selected.id) {
+            /* SNIPCODE-HOOK start: S16 Tag QuickPick gets a Checkout option too (context menu already has one) */
+            case 'checkout':
+              activeGitService.checkout(tag.name).then(() => {
+                refreshAll();
+                MainPanel.currentPanel?.postRefresh();
+              }).catch(err => vscode.window.showErrorMessage(err.message));
+              break;
+            /* SNIPCODE-HOOK end */
             case 'push': vscode.commands.executeCommand('gitGraphPlus.pushTag', tagItem); break;
             case 'delete': vscode.commands.executeCommand('gitGraphPlus.deleteTag', tagItem); break;
             case 'deleteRemote': vscode.commands.executeCommand('gitGraphPlus.deleteRemoteTag', tagItem); break;
