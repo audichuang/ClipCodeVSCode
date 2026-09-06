@@ -4,7 +4,7 @@ import { renameSync } from 'node:fs';
 import { join } from 'node:path';
 /* SNIPCODE-HOOK end */
 /* SNIPCODE-HOOK start: S4 discardPaths integration */
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 /* SNIPCODE-HOOK end */
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
@@ -156,6 +156,51 @@ describe('GitService integration — real staging (stagePaths/unstagePaths/commi
       nestedRepo.cleanup();
     }
   });
+
+  /* SNIPCODE-HOOK start: F1 discard must restore from the index, not HEAD */
+  it('MM: discard reverts only the unstaged edit — worktree matches the INDEX version, index untouched', async () => {
+    writeFile(repo.path, 'a.txt', 'a2\n');
+    await svc.stagePaths(['a.txt']); // index now has a2 (staged edit)
+    writeFile(repo.path, 'a.txt', 'a3\n'); // further unstaged edit on top
+
+    await svc.discardPaths([{ path: 'a.txt', status: 'M' }]);
+
+    // Worktree drops back to the staged (index) content, NOT the original
+    // HEAD content — a `--source=HEAD` restore would wrongly land on 'a1'.
+    expect(runGit(repo.path, ['show', ':a.txt']).trim()).toBe('a2');
+    const worktreeContent = readFileSync(join(repo.path, 'a.txt'), 'utf-8');
+    expect(worktreeContent).toBe('a2\n');
+    // Staged change survives — discard is worktree-only.
+    expect(runGit(repo.path, ['diff', '--cached', '--name-only']).trim()).toBe('a.txt');
+  });
+
+  it('AM: discard on a staged-then-edited new file keeps the file, restored to the staged (index) content', async () => {
+    writeFile(repo.path, 'new.txt', 'v1\n');
+    await svc.stagePaths(['new.txt']); // staged add, absent from HEAD
+    writeFile(repo.path, 'new.txt', 'v2\n'); // further unstaged edit
+
+    await svc.discardPaths([{ path: 'new.txt', status: 'M' }]);
+
+    // A `--source=HEAD` restore would delete this file (HEAD has no such
+    // path) — the fix must leave it in place, at the staged content.
+    expect(existsSync(join(repo.path, 'new.txt'))).toBe(true);
+    const worktreeContent = readFileSync(join(repo.path, 'new.txt'), 'utf-8');
+    expect(worktreeContent).toBe('v1\n');
+    expect(runGit(repo.path, ['diff', '--cached', '--name-only']).trim()).toBe('new.txt');
+  });
+
+  it('staged-only (M in index, clean worktree): discard is a no-op', async () => {
+    writeFile(repo.path, 'a.txt', 'a2\n');
+    await svc.stagePaths(['a.txt']); // staged, worktree already matches index
+
+    await svc.discardPaths([{ path: 'a.txt', status: 'M' }]);
+
+    expect(runGit(repo.path, ['show', ':a.txt']).trim()).toBe('a2');
+    const worktreeContent = readFileSync(join(repo.path, 'a.txt'), 'utf-8');
+    expect(worktreeContent).toBe('a2\n');
+    expect(runGit(repo.path, ['status', '--porcelain']).trim()).toBe('M  a.txt');
+  });
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   it('unstagePaths under an unborn HEAD (no commits) unstages via rm --cached', async () => {

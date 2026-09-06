@@ -740,6 +740,16 @@ describe('FileDiffView rename/mode-only empty-hunks explanation', () => {
     expect(container.querySelector('.diff-empty-meta')).toBeNull();
     expect(container.querySelectorAll('.diff-content .diff-line').length).toBeGreaterThan(0);
   });
+
+  /* SNIPCODE-HOOK start: F4 renamed-from note also shown above hunks */
+  it('a rename+modify (non-empty hunks) still shows the "Renamed from" note above the hunks', () => {
+    const diff = { ...sampleDiff(), oldPath: 'old.ts', similarity: 88 };
+    const { container } = render(FileDiffView, { diff });
+    expect(container.querySelector('.diff-empty-meta')).toBeNull();
+    expect(container.querySelector('.diff-rename-note')!.textContent).toContain('Renamed from old.ts (similarity 88%)');
+    expect(container.querySelectorAll('.diff-content .diff-line').length).toBeGreaterThan(0);
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
 

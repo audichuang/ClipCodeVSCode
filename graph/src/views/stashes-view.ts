@@ -47,11 +47,13 @@ export class StashesViewProvider implements vscode.TreeDataProvider<StashItem> {
 
 class StashItem extends vscode.TreeItem {
   constructor(public readonly stash: StashEntry) {
-    /* SNIPCODE-HOOK start: S P2 the message is the primary label, stash@{n} is secondary */
+    /* SNIPCODE-HOOK start: S P2 the message is the primary label, stash@{n} is secondary
+     * With no message, stash@{n} IS the label — putting it in `description` too
+     * would duplicate it right next to itself, so description stays empty then. */
     super(stash.message || `stash@{${stash.index}}`, vscode.TreeItemCollapsibleState.None);
     this.contextValue = 'stash';
     this.iconPath = new vscode.ThemeIcon('archive');
-    this.description = `stash@{${stash.index}}`;
+    this.description = stash.message ? `stash@{${stash.index}}` : '';
     /* SNIPCODE-HOOK end */
     this.tooltip = `${stash.message}\n${stash.date}`;
 
