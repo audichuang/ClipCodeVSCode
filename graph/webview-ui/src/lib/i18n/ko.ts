@@ -716,4 +716,7 @@ export const ko: Record<string, string> = {
   'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
   'pr.into': '→',
   /* SNIPCODE-HOOK end */
+
+  // ui/diff
+  'diff.noNewlineAtEof': '파일 끝에 줄바꿈 없음',
 };

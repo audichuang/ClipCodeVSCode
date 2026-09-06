@@ -156,6 +156,11 @@ export interface DiffLine {
   content: string;
   oldLineNumber?: number;
   newLineNumber?: number;
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  /** Set when this line is immediately followed by git's `\ No newline at end
+   *  of file` marker — i.e. this line has no trailing newline in that blob. */
+  noNewline?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface WorktreeInfo {

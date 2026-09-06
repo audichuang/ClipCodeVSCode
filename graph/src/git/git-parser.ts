@@ -320,6 +320,14 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
         });
         oldLineNum++;
         newLineNum++;
+      /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+      } else if (line.startsWith('\\')) {
+        // `\ No newline at end of file` always follows the +/-/context line it
+        // describes — flag that just-pushed line rather than emitting a phantom
+        // DiffLine for the marker itself.
+        const last = currentHunk.lines[currentHunk.lines.length - 1];
+        if (last) last.noNewline = true;
+      /* SNIPCODE-HOOK end */
       }
     }
 
