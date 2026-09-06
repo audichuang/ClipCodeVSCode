@@ -2305,18 +2305,28 @@
   /* Light theme: the raw palette averages ~1.5–2.3:1 contrast against white
      (measured), well under WCAG's 3:1 graphical-object floor. Darken toward
      black in oklab (perceptually even mixing) rather than adding a whole
-     second palette to maintain. */
-  :global(body.vscode-light) .graph-lines .rail {
+     second palette to maintain.
+     C7 — VS Code puts `vscode-high-contrast-light` on body for HC Light,
+     NOT `vscode-light` (see lib/utils/highlighter.ts's identical note), so
+     this rule needs both selectors or HC Light silently falls back to the
+     raw (low-contrast) dark-theme palette on its light background. */
+  :global(body.vscode-light) .graph-lines .rail,
+  :global(body.vscode-high-contrast-light) .graph-lines .rail {
     stroke: color-mix(in oklab, var(--c) 72%, #000);
   }
-  :global(body.vscode-light) .graph-lines .dot-fill {
+  :global(body.vscode-light) .graph-lines .dot-fill,
+  :global(body.vscode-high-contrast-light) .graph-lines .dot-fill {
     fill: color-mix(in oklab, var(--c) 72%, #000);
   }
-  :global(body.vscode-light) .graph-lines .dot-ring {
+  :global(body.vscode-light) .graph-lines .dot-ring,
+  :global(body.vscode-high-contrast-light) .graph-lines .dot-ring {
     stroke: color-mix(in oklab, var(--c) 72%, #000);
   }
 
-  :global(body.vscode-high-contrast) .graph-lines .rail {
+  /* C7 — high-contrast bolder rail applies to both HC variants (dark and
+     light), not just `vscode-high-contrast` (HC dark). */
+  :global(body.vscode-high-contrast) .graph-lines .rail,
+  :global(body.vscode-high-contrast-light) .graph-lines .rail {
     stroke-width: 2.5;
   }
   /* SNIPCODE-HOOK end */
@@ -2749,21 +2759,29 @@
     content: none;
   }
 
-  /* Light theme overrides */
-  :global(body.vscode-light) .ref-badge {
+  /* Light theme overrides. */
+  /* SNIPCODE-HOOK start: C7 — also match HC Light (`vscode-high-contrast-light`,
+     a light background, same as plain light) instead of just `vscode-light`;
+     the HC-dark override below (white text on transparent) would be invisible
+     here, so HC Light needs these dark-on-light rules, not that one. */
+  :global(body.vscode-light) .ref-badge,
+  :global(body.vscode-high-contrast-light) .ref-badge {
     background: rgba(0, 0, 0, 0.04);
     color: #000;
     border: 1px solid rgba(0, 0, 0, 0.15);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-fixed {
+  :global(body.vscode-light) .ref-badge.badge-fixed,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-fixed {
     background: color-mix(in srgb, var(--badge-color) var(--fixed-tint, 20%), #fff);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-head {
+  :global(body.vscode-light) .ref-badge.badge-head,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-head {
     background: color-mix(in srgb, var(--badge-color) 70%, #fff);
     color: #000;
   }
+  /* SNIPCODE-HOOK end */
 
   /* High contrast overrides */
   :global(body.vscode-high-contrast) .ref-badge {
