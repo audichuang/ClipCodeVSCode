@@ -123,4 +123,14 @@
 
   .conflict-status.is-warning { color: #f0a020; }
   .conflict-status.is-success { color: #4caf50; }
+
+  /* SNIPCODE-HOOK start: live-QA-7 the dark-theme amber/green measure about
+     2.15:1 on a white background — the merge-prediction line was the palest
+     text in the dialog on light themes. Same darker pair the other light
+     overrides use (App.svelte's conflict icons, ColorSelect's warning). */
+  :global(body.vscode-light) .conflict-status.is-warning,
+  :global(body.vscode-high-contrast-light) .conflict-status.is-warning { color: #9a6700; }
+  :global(body.vscode-light) .conflict-status.is-success,
+  :global(body.vscode-high-contrast-light) .conflict-status.is-success { color: #2e7d32; }
+  /* SNIPCODE-HOOK end */
 </style>

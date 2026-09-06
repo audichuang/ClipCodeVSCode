@@ -86,6 +86,19 @@ describe('BisectBanner — finished message parsing', () => {
     expect(summary?.textContent).toBe('Broke the parser by inverting the condition');
   });
 
+  /* SNIPCODE-HOOK start: live-QA-6 git 2.55 quotes the term. The message above
+     is git 2.43's wording; this is the same run on a newer git, and the banner
+     must reach the same finished state (it used to stay stuck "in progress"). */
+  it('flags finished for git 2.55\'s quoted wording too', () => {
+    const quoted = finishedMsg.replace('is the first bad commit', "is the first 'bad' commit");
+    const { container } = render(BisectBanner, { message: quoted, onReset: vi.fn() });
+    expect(container.querySelector('.bisect-banner.finished')).not.toBeNull();
+    expect(container.querySelector('.bisect-culprit .bisect-hash')?.textContent).toBe('abc1234');
+    expect(container.querySelector('.bisect-summary')?.textContent)
+      .toBe('Broke the parser by inverting the condition');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('hides Good/Bad/Skip buttons once finished, keeps only Reset', () => {
     const { container } = render(BisectBanner, { message: finishedMsg, onReset: vi.fn() });
     const buttons = container.querySelectorAll('button');
