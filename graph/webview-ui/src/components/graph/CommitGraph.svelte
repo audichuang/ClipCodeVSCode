@@ -1240,6 +1240,15 @@
           action: () => { uiStore.exitMultiSelect(); },
         });
       } else {
+        /* SNIPCODE-HOOK start: M6 — a standing entry point into multi-select,
+           since previously the only way in was an unlabeled Ctrl/Shift+click
+           (uiStore.enterMultiSelect existed but no menu ever called it). */
+        compareGroup.push({
+          label: t('graph.selectForCompare'),
+          icon: 'checklist',
+          action: () => { uiStore.enterMultiSelect(commit.hash); },
+        });
+        /* SNIPCODE-HOOK end */
       }
       // ── Bisect ── (shares the compare/inspect group)
       if (bisectBadCommit) {
