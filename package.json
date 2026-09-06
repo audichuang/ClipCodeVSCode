@@ -574,9 +574,54 @@
           "group": "inline"
         },
         {
+          "command": "snipcode.git.stage",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.unstage",
+          "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.markResolved",
+          "when": "view == snipcode.changes && viewItem == file-conflict",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.stageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.unstageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-staged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.openChange",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@1"
+        },
+        {
+          "command": "snipcode.git.showDiff",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@2"
+        },
+        {
+          "command": "snipcode.git.discard",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "3_discard@1"
+        },
+        {
+          "command": "snipcode.git.discardRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "3_discard@1"
+        },
+        {
           "command": "snipcode.git.copyAsClipCode",
           "when": "view == snipcode.changes && viewItem =~ /^(file|repo|group)-/",
-          "group": "navigation@10"
+          "group": "9_copy@1"
         },
         {
           "command": "clipcode.history.copyFullSource",
