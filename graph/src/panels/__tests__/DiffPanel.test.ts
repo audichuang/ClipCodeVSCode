@@ -84,8 +84,10 @@ describe('DiffPanel', () => {
   it('show() fetches both sides and posts one diffShow with stagedDiff + unstagedDiff', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
-    expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'staged');
-    expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'unstaged');
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'staged', undefined);
+    expect(wb.fileDiffData).toHaveBeenCalledWith('/r', 'a.ts', 'unstaged', undefined);
+    /* SNIPCODE-HOOK end */
     expect(diffShows()).toEqual([
       /* SNIPCODE-HOOK start: Batch B image request identity */
       { type: 'diffShow', payload: { repoPath: '/r', file: 'a.ts', generation: expect.any(Number), stagedDiff, unstagedDiff, fetchError: null } },
@@ -165,9 +167,13 @@ describe('DiffPanel', () => {
     await shownPanel(wb);
     /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
     await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 2, fingerprint: 'unstaged-fp', operationId: 'op-1' } });
-    expect(wb.stageHunks).toHaveBeenCalledWith('/r', 'a.ts', [2], 'unstaged-fp', 'op-1');
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    expect(wb.stageHunks).toHaveBeenCalledWith('/r', 'a.ts', [2], 'unstaged-fp', 'op-1', undefined);
+    /* SNIPCODE-HOOK end */
     await H.messageHandler!({ type: 'diffStageHunk', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 0, fingerprint: 'staged-fp', operationId: 'op-2' } });
-    expect(wb.unstageHunks).toHaveBeenCalledWith('/r', 'a.ts', [0], 'staged-fp', 'op-2');
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    expect(wb.unstageHunks).toHaveBeenCalledWith('/r', 'a.ts', [0], 'staged-fp', 'op-2', undefined);
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   });
 
@@ -176,9 +182,13 @@ describe('DiffPanel', () => {
     await shownPanel(wb);
     /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
     await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 1, lineIndices: [0, 2], fingerprint: 'unstaged-fp', operationId: 'op-1' } });
-    expect(wb.stageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [0, 2], 'unstaged-fp', 'op-1');
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    expect(wb.stageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [0, 2], 'unstaged-fp', 'op-1', undefined);
+    /* SNIPCODE-HOOK end */
     await H.messageHandler!({ type: 'diffStageLines', payload: { repoPath: '/r', file: 'a.ts', side: 'staged', hunkIndex: 1, lineIndices: [1], fingerprint: 'staged-fp', operationId: 'op-2' } });
-    expect(wb.unstageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [1], 'staged-fp', 'op-2');
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    expect(wb.unstageLines).toHaveBeenCalledWith('/r', 'a.ts', 1, [1], 'staged-fp', 'op-2', undefined);
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   });
 
