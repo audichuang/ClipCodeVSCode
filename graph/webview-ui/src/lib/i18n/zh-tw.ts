@@ -686,6 +686,9 @@ export const zhTw: Record<string, string> = {
   'file.stageBlock': '暫存此變更塊',
   'file.unstageBlock': '取消暫存此變更塊',
   'file.lines': '行',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}：第 {range} 行',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': '複製',
   'file.copyLines': '複製行',
   'lfs.lock': 'LFS 鎖定',
@@ -766,6 +769,9 @@ export const zhTw: Record<string, string> = {
   'image.onionSkin': '疊加對比',
   'image.before': '之前',
   'image.after': '之後',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': '無圖片',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': '關閉（Esc）',
   'toolbar.historyDesc': 'Graph（Ctrl+1）',

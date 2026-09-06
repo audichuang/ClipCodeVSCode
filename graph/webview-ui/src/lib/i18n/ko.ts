@@ -683,6 +683,9 @@ export const ko: Record<string, string> = {
   'file.stageBlock': '변경 블록 스테이지',
   'file.unstageBlock': '변경 블록 스테이지 해제',
   'file.lines': '줄',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}: {range}줄',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': '복사',
   'file.copyLines': '줄 복사',
   'lfs.lock': 'LFS 잠금',
@@ -763,6 +766,9 @@ export const ko: Record<string, string> = {
   'image.onionSkin': '어니언 스킨',
   'image.before': '이전',
   'image.after': '이후',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': '이미지 없음',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': '닫기 (Esc)',
   'toolbar.historyDesc': 'Graph (Ctrl+1)',

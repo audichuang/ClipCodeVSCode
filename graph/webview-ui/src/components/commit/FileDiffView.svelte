@@ -262,7 +262,9 @@
     const count = useNew ? hunk.newLines : hunk.oldLines;
     const end = start + Math.max(count, 1) - 1;
     const range = end > start ? `${start}-${end}` : `${start}`;
-    return `Hunk ${hunkIdx + 1}: ${t('file.lines')} ${range}`;
+    /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+    return t('file.hunkLabel', { n: hunkIdx + 1, range });
+    /* SNIPCODE-HOOK end */
   }
 
   function getFileName(path: string): string {

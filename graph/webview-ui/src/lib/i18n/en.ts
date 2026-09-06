@@ -682,6 +682,9 @@ export const en: Record<string, string> = {
   'file.stageBlock': 'Stage Change Block',
   'file.unstageBlock': 'Unstage Change Block',
   'file.lines': 'Lines',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}: Lines {range}',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': 'Copy',
   'file.copyLines': 'Copy Lines',
 
@@ -765,6 +768,9 @@ export const en: Record<string, string> = {
   'image.onionSkin': 'Onion Skin',
   'image.before': 'Before',
   'image.after': 'After',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': 'No image',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': 'Close (Esc)',
   'toolbar.historyDesc': 'Graph (Ctrl+1)',
