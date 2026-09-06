@@ -756,6 +756,52 @@ describe('GitService', () => {
     /* SNIPCODE-HOOK end */
   });
 
+  /* SNIPCODE-HOOK start: S4 discardPaths */
+  describe('discardPaths', () => {
+    it('restores tracked paths from HEAD (worktree only) and cleans untracked paths separately', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([
+        { path: 'a.ts', status: 'M' },
+        { path: 'new.ts', status: 'U' },
+      ]);
+
+      expect(calls).toEqual([
+        ['restore', '--worktree', '--source=HEAD', '--', 'a.ts'],
+        ['clean', '-f', '--', 'new.ts'],
+      ]);
+    });
+
+    it('discards both the old and new path of a staged-then-modified rename', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([{ path: 'renamed.ts', status: 'R', oldPath: 'old.ts' }]);
+
+      expect(calls).toEqual([['restore', '--worktree', '--source=HEAD', '--', 'renamed.ts', 'old.ts']]);
+    });
+
+    it('never touches a nested repo directory (status N)', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([{ path: 'vendor-lib', status: 'N' }]);
+
+      expect(calls).toEqual([]);
+    });
+
+    it('is a no-op on an empty list', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([]);
+
+      expect(calls).toEqual([]);
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */
   describe('selective staging raw diff failures', () => {
     it('surfaces the git failure instead of reporting no unstaged changes', async () => {

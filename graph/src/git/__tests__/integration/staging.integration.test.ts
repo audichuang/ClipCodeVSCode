@@ -3,6 +3,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { renameSync } from 'node:fs';
 import { join } from 'node:path';
 /* SNIPCODE-HOOK end */
+/* SNIPCODE-HOOK start: S4 discardPaths integration */
+import { existsSync, mkdirSync } from 'node:fs';
+/* SNIPCODE-HOOK end */
 import { GitService } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
 
@@ -113,6 +116,45 @@ describe('GitService integration — real staging (stagePaths/unstagePaths/commi
     const afterResolve = await svc.getUncommittedDiff();
     expect(afterResolve.conflict).toEqual([]);
     expect(afterResolve.staged.map(e => e.path)).toContain('a.txt');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S4 discardPaths integration */
+  it('discardPaths reverts a tracked working-tree edit and leaves staged changes untouched', async () => {
+    writeFile(repo.path, 'a.txt', 'a2\n'); // unstaged edit
+    writeFile(repo.path, 'b.txt', 'b2\n');
+    await svc.stagePaths(['b.txt']); // b.txt is staged, must survive discard of a.txt
+
+    await svc.discardPaths([{ path: 'a.txt', status: 'M' }]);
+
+    expect(runGit(repo.path, ['status', '--porcelain']).trim()).toBe('M  b.txt');
+    expect(runGit(repo.path, ['show', ':a.txt']).trim()).toBe('a1'); // back to HEAD content
+  });
+
+  it('discardPaths removes an untracked file from disk via git clean', async () => {
+    writeFile(repo.path, 'new.txt', 'hi\n');
+    await svc.discardPaths([{ path: 'new.txt', status: 'U' }]);
+
+    const diff = await svc.getUncommittedDiff();
+    expect(diff.unstaged).toEqual([]);
+    expect(existsSync(join(repo.path, 'new.txt'))).toBe(false);
+  });
+
+  it('discardPaths never runs git clean on a nested repo directory (status N)', async () => {
+    const nestedRepo = createTempRepo();
+    try {
+      const nestedDirName = 'vendor-lib';
+      mkdirSync(join(repo.path, nestedDirName), { recursive: true });
+      // A .git dir marks it as its own repo — untracked, surfaces as status N.
+      renameSync(join(nestedRepo.path, '.git'), join(repo.path, nestedDirName, '.git'));
+      writeFile(repo.path, `${nestedDirName}/README.md`, 'nested\n');
+
+      await svc.discardPaths([{ path: nestedDirName, status: 'N' }]);
+
+      expect(existsSync(join(repo.path, nestedDirName, '.git'))).toBe(true);
+    } finally {
+      nestedRepo.cleanup();
+    }
   });
   /* SNIPCODE-HOOK end */
 

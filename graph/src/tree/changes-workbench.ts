@@ -234,6 +234,37 @@ export class ChangesWorkbench implements vscode.Disposable {
     await this.refresh();
   }
 
+  /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+  /** Revert the working-tree edits for the selected unstaged file(s) — tracked
+   *  paths restore from HEAD, untracked paths are deleted. Destructive and
+   *  unrecoverable, so it always confirms via a modal warning first. */
+  private async discard(nodes: FileNode[]): Promise<void> {
+    if (nodes.length === 0) return;
+    const label = nodes.length === 1 ? nodes[0].path : `${nodes.length} 個檔案`;
+    const confirmed = await vscode.window.showWarningMessage(
+      `捨棄 ${label} 的變更？此動作無法復原。`,
+      { modal: true },
+      '捨棄',
+    );
+    if (confirmed !== '捨棄') return;
+    await this.byRepo(nodes, (svc, changes) => svc.discardPaths(changes));
+  }
+
+  /** Discard every unstaged file of one repo (the repo node under Unstaged). */
+  private async discardRepo(node: RepoNode): Promise<void> {
+    const files = node.files.filter(f => f.status !== 'N');
+    if (files.length === 0) return;
+    const confirmed = await vscode.window.showWarningMessage(
+      `捨棄 ${node.repoName} 中 ${files.length} 個檔案的變更？此動作無法復原。`,
+      { modal: true },
+      '捨棄',
+    );
+    if (confirmed !== '捨棄') return;
+    await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).discardPaths(files));
+    await this.refresh();
+  }
+  /* SNIPCODE-HOOK end */
+
   /** Flatten any selected node(s) — file, repo, or group — to their file nodes. */
   private nodeFiles(node: ChangeTreeNode): FileNode[] {
     if (node.kind === 'file') return [node];
@@ -453,6 +484,10 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
+    /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+    reg('snipcode.git.discard', (n, ns) => this.discard(sameGroup(n, ns)));
+    reg('snipcode.git.discardRepo', (n) => this.discardRepo(n as RepoNode));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
