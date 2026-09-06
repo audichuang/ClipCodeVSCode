@@ -21,6 +21,16 @@ function makeCommit(hash: string, subject: string, parents: string[] = []): Comm
   };
 }
 
+/* SNIPCODE-HOOK start: M5 — menu items now optionally render a leading
+   codicon <i>, so a leaf-menu-item is no longer necessarily children.length
+   === 0 (an icon adds one child). Match on the menu-item button itself
+   instead of a childless-leaf heuristic. */
+function findMenuItem(container: HTMLElement, re: RegExp): HTMLElement | undefined {
+  return Array.from(container.querySelectorAll<HTMLElement>('button.menu-item'))
+    .find(el => re.test((el.textContent ?? '').trim()));
+}
+/* SNIPCODE-HOOK end */
+
 function makeGraphData(commits: Commit[]): CommitGraphData {
   return {
     commits,
@@ -148,8 +158,7 @@ describe('CommitGraph smoke', () => {
     await fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await tick();
     // The single menu item is "Amend '{ref}'" (ref = current branch); click it.
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^amend 'main'$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^amend 'main'$/i);
     expect(item).toBeTruthy();
     await fireEvent.click(item!);
     await tick();
@@ -173,8 +182,7 @@ describe('CommitGraph smoke', () => {
     const row = container.querySelectorAll<HTMLElement>('.commit-row')[0]; // HEAD row
     await fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await tick();
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^amend commit$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^amend commit$/i);
     expect(item).toBeTruthy();
     await fireEvent.click(item!);
     await tick();
@@ -207,8 +215,7 @@ describe('CommitGraph smoke', () => {
       await fireEvent.mouseEnter(parentBtn);
       await tick();
     }
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^new worktree$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^new worktree$/i);
     expect(item).toBeTruthy();
     await fireEvent.click(item!);
     await tick();
@@ -235,8 +242,7 @@ describe('CommitGraph smoke', () => {
     await fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await tick();
     // Top-level (flat) item is present WITHOUT hovering into the branch submenu.
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^new worktree$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^new worktree$/i);
     expect(item).toBeTruthy();
     await fireEvent.click(item!);
     await tick();
@@ -311,8 +317,7 @@ describe('CommitGraph signature icon', () => {
     await fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await tick();
 
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^interactive rebase \d+ commits$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^interactive rebase \d+ commits$/i);
     expect(item).toBeTruthy();
 
     uiStore.exitMultiSelect();
@@ -342,8 +347,7 @@ describe('CommitGraph signature icon', () => {
     await fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await tick();
 
-    const item = Array.from(container.querySelectorAll<HTMLElement>('*'))
-      .find(el => el.children.length === 0 && /^interactive rebase \d+ commits$/i.test((el.textContent ?? '').trim()));
+    const item = findMenuItem(container, /^interactive rebase \d+ commits$/i);
     expect(item).toBeTruthy();
 
     uiStore.exitMultiSelect();

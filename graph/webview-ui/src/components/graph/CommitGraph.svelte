@@ -1102,17 +1102,23 @@
     // Groups are collected separately, then joined with separators at the end.
     // Each non-empty group gets a separator before it (after the refs block).
     const groups: any[][] = [];
+    /* SNIPCODE-HOOK start: M5 — Checkout + Copy SHA moved to the first group
+       (were buried in the 4th/last group); populated below, unshifted onto
+       `groups` right before the flatten step. */
+    const topGroup: any[] = [];
+    /* SNIPCODE-HOOK end */
 
     if (!isStashCommit) {
       // ── Create ──
       const createGroup: any[] = [
-        { label: t('graph.createBranchHere'), action: () => { modalStore.openCreateBranch(commit.hash, commit.subject); } },
-        { label: t('graph.newTag'),           action: () => { modalStore.openCreateTag(commit.hash, commit.subject); } },
+        { label: t('graph.createBranchHere'), icon: 'git-branch', action: () => { modalStore.openCreateBranch(commit.hash, commit.subject); } },
+        { label: t('graph.newTag'),           icon: 'tag',        action: () => { modalStore.openCreateTag(commit.hash, commit.subject); } },
       ];
       const worktreeStartRef = commit.refs.find(r => r.type === 'head' || r.type === 'branch');
       if (worktreeStartRef) {
         createGroup.push({
           label: t('graph.createWorktree'),
+          icon: 'empty-window',
           action: () => vscode.postMessage({ type: 'worktreeAddModalRequest', payload: { startPoint: worktreeStartRef.name } }),
         });
       }
@@ -1127,20 +1133,23 @@
         const tagRef    = commit.refs.find(r => r.type === 'tag');
         const mergeRef  = localRef?.name ?? (remoteRef ? `${remoteRef.remote}/${remoteRef.name}` : undefined) ?? tagRef?.name ?? commit.hash;
         if (mergeRef !== currentBranch) {
-          branchOps.push({ label: t('graph.mergeInto', { branch: currentBranch }), action: () => { modalStore.openMerge(mergeRef, branchStore.currentBranch?.name ?? 'current branch'); } });
+          branchOps.push({ label: t('graph.mergeInto', { branch: currentBranch }), icon: 'git-merge', action: () => { modalStore.openMerge(mergeRef, branchStore.currentBranch?.name ?? 'current branch'); } });
         }
       }
       const isOnCurrentBranch = currentBranchCommits.has(commit.hash);
       if (!isOnCurrentBranch) {
-        branchOps.push({ label: t('graph.rebaseTo', { branch: currentBranch }), action: () => { rebaseTarget = commit.hash; showRebaseModal = true; } });
+        branchOps.push({ label: t('graph.rebaseTo', { branch: currentBranch }), icon: 'git-pull-request', action: () => { rebaseTarget = commit.hash; showRebaseModal = true; } });
       }
-      branchOps.push({ label: t('graph.interactiveRebaseTo', { branch: currentBranch }), action: () => { interactiveRebaseBase = commit.hash; } });
+      branchOps.push({ label: t('graph.interactiveRebaseTo', { branch: currentBranch }), icon: 'list-ordered', action: () => { interactiveRebaseBase = commit.hash; } });
       groups.push(branchOps);
 
       // ── Reset ──
       const isHead = commit.refs.some(r => r.type === 'head');
       if (!isHead) {
-        groups.push([{ label: t('graph.resetBranchToHere', { branch: currentBranch }), action: () => { resetTarget = commit.hash; resetMode = 'mixed'; showResetModal = true; } }]);
+        /* SNIPCODE-HOOK start: M5 — Reset can run `--hard`, discarding work;
+           mark it danger like the other destructive menu items (R2 policy). */
+        groups.push([{ label: t('graph.resetBranchToHere', { branch: currentBranch }), icon: 'discard', danger: true, action: () => { resetTarget = commit.hash; resetMode = 'mixed'; showResetModal = true; } }]);
+        /* SNIPCODE-HOOK end */
       }
 
       // ── Modify commit with staged changes (amend / fixup) ──
@@ -1157,11 +1166,13 @@
       // commit → a rebase that rewords it, rewriting history from there forward).
       modifyOps.push({
         label: t('graph.reword'),
+        icon: 'edit',
         action: () => modalStore.openReword({ hash: commit.hash, message: fullMessage, isHead, isPushed: fullyPushed }),
       });
       if (isHead) {
         modifyOps.push({
           label: t('graph.amendCommit'),
+          icon: 'pencil',
           action: () => {
             modalStore.openAmend({ hash: commit.hash, subject: commit.subject, message: fullMessage, isPushed: fullyPushed });
             vscode.postMessage({ type: 'openScmView', payload: { returnFocus: true } });
@@ -1174,34 +1185,38 @@
         autosquashTarget = { hash: commit.hash, subject: commit.subject, mode };
         vscode.postMessage({ type: 'openScmView', payload: { returnFocus: true } });
       };
-      modifyOps.push({ label: t('graph.commitFixup'),  action: () => openAutosquash('fixup') });
-      modifyOps.push({ label: t('graph.commitSquash'), action: () => openAutosquash('squash') });
+      modifyOps.push({ label: t('graph.commitFixup'),  icon: 'combine', action: () => openAutosquash('fixup') });
+      modifyOps.push({ label: t('graph.commitSquash'), icon: 'combine', action: () => openAutosquash('squash') });
       groups.push(modifyOps);
 
-      // ── Commit operations ──
-      groups.push([
-        {
-          label: t('graph.checkoutCommit'),
-          action: () => {
-            const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
-            if (localRefs.length === 1) {
-              doCheckout(localRefs[0].name);
-            } else if (localRefs.length > 1) {
-              openCheckoutCommitModal(commit.hash);
-            } else {
-              const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
-              if (remoteRef) { doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name); }
-              else            { openCheckoutCommitModal(commit.hash); }
-            }
-          },
+      /* SNIPCODE-HOOK start: M5 — Checkout is first-group now; Cherry-pick/Revert
+         stay together as their own group (2nd-to-last). */
+      topGroup.push({
+        label: t('graph.checkoutCommit'),
+        icon: 'check',
+        action: () => {
+          const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
+          if (localRefs.length === 1) {
+            doCheckout(localRefs[0].name);
+          } else if (localRefs.length > 1) {
+            openCheckoutCommitModal(commit.hash);
+          } else {
+            const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
+            if (remoteRef) { doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name); }
+            else            { openCheckoutCommitModal(commit.hash); }
+          }
         },
-        { label: t('graph.cherryPickCommit'), action: () => { cherryPickTarget = commit.hash; showCherryPickModal = true; } },
-        { label: t('graph.revertCommit'),     action: () => { revertTarget = commit.hash; showRevertModal = true; } },
+      });
+      groups.push([
+        { label: t('graph.cherryPickCommit'), icon: 'git-commit', action: () => { cherryPickTarget = commit.hash; showCherryPickModal = true; } },
+        { label: t('graph.revertCommit'),     icon: 'discard',    action: () => { revertTarget = commit.hash; showRevertModal = true; } },
       ]);
+      /* SNIPCODE-HOOK end */
 
       // ── Compare / Multi-select ──
       const compareGroup: any[] = [{
         label: t('graph.compareToLocal'),
+        icon: 'diff',
         action: () => {
           uiStore.multiSelectArmed = false;
           uiStore.comparing = true; uiStore.selectedCommitHash = null;
@@ -1216,26 +1231,29 @@
       if (uiStore.multiSelectArmed) {
         compareGroup.push({
           label: t('graph.addToSelection'),
+          icon: 'add',
           action: () => { uiStore.toggleHash(commit.hash); },
         });
         compareGroup.push({
           label: t('graph.cancelSelection'),
+          icon: 'close',
           action: () => { uiStore.exitMultiSelect(); },
         });
       } else {
       }
       // ── Bisect ── (shares the compare/inspect group)
       if (bisectBadCommit) {
-        compareGroup.push({ label: t('bisect.startGood'), action: () => { const bad = bisectBadCommit!; bisectBadCommit = null; bisectStartBad = bad; bisectStartGood = commit.hash; vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } }); } });
-        compareGroup.push({ label: t('bisect.cancelSelect'), action: () => { bisectBadCommit = null; } });
+        compareGroup.push({ label: t('bisect.startGood'), icon: 'search', action: () => { const bad = bisectBadCommit!; bisectBadCommit = null; bisectStartBad = bad; bisectStartGood = commit.hash; vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } }); } });
+        compareGroup.push({ label: t('bisect.cancelSelect'), icon: 'close', action: () => { bisectBadCommit = null; } });
       } else {
-        compareGroup.push({ label: t('bisect.selectBad'), action: () => { bisectBadCommit = commit.hash; uiStore.selectedCommitHash = null; uiStore.showBottomPanel = false; } });
+        compareGroup.push({ label: t('bisect.selectBad'), icon: 'search', action: () => { bisectBadCommit = commit.hash; uiStore.selectedCommitHash = null; uiStore.showBottomPanel = false; } });
       }
       groups.push(compareGroup);
     } else {
       // ── Stash: compare to working ──
       groups.push([{
         label: t('graph.compareToLocal'),
+        icon: 'diff',
         action: () => {
           uiStore.comparing = true; uiStore.selectedCommitHash = null;
           uiStore.compareRef1 = commit.hash; uiStore.compareRef2 = null;
@@ -1251,13 +1269,16 @@
     // for real commits only (not stashes).
     const copyGroup: any[] = [];
     if (!isStashCommit) {
-      copyGroup.push({ label: t('graph.savePatch'), action: () => vscode.postMessage({ type: 'saveCommitPatch', payload: { hash: commit.hash } }) });
+      copyGroup.push({ label: t('graph.savePatch'), icon: 'save', action: () => vscode.postMessage({ type: 'saveCommitPatch', payload: { hash: commit.hash } }) });
     }
+    /* SNIPCODE-HOOK start: M5 — Copy SHA moves to the first group; the other
+       two copy variants (short SHA, "hash - subject") stay here. */
+    topGroup.push({ label: t('graph.copySHA'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.hash } }) });
     copyGroup.push(
-      { label: t('graph.copySHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.hash } }) },
-      { label: t('graph.copyShortSHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
-      { label: t('graph.copyCommitInfo'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
+      { label: t('graph.copyShortSHA'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
+      { label: t('graph.copyCommitInfo'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
     );
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Copy Full Source (S4) — whole commit, lazy-loaded files.
        The graph row has the hash but NOT the commit's changed-file list (that is
        lazy-loaded into CommitDetails' local state, not in scope here). So the
@@ -1267,12 +1288,16 @@
     if (!isStashCommit) {
       copyGroup.push({
         label: 'Copy Full Source',
+        icon: 'copy',
         action: () => copyFullSourceForCommit(commit.hash),
       });
     }
     /* SNIPCODE-HOOK end */
     groups.push(copyGroup);
 
+    /* SNIPCODE-HOOK start: M5 — Checkout + Copy SHA lead the menu */
+    if (topGroup.length > 0) groups.unshift(topGroup);
+    /* SNIPCODE-HOOK end */
 
     // Flatten groups with separators between them, preceded by a separator if there were refs
     if (refs.length > 0) items.push(sep);
