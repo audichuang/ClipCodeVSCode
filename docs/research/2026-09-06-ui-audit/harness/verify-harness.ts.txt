@@ -1,0 +1,68 @@
+// Copy to graph/webview-ui/src/verify-harness.ts ; HTMLs via gen-html.py ; fixture → graph/webview-ui/verify-fixture.json
+// ?mode=app|workbench|diff  &select=merge  &file=1
+import fixture from '../verify-fixture.json';
+type Msg = { type: string; payload?: any };
+const fx = fixture as any; const q = new URLSearchParams(location.search); const mode = q.get('mode') ?? 'app'; const posted: string[] = [];
+function reply(data: Msg) { setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data })), 0); }
+const fakeApi = {
+  postMessage(msg: Msg) {
+    posted.push(msg.type); const p = msg.payload ?? {};
+    switch (msg.type) {
+      case 'getLog': reply({ type: 'logData', payload: fx.logData }); break;
+      case 'getBranches': reply({ type: 'branchData', payload: fx.branchData }); break;
+      case 'getRepoList': reply({ type: 'repoList', payload: { repos: [{ path: fx.repoPath, name: 'synth-repo', type: 'root' }], active: fx.repoPath } }); break;
+      case 'checkFlowStatus': reply({ type: 'flowStatus', payload: { installed: false, initialized: false, config: null } }); break;
+      case 'getCommitDiff': reply({ type: 'commitDiffData', payload: { hash: p.hash, files: fx.commitFiles[p.hash] ?? [] } }); break;
+      case 'getFileDiff': reply({ type: 'fileDiffData', payload: { hash: p.hash, file: p.file, diff: fx.fileDiffs[`${p.hash}:${p.file}`] ?? null } }); break;
+      case 'getUncommittedDiff': reply({ type: 'uncommittedDiffData', payload: fx.uncommitted }); break;
+      case 'getUncommittedFileDiff': { const key = (p.staged ? 'staged' : 'unstaged') + ':' + p.file; reply({ type: 'fileDiffData', payload: { hash: 'UNCOMMITTED', file: p.file, key, diff: fx.uncommittedFileDiffs[key] ?? null } }); break; }
+      case 'getCommitSignature': reply({ type: 'commitSignatureData', payload: { hash: p.hash, signature: { status: 'none' } } }); break;
+      case 'getLfsFiles': reply({ type: 'lfsData', payload: { files: [], locks: [] } }); break;
+      case 'getAvatar': reply({ type: 'avatarData', payload: { email: p.email, size: p.size, dataUri: null } }); break;
+    }
+  }, getState: () => undefined, setState: () => {},
+};
+(window as any).acquireVsCodeApi = () => fakeApi;
+const target = document.getElementById('app')!; const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function waitFor<T>(fn: () => T | null | undefined, ms = 3000): Promise<T | null> { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(50); } return null; }
+function emitMetrics(obj: unknown) { console.log('HARNESS_METRICS ' + JSON.stringify(obj)); const pre = document.createElement('pre'); pre.id = 'metrics'; pre.hidden = true; pre.textContent = JSON.stringify(obj, null, 1); document.body.appendChild(pre); }
+(async () => {
+  const { mount } = await import('svelte');
+  if (mode === 'workbench') {
+    await import('./styles/workbench.css');
+    const { listenForHostMessages } = await import('./workbench/messaging'); const { workbenchStore } = await import('./workbench/workbench-store.svelte'); const { default: Workbench } = await import('./workbench/Workbench.svelte');
+    listenForHostMessages(); workbenchStore.message = 'feat(users): validate avatar mime type\n\nReject anything that is not image/png or image/jpeg (#140).';
+    mount(Workbench, { target }); reply({ type: 'workbenchCommitState', payload: { stagedRepoCount: 1 } }); await sleep(300);
+    emitMetrics({ mode, buttons: [...document.querySelectorAll('button')].map(b => ({ text: b.textContent?.trim(), disabled: b.disabled })), posted }); return;
+  }
+  if (mode === 'diff') {
+    const { listenForHostMessages } = await import('./diff/messaging'); const { default: Diff } = await import('./diff/Diff.svelte');
+    listenForHostMessages(); mount(Diff, { target }); reply({ type: 'setLocale', payload: { locale: 'en' } });
+    reply({ type: 'diffShow', payload: { repoPath: fx.repoPath, file: fx.dirtyFile, generation: 1, stagedDiff: fx.uncommittedFileDiffs[`staged:${fx.dirtyFile}`], unstagedDiff: fx.uncommittedFileDiffs[`unstaged:${fx.dirtyFile}`] } });
+    await sleep(1500); emitMetrics({ mode, sectionHeaders: [...document.querySelectorAll('.section-header')].map(h => h.textContent?.trim().replace(/\s+/g, ' ')), posted }); return;
+  }
+  await import('./styles/global.css');
+  const { default: App } = await import('./App.svelte'); const { uiStore } = await import('./lib/stores/ui.svelte'); const { commitStore } = await import('./lib/stores/commits.svelte');
+  mount(App, { target });
+  reply({ type: 'setLocale', payload: { locale: 'en', homeDir: '/home/audichuang' } }); reply({ type: 'setDefaults', payload: {} }); reply({ type: 'setBadgeBarThickness', payload: { width: 4 } });
+  reply({ type: 'setGraphColors', payload: { colors: ['#63b0f4', '#73d13d', '#ff7a45', '#b37feb', '#f759ab', '#36cfc9', '#ffc53d', '#ff4d4f', '#597ef7', '#9254de', '#43e8d8', '#faad14'] } });
+  reply({ type: 'setLoadMoreCount', payload: { count: 50 } }); reply({ type: 'repoList', payload: { repos: [{ path: fx.repoPath, name: 'synth-repo', type: 'root' }], active: fx.repoPath } });
+  await waitFor(() => commitStore.commits.length > 0 ? true : null); await sleep(200);
+  let selected: string | null = null, clickedFile: string | null = null;
+  if (q.get('select') === 'merge') {
+    const merge = commitStore.commits.find(c => c.parents.length > 1)!; selected = merge.hash; uiStore.selectSingle(merge.hash);
+    if (q.get('file')) {
+      const tab = await waitFor(() => document.querySelector('.tab-count')?.closest('button') as HTMLButtonElement | null); tab?.click();
+      const item = await waitFor(() => document.querySelector<HTMLButtonElement>('.file-item')); if (item) { clickedFile = item.textContent?.trim() ?? null; item.click(); } await sleep(1500);
+    } else await sleep(600);
+  }
+  const R = (el: Element | null) => el ? el.getBoundingClientRect() : null; const cs = getComputedStyle(document.documentElement);
+  const svg = document.querySelector('svg.graph-lines'); const rows = [...document.querySelectorAll('.commit-row')]; const circles = [...document.querySelectorAll('svg.graph-lines circle')];
+  const cxs = [...new Set(circles.map(c => +c.getAttribute('cx')!))].sort((a, b) => a - b); const badge = document.querySelector('.ref-badge'); const badgeCs = badge ? getComputedStyle(badge) : null;
+  const firstSubject = document.querySelector('.commit-row .commit-subject');
+  emitMetrics({ mode, selected, clickedFile, cssVars: { rowHeight: cs.getPropertyValue('--row-height').trim(), laneWidth: cs.getPropertyValue('--lane-width').trim(), nodeRadius: cs.getPropertyValue('--graph-node-radius').trim() },
+    toolbar: R(document.querySelector('.toolbar'))?.height, svgWidthAttr: svg?.getAttribute('width'), rowCount: rows.length, rowHeight: R(rows[0])?.height,
+    strokeWidths: [...new Set([...document.querySelectorAll('svg.graph-lines path')].map(p => p.getAttribute('stroke-width')))], dotRadii: [...new Set(circles.map(c => c.getAttribute('r')))], laneCx: cxs, lanePitch: cxs.slice(1).map((x, i) => +(x - cxs[i]).toFixed(2)),
+    badge: badge && { fontSize: badgeCs!.fontSize, height: R(badge)!.height, padding: badgeCs!.padding, text: badge.textContent?.trim() }, firstSubjectX: R(firstSubject)?.x,
+    bottomPanel: R(document.querySelector('.bottom-area'))?.height, fileItems: document.querySelectorAll('.file-item').length, posted: [...new Set(posted)] });
+})();
