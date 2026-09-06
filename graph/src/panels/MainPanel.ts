@@ -135,7 +135,16 @@ export class MainPanel {
     return { commits, hasMore };
   }
 
-  private buildUncommittedSummary(diff: { staged: Array<{ path: string }>; unstaged: Array<{ path: string }> }): Commit | null {
+  /* SNIPCODE-HOOK start: X4 — thread UNCOMMITTED onto HEAD's rail (same fix as
+     GitService.log()'s own UNCOMMITTED construction; this is the 'status'-scope
+     refresh path, which rebuilds the summary from the cached log instead of
+     re-running GitService.log()). `headHash` is resolved by the caller from the
+     `head` ref on the cached commits — NOT BranchInfo.hash (pre-X6 abbreviated,
+     and not what the builder's hashIndex is keyed by anyway). */
+  private buildUncommittedSummary(
+    diff: { staged: Array<{ path: string }>; unstaged: Array<{ path: string }> },
+    headHash: string | null,
+  ): Commit | null {
     const staged = diff.staged.length;
     const unstaged = diff.unstaged.length;
     // Unique-file count: a file that is both staged and unstaged (MM) appears
@@ -146,7 +155,7 @@ export class MainPanel {
     return {
       hash: 'UNCOMMITTED',
       abbreviatedHash: 'UNCOMMITTED',
-      parents: [],
+      parents: headHash ? [headHash] : [],
       refs: [],
       subject: `Uncommitted changes (${total})`,
       body: JSON.stringify({ staged, unstaged }),
@@ -157,9 +166,11 @@ export class MainPanel {
 
   private applyUncommittedSummary(commits: Commit[], diff: { staged: Array<{ path: string }>; unstaged: Array<{ path: string }> }): Commit[] {
     const base = commits.filter(c => c.hash !== 'UNCOMMITTED');
-    const summary = this.buildUncommittedSummary(diff);
+    const headHash = base.find(c => c.refs.some(r => r.type === 'head'))?.hash ?? null;
+    const summary = this.buildUncommittedSummary(diff, headHash);
     return summary && base.length > 0 ? [summary, ...base] : base;
   }
+  /* SNIPCODE-HOOK end */
 
   private buildLogPayload(
     commits: Commit[],
