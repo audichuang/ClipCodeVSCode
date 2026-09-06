@@ -582,3 +582,42 @@ describe('buildFullGraph HEAD-on-merge dot (G6)', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G7 — rail pathIndex for hover/selected highlight */
+describe('buildFullGraph rail pathIndex (G7)', () => {
+  it('a dot\'s pathIndex points at the path it actually sits on', () => {
+    const commits = [
+      makeCommit('c2', ['c1'], [{ type: 'branch', name: 'main' }]),
+      makeCommit('c1', []),
+    ];
+    const graph = buildFullGraph(commits);
+    const idx = graph.dots[0].pathIndex;
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(graph.paths[idx]).toBeDefined();
+    expect(graph.paths[idx].points[0]).toEqual(graph.dots[0].center);
+  });
+
+  it('a merge link into an existing rail carries that rail\'s pathIndex', () => {
+    // Same topology as the "reuses existing path via link" test above.
+    const commits = [
+      makeCommit('N', ['B']),
+      makeCommit('M', ['A', 'B']),
+      makeCommit('A', ['X']),
+      makeCommit('B', ['X']),
+      makeCommit('X', []),
+    ];
+    const graph = buildFullGraph(commits);
+    const mDot = graph.dots[1];
+    const link = graph.links.find(l => l.start.x === mDot.center.x && l.start.y === mDot.center.y);
+    expect(link).toBeDefined();
+    expect(link!.pathIndex).toBeGreaterThanOrEqual(0);
+    expect(graph.paths[link!.pathIndex]).toBeDefined();
+  });
+
+  it('a disconnected root dot with no rail gets pathIndex -1', () => {
+    const commits = [makeCommit('root', [])];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].pathIndex).toBe(-1);
+  });
+});
+/* SNIPCODE-HOOK end */

@@ -643,32 +643,54 @@
   // surface. One coordinate-based handler covers the rows and the pinned meta
   // overlay alike, so they always resolve to the same row with no cross-element
   // enter/leave flicker.
+  /* SNIPCODE-HOOK start: G7 — track the hovered row's index (already computed
+     here) so the rail it sits on can be looked up in O(1) (displayDots[idx]),
+     instead of a findIndex-by-hash per pointermove. */
+  let hoveredRowIndex = $state(-1);
   function handleRowHover(e: PointerEvent) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const idx = Math.floor((e.clientY - rect.top) / ROW_HEIGHT);
-    hoveredHash = idx >= 0 && idx < displayCommits.length ? displayCommits[idx].hash : null;
+    const inRange = idx >= 0 && idx < displayCommits.length;
+    hoveredHash = inRange ? displayCommits[idx].hash : null;
+    hoveredRowIndex = inRange ? idx : -1;
   }
 
-  function handleRowDblClick(commit: typeof displayCommits[0]) {
-    if (commit.hash === 'UNCOMMITTED') return;
-    // In selection / compare mode a double-click is just two membership toggles —
-    // never a checkout.
-    if (uiStore.multiSelectArmed || uiStore.comparing) return;
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
-    const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
-    if (localRefs.length === 1) {
-      doCheckout(localRefs[0].name, false, {}, true);
-    } else if (localRefs.length > 1) {
-      openCheckoutCommitModal(commit.hash);
-    } else {
-      const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
-      if (remoteRef) {
-        doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name);
-      } else {
-        openCheckoutCommitModal(commit.hash);
-      }
+  // Selected row's index, for the same rail lookup (selection is by hash, not
+  // by row index, so this needs an O(1) map rather than a scan).
+  const hashToIndex = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < displayCommits.length; i++) m.set(displayCommits[i].hash, i);
+    return m;
+  });
+  const selectedRowIndex = $derived(uiStore.selectedCommitHash ? (hashToIndex.get(uiStore.selectedCommitHash) ?? -1) : -1);
+
+  // Rail(s) to highlight on hover/selection (G7). A Set (not a single index)
+  // because hover and selection can land on two different rails at once.
+  const activePathIndices = $derived.by(() => {
+    const s = new Set<number>();
+    if (hoveredRowIndex >= 0) {
+      const idx = displayDots[hoveredRowIndex]?.pathIndex;
+      if (idx !== undefined && idx >= 0) s.add(idx);
     }
+    if (selectedRowIndex >= 0) {
+      const idx = displayDots[selectedRowIndex]?.pathIndex;
+      if (idx !== undefined && idx >= 0) s.add(idx);
+    }
+    return s;
+  });
+
+  /** Combined G2 (non-current-branch dim) + G7 (hover/select rail spotlight)
+   *  visual for one path/link. When nothing is hovered/selected, G2 alone
+   *  decides (highlighted ? full : dim). Once something IS active, the active
+   *  rail(s) go fully opaque and everything else drops to whichever is MORE
+   *  dimmed of the two rules ("與 G2 疊加時取較低"), so the spotlight reads
+   *  clearly regardless of which branch the other rails belong to. */
+  function railVisual(highlighted: boolean, pathIndex: number): { opacity: number; strokeWidth: number } {
+    if (activePathIndices.has(pathIndex)) return { opacity: 1, strokeWidth: 3 };
+    const g2Opacity = highlighted ? 1 : 0.35;
+    return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
   }
+
 
   function selectCommit(hash: string) {
     navPath = [];
@@ -1203,6 +1225,7 @@
           label: t('graph.cancelSelection'),
           action: () => { uiStore.exitMultiSelect(); },
         });
+      } else {
       }
       // ── Bisect ── (shares the compare/inspect group)
       if (bisectBadCommit) {
@@ -1253,6 +1276,7 @@
     /* SNIPCODE-HOOK end */
     groups.push(copyGroup);
 
+
     // Flatten groups with separators between them, preceded by a separator if there were refs
     if (refs.length > 0) items.push(sep);
     for (let i = 0; i < groups.length; i++) {
@@ -1268,6 +1292,7 @@
   function onUncommittedContextMenu(e: MouseEvent) {
     e.preventDefault();
     const items: any[] = [];
+
 
     // Stash is always available: the row only renders when there are uncommitted
     // changes to stash.
@@ -1359,6 +1384,7 @@
     }
   });
 
+
   function handleGraphNavKey(e: KeyboardEvent) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     // Ignore while a modal is open, a multi-select range is armed, or the user
@@ -1369,6 +1395,8 @@
                el.tagName === 'SELECT' || el.isContentEditable)) return;
 
     const navCommits = displayCommits.filter(c => c.hash !== 'UNCOMMITTED');
+
+
     const dir = e.key === 'ArrowDown' ? 'down' : 'up';
     e.preventDefault();
 
@@ -1378,6 +1406,7 @@
       if (result.target) {
         uiStore.selectSingle(result.target);
         scrollHashIntoView(result.target, 'edge');
+        focusSelectedRow();
       }
       return;
     }
@@ -1388,6 +1417,7 @@
     if (target) {
       uiStore.selectSingle(target);
       scrollHashIntoView(target, 'edge');
+      focusSelectedRow();
     }
   }
 
@@ -1458,7 +1488,7 @@
       style="height: {totalHeight}px; position: relative;{contentWidth ? ` width: ${contentWidth}px;` : ''}"
       role="presentation"
       onpointermove={handleRowHover}
-      onpointerleave={() => { hoveredHash = null; }}
+      onpointerleave={() => { hoveredHash = null; hoveredRowIndex = -1; }}
     >
       <!-- SVG for graph - SourceGit-style Path + Link + Dot rendering -->
       <svg
@@ -1484,6 +1514,7 @@
         <!-- Links: merge connection curves -->
         {#each visibleLinks as link}
           {@const linkColor = resolveGraphColor(graphColorsStore.palette, link.color, link.colorOverride)}
+          {@const v = railVisual(link.highlighted, link.pathIndex)}
           {@const sx = laneX(link.start.x)}
           {@const sy = link.start.y * ROW_HEIGHT}
           {@const cx = laneX(link.control.x)}
@@ -1491,12 +1522,9 @@
           {@const ex = laneX(link.end.x)}
           {@const ey = link.end.y * ROW_HEIGHT}
           <path
+            class="rail"
             d="M {sx} {sy} Q {cx} {cy}, {ex} {ey}"
-            fill="none" stroke={linkColor} stroke-width="5" opacity="0.07" stroke-linecap="round"
-          />
-          <path
-            d="M {sx} {sy} Q {cx} {cy}, {ex} {ey}"
-            fill="none" stroke={linkColor} stroke-width="2" opacity="0.85" stroke-linecap="round"
+            style="--c: {linkColor}" stroke-width={v.strokeWidth} opacity={v.opacity} stroke-linecap="round"
           />
         {/each}
 
@@ -1542,13 +1570,13 @@
         {#each visibleCommits as { commit, index } (commit.hash)}
           {@const dot = displayDots[index]}
           {@const nodeColor = dot ? resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride) : '#888'}
-          {@const isRemoteTip = dot?.remoteTip ?? false}
+          {@const isSelected = uiStore.selectedCommitHashes.length > 0
+            ? uiStore.selectedCommitHashes.includes(commit.hash)
+            : uiStore.selectedCommitHash === commit.hash}
           <div
             class="commit-row"
             class:hovered={hoveredHash === commit.hash}
-            class:selected={uiStore.selectedCommitHashes.length > 0
-              ? uiStore.selectedCommitHashes.includes(commit.hash)
-              : uiStore.selectedCommitHash === commit.hash}
+            class:selected={isSelected}
             class:highlighted={contextMenuHash === commit.hash}
             class:search-match={isSearchActive && searchMatchedHashes?.has(commit.hash)}
             class:search-dim={isSearchActive && !searchMatchedHashes?.has(commit.hash)}
@@ -1562,18 +1590,16 @@
             class:bisect-start-bad={bisectActive && bisectStartBad === commit.hash}
             class:bisect-start-good={bisectActive && bisectStartGood === commit.hash}
             class:bisect-culprit={bisectCulpritHash !== null && commit.hash.startsWith(bisectCulpritHash)}
-            style="height: {ROW_HEIGHT}px;"
+            class:head-row={dot?.isHead ?? false}
+            style="height: {ROW_HEIGHT}px;{dot?.isHead ? ` --head-lane-color: ${nodeColor};` : ''}"
             onclick={(e) => handleRowClick(commit, e)}
-            ondblclick={() => handleRowDblClick(commit)}
             oncontextmenu={(e) => { if (commit.hash === 'UNCOMMITTED') onUncommittedContextMenu(e); else onCommitContextMenu(e, commit); }}
-            use:tooltip={commit.hash === 'UNCOMMITTED' ? t('graph.clickToOpenScm') : ''}
             role="row"
             tabindex={0}
             onkeydown={(e) => {
               if (e.key !== 'Enter') return;
               if (commit.hash === 'UNCOMMITTED') {
-                uiStore.selectedCommitHash = null;
-                vscode.postMessage({ type: 'openScmView' });
+                uiStore.selectCommit('UNCOMMITTED');
               } else {
                 selectCommit(commit.hash);
               }
@@ -1746,6 +1772,8 @@
           style="height: {totalHeight}px; width: {RIGHT_COLS_WIDTH}px;"
         >
           {#each visibleCommits as { commit, index } (commit.hash)}
+            {@const dot = displayDots[index]}
+            {@const nodeColor = dot ? resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride) : '#888'}
             <div
               class="meta-row"
               class:selected={uiStore.selectedCommitHashes.length > 0
@@ -1762,11 +1790,11 @@
               class:bisect-start-good={bisectActive && bisectStartGood === commit.hash}
               class:bisect-culprit={bisectCulpritHash !== null && commit.hash.startsWith(bisectCulpritHash)}
               class:hovered={hoveredHash === commit.hash}
-              style="top: {index * ROW_HEIGHT}px; height: {ROW_HEIGHT}px;"
+              class:head-row={dot?.isHead ?? false}
+              style="top: {index * ROW_HEIGHT}px; height: {ROW_HEIGHT}px;{dot?.isHead ? ` --head-lane-color: ${nodeColor};` : ''}"
               role="row"
               tabindex={-1}
               onclick={(e) => handleRowClick(commit, e)}
-              ondblclick={() => handleRowDblClick(commit)}
               oncontextmenu={(e) => { if (commit.hash === 'UNCOMMITTED') onUncommittedContextMenu(e); else onCommitContextMenu(e, commit); }}
               onkeydown={(e) => { if (e.key === 'Enter') handleRowClick(commit); }}
             >
@@ -2035,6 +2063,7 @@
     position: relative;
   }
 
+
   /* Indeterminate top bar shown while a git op is in flight. Sticky pins it to
      the top of the scroll viewport; a moving sheen conveys "working" without
      blocking or blanking the graph beneath it. */
@@ -2128,6 +2157,7 @@
     z-index: 3;
   }
 
+
   .visible-rows {
     z-index: 1;
   }
@@ -2158,6 +2188,7 @@
     background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
   }
   /* SNIPCODE-HOOK end */
+
   .commit-row.compare-base {
     background: rgba(99, 176, 244, 0.12);
     box-shadow: inset 3px 0 0 #63b0f4;
@@ -2317,6 +2348,7 @@
     background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
   }
   /* SNIPCODE-HOOK end */
+
   .meta-row.hovered { background-color: var(--bg-hover); }
   .meta-row.selected { background-color: var(--bg-selected); }
   .meta-row.selected .col-author,

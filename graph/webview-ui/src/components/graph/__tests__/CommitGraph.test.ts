@@ -27,7 +27,7 @@ function makeGraphData(commits: Commit[]): CommitGraphData {
     graph: commits.map(c => ({ commit: c.hash, column: 0, color: '#63b0f4', parents: [] })),
     paths: [],
     links: [],
-    dots: commits.map((_, i) => ({ center: { x: 0, y: i }, color: 0, type: 'default' as const, localOnly: false, remoteTip: false })),
+    dots: commits.map((_, i) => ({ center: { x: 0, y: i }, color: 0, type: 'default' as const, localOnly: false, remoteTip: false, highlighted: true, isHead: false, pathIndex: -1 })),
     commitLeftMargin: commits.map(() => 24),
     hasMore: false,
     currentLimit: 1000,
