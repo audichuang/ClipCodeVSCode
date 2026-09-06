@@ -7,25 +7,47 @@ import { toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 /**
- * Rough token estimate for a copied payload, shown in the copy notification so the
- * user sees how large a chunk they're about to paste into an AI assistant. Mirrors
- * the IntelliJ ClipCode heuristic (TokenEstimator.kt): word count plus a few
- * structural punctuation marks — deliberately crude, not a real tokenizer.
+ * The four numbers the copy notification reports for a payload, in ONE linear pass.
+ *
+ * Byte-mirror of `ClipCode/.../TokenEstimator.kt stats`. All four are a function of
+ * the whole clipboard text — headers, pre/post text and the `clipcode-root` line
+ * included — because that is what actually gets pasted. They are NOT per-file sums:
+ * carrying them per file is what let IntelliJ's old counters drift into numbers the
+ * two tools never agreed on (they silently dropped every header and blank separator
+ * line). Pinned by the shared golden `clipboard-contract.json` (`tokenCases`).
+ *
+ * - `chars`  UTF-16 code units, i.e. `String.length` on both sides. An astral char
+ *            (emoji) counts 2 in Kotlin and 2 here — identical by construction.
+ * - `lines`  `\n` count + 1, so a payload with no trailing newline still counts its
+ *            last line. Empty text is 0 lines.
+ * - `words`  maximal runs of non-separator characters.
+ * - `tokens` `words` plus a point for each structural punctuation mark — a crude
+ *            AI-payload size gauge, deliberately not a real tokenizer.
  *
  * The word scan separates on an ASCII whitespace class, NOT JS `\s`: Kotlin's `\s` is
  * ASCII-only, so a Unicode split would count U+3000 / NBSP-separated CJK text as
- * more words here than IntelliJ does and the two tools would report different
- * token counts for the same payload. Same reason `clipboardFormat.ts` pins ASCII_WS.
+ * more words here than IntelliJ does and the two tools would disagree on the same
+ * payload. Same reason `clipboardFormat.ts` pins ASCII_WS.
  *
  * One linear pass, O(1) extra memory: this blocks the single extension-host thread on
  * the whole payload, and materialising one string per word froze it precisely when the
- * estimate matters most (the 1M/2M-token warning).
+ * numbers matter most (the 1M/2M-token warning).
  */
-export function estimateTokens(text: string): number {
-  let tokens = 0;
+export interface PayloadStats {
+  chars: number;
+  lines: number;
+  words: number;
+  tokens: number;
+}
+
+export function payloadStats(text: string): PayloadStats {
+  let words = 0;
+  let punctuation = 0;
+  let newlines = 0;
   let inWord = false;
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
+    if (code === 0x0A) newlines++;
     // Space 0x20 plus the contiguous 0x09-0x0D block (\t \n \x0B \f \r) —
     // exactly the six ASCII separators, nothing Unicode.
     if (code === 0x20 || (code >= 0x09 && code <= 0x0D)) {
@@ -35,17 +57,27 @@ export function estimateTokens(text: string): number {
     // A maximal run of non-separators is one word — what split-then-drop-empty counted.
     if (!inWord) {
       inWord = true;
-      tokens++;
+      words++;
     }
     // ; , ( ) { } [ ]
     if (
       code === 0x3B || code === 0x2C || code === 0x28 || code === 0x29 ||
       code === 0x7B || code === 0x7D || code === 0x5B || code === 0x5D
     ) {
-      tokens++;
+      punctuation++;
     }
   }
-  return tokens;
+  return {
+    chars: text.length,
+    lines: text.length === 0 ? 0 : newlines + 1,
+    words,
+    tokens: words + punctuation
+  };
+}
+
+/** The `tokens` field alone. Kept because it is the name the contract fixtures use. */
+export function estimateTokens(text: string): number {
+  return payloadStats(text).tokens;
 }
 
 export interface CopyResult {

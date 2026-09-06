@@ -16,7 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const fmt = require('../out/src/clipboardFormat.js');
-const { estimateTokens } = require('../out/src/copy.js');
+const { payloadStats } = require('../out/src/copy.js');
 
 const DEFAULT_HEADER = '// file: $FILE_PATH';
 
@@ -229,11 +229,12 @@ const parseInputs = [
   },
 ];
 
-// ---- token-estimate scenarios --------------------------------------------------
-// The copy notification's "~N tokens" must be the SAME number in both tools for the
-// same clipboard text. The two implementations (src/copy.ts estimateTokens /
-// ClipCode TokenEstimator) are word-count + structural punctuation, so every case
-// below targets a place where the two stdlibs could disagree on "whitespace".
+// ---- payload-statistics scenarios ----------------------------------------------
+// The copy notification reports chars / lines / words / tokens, and ALL FOUR must be
+// the SAME numbers in both tools for the same clipboard text. The two implementations
+// (src/copy.ts payloadStats / ClipCode TokenEstimator.stats) are one shared scan, so
+// the cases below target every place the two stdlibs could disagree: the whitespace
+// class, the punctuation set, `\n` counting, and UTF-16 code-unit length.
 const tokenInputs = [
   { name: 'empty string', text: '' },
   { name: 'ascii whitespace only', text: ' \t\n\u000B\f\r' },
@@ -256,6 +257,13 @@ const tokenInputs = [
     name: 'realistic payload: root line, header, CJK comment, code',
     text: '// clipcode-root: myrepo\n\n// file: src/a.ts\n// \u9019\u662F\u3000\u4E2D\u6587\u8A3B\u89E3\nconst x = foo(bar, baz);\n',
   },
+  // `chars` is UTF-16 code units on both sides: Kotlin String.length counts a
+  // surrogate pair as 2, and so does JS. Codepoint counting on either side breaks this.
+  { name: 'astral char counts as two UTF-16 code units', text: '\uD83D\uDC4D' },
+  // `lines` is \n count + 1, so a trailing newline still yields a final empty line and
+  // a lone CR is NOT a line break (matching the parser's \r?\n rule).
+  { name: 'trailing newline still counts the final empty line', text: 'a\nb\n' },
+  { name: 'CRLF counts one line break, lone CR counts none', text: 'a\r\nb\rc' },
 ];
 
 function buildWire(input) {
@@ -276,7 +284,7 @@ const fixtures = {
     'Regenerate and copy to both repos; update EXPECTED_FIXTURES_SHA on both sides.',
   buildCases: buildInputs.map(i => ({ name: i.name, kind: i.kind, options: i.options, wire: buildWire(i) })),
   parseCases: parseInputs.map(i => ({ name: i.name, headerFormat: i.headerFormat, input: i.input, expected: parseExpected(i) })),
-  tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, tokens: estimateTokens(i.text) })),
+  tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, ...payloadStats(i.text) })),
 };
 
 const json = JSON.stringify(fixtures, null, 2) + '\n';

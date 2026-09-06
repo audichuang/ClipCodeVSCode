@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { estimateTokens } from './copy.js';
+import { payloadStats } from './copy.js';
 
 // ponytail: fixed thresholds; promote to settings only if someone asks.
 // VS Code has no notification colour API — info / warning / error ARE the
@@ -28,8 +28,13 @@ export interface CopyToastAction {
  * awaiting would block the copy from returning (hangs headless e2e).
  */
 export function notifyCopied(message: string, copiedText: string, action?: CopyToastAction): void {
-  const tokens = estimateTokens(copiedText);
-  const note = `${message} ~${grouped(tokens)} tokens.`;
+  // Same four numbers, same order, same whole-payload basis as the IntelliJ
+  // notification — a VS Code toast is one line, so they are separated by ` · `
+  // instead of `<br>`.
+  const { chars, lines, words, tokens } = payloadStats(copiedText);
+  const note =
+    `${message} ${grouped(chars)} chars · ${grouped(lines)} lines · ` +
+    `${grouped(words)} words · ~${grouped(tokens)} tokens.`;
   const buttons = action ? [action.label] : [];
   const onPick = (picked?: string) => {
     if (action && picked === action.label) action.run();
