@@ -683,6 +683,9 @@ export const zh: Record<string, string> = {
   'file.stageBlock': '暂存此变更块',
   'file.unstageBlock': '取消暂存此变更块',
   'file.lines': '行',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}：第 {range} 行',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': '复制',
   'file.copyLines': '复制行',
   'lfs.lock': 'LFS 锁定',
@@ -763,6 +766,9 @@ export const zh: Record<string, string> = {
   'image.onionSkin': '叠加对比',
   'image.before': '之前',
   'image.after': '之后',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': '无图片',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': '关闭（Esc）',
   'toolbar.historyDesc': 'Graph（Ctrl+1）',
