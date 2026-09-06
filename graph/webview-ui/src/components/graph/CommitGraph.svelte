@@ -2156,6 +2156,41 @@
     z-index: 3;
   }
 
+  /* SNIPCODE-HOOK start: G11 — color driven by the --c custom property (set
+     inline per element) instead of a `stroke`/`fill` SVG attribute, so a
+     single theme override below can recolor every rail/dot without touching
+     the template. Base (dark) rules just read the color straight through;
+     opacity/stroke-width stay inline (they vary per-element via G2/G7). */
+  .graph-lines .rail {
+    fill: none;
+    stroke: var(--c);
+  }
+  .graph-lines .dot-fill {
+    fill: var(--c);
+  }
+  .graph-lines .dot-ring {
+    fill: transparent;
+    stroke: var(--c);
+  }
+
+  /* Light theme: the raw palette averages ~1.5–2.3:1 contrast against white
+     (measured), well under WCAG's 3:1 graphical-object floor. Darken toward
+     black in oklab (perceptually even mixing) rather than adding a whole
+     second palette to maintain. */
+  :global(body.vscode-light) .graph-lines .rail {
+    stroke: color-mix(in oklab, var(--c) 72%, #000);
+  }
+  :global(body.vscode-light) .graph-lines .dot-fill {
+    fill: color-mix(in oklab, var(--c) 72%, #000);
+  }
+  :global(body.vscode-light) .graph-lines .dot-ring {
+    stroke: color-mix(in oklab, var(--c) 72%, #000);
+  }
+
+  :global(body.vscode-high-contrast) .graph-lines .rail {
+    stroke-width: 2.5;
+  }
+  /* SNIPCODE-HOOK end */
 
   .visible-rows {
     z-index: 1;
