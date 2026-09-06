@@ -296,6 +296,61 @@ describe('buildFullGraph upstream-based remote-only detection', () => {
   });
 });
 
+/* SNIPCODE-HOOK start: X6 regression — BranchInfo.hash must be the FULL
+   object name (git-service.ts now emits %(objectname), not
+   %(objectname:short)) for buildUpstreamMap's hash to line up with
+   hashIndex's full-hash keys. Fixtures below use realistic full-length hex
+   hashes (not the 1-3 char toy IDs used elsewhere in this file) so the tests
+   actually exercise exact full-string matching rather than accidentally
+   passing due to short, incidental equality. One "ahead" shape (remote leads,
+   with several hops of shared history below the divergence point — this is
+   what silently broke before the fix: with a truncated hash, hashIndex.get()
+   on the local tip missed entirely, localAncestors never resolved past a
+   placeholder string, and the BFS never stopped, wrongly marking the whole
+   shared history as remote-only) and one "behind" shape (remote lags local —
+   this also exercises the buildRemoteOnlyData ancestor-check fix above: the
+   remote tip commit itself must NOT be flagged just because it differs from
+   the local tip's hash). */
+describe('buildFullGraph remoteTip stays correct with full-length BranchInfo.hash (X6)', () => {
+  const LOCAL_TIP = '2222222222222222222222222222222222222222';
+  const SHARED_1 = '3333333333333333333333333333333333333333';
+  const SHARED_0 = '4444444444444444444444444444444444444444';
+  const REMOTE_1 = '1111111111111111111111111111111111111111';
+  const REMOTE_2 = '0000000000000000000000000000000000000000';
+
+  it('ahead: remote leads by 2 commits, with 2 hops of shared history below the local tip', () => {
+    const commits = [
+      makeCommit(REMOTE_2, [REMOTE_1], [{ type: 'remote-branch', name: 'main', remote: 'origin' }]),
+      makeCommit(REMOTE_1, [LOCAL_TIP]),
+      makeCommit(LOCAL_TIP, [SHARED_1], [{ type: 'branch', name: 'main' }]),
+      makeCommit(SHARED_1, [SHARED_0]),
+      makeCommit(SHARED_0, []),
+    ];
+    const branches = [branch('main', LOCAL_TIP, { upstream: 'origin/main' })];
+    const graph = buildFullGraph(commits, branches);
+    expect(graph.dots[0].remoteTip).toBe(true);  // REMOTE_2
+    expect(graph.dots[1].remoteTip).toBe(true);  // REMOTE_1
+    expect(graph.dots[2].remoteTip).toBe(false); // LOCAL_TIP
+    expect(graph.dots[3].remoteTip).toBe(false); // SHARED_1 — the "整條祖先" case
+    expect(graph.dots[4].remoteTip).toBe(false); // SHARED_0
+  });
+
+  it('behind: local leads by 2 commits, remote tip is a plain ancestor — nothing is remote-only', () => {
+    const commits = [
+      makeCommit(LOCAL_TIP, [REMOTE_1], [{ type: 'branch', name: 'main' }]),
+      makeCommit(REMOTE_1, [SHARED_1]),
+      makeCommit(SHARED_1, [SHARED_0], [{ type: 'remote-branch', name: 'main', remote: 'origin' }]),
+      makeCommit(SHARED_0, []),
+    ];
+    const branches = [branch('main', LOCAL_TIP, { upstream: 'origin/main' })];
+    const graph = buildFullGraph(commits, branches);
+    for (const dot of graph.dots) {
+      expect(dot.remoteTip).toBe(false);
+    }
+  });
+});
+/* SNIPCODE-HOOK end */
+
 describe('buildFullGraph lane geometry', () => {
   it('builds bending paths when lanes are created and collapse', () => {
     // A feature branch forks off main, runs in parallel, then merges back.

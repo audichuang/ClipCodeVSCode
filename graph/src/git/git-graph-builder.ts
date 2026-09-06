@@ -134,6 +134,17 @@ function buildUpstreamMap(branches: BranchInfo[]): Map<string, string> {
   return map;
 }
 
+/* SNIPCODE-HOOK start: X6 — remote tip must not be misjudged when it is
+   actually an ancestor of the local branch (local ahead of / caught up with
+   remote). The candidate-collection pass below only knows "this commit
+   carries a remote-branch ref and no local ref" — it can't yet tell whether
+   that commit is genuinely remote-only or just an older commit the local
+   branch has already passed. That check needs each candidate's corresponding
+   local branch's ancestor set, which is only computed in the second pass, so
+   we defer tipSet/allSet membership to there instead of writing tipSet
+   eagerly in the first pass (the old bug: a "local ahead of remote" tip that
+   happened to also collide via truncated BranchInfo.hash could otherwise
+   never resolve to a real ancestor and get treated as remote-only forever). */
 function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashIndex: Map<string, number>): { tipSet: Set<string>; allSet: Set<string> } {
   // upstream map: "origin/main" → local branch hash
   const upstreamMap = buildUpstreamMap(branches);
@@ -148,9 +159,12 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
     }
   }
 
-  // Find remote tips with their corresponding local hash
-  const tipSet = new Set<string>();
-  const tips: Array<{ tipIdx: number; localHash: string }> = [];
+  // Candidates: commits that carry a remote-branch ref and no local ref, with
+  // a resolvable local counterpart hash. Final tipSet/allSet membership is
+  // decided below once we know each candidate isn't already an ancestor of
+  // that local branch (which would mean local is ahead of / caught up with
+  // the remote, not behind it — nothing remote-only there).
+  const candidates: Array<{ tipIdx: number; localHash: string }> = [];
   for (const c of commits) {
     const hasRemoteRef = c.refs.some(r => r.type === 'remote-branch');
     const hasLocalRef = c.refs.some(r => r.type === 'branch' || r.type === 'head' || r.type === 'tag');
@@ -161,19 +175,19 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
       const fullRemoteName = `${r.remote}/${r.name}`;
       const localHash = upstreamMap.get(fullRemoteName) ?? localBranchMap.get(r.name);
       if (localHash && localHash !== c.hash) {
-        tipSet.add(c.hash);
         const idx = hashIndex.get(c.hash);
-        if (idx !== undefined) tips.push({ tipIdx: idx, localHash });
+        if (idx !== undefined) candidates.push({ tipIdx: idx, localHash });
         break;
       }
     }
   }
 
-  // For each remote tip, BFS through parents stopping at the corresponding local branch's ancestors
+  // For each candidate, BFS through parents stopping at the corresponding local branch's ancestors
+  const tipSet = new Set<string>();
   const allSet = new Set<string>();
   const ancestorCache = new Map<string, Set<string>>();
 
-  for (const { tipIdx, localHash } of tips) {
+  for (const { tipIdx, localHash } of candidates) {
     // Get or compute ancestors of the corresponding local branch
     let localAncestors = ancestorCache.get(localHash);
     if (!localAncestors) {
@@ -195,8 +209,14 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
       ancestorCache.set(localHash, localAncestors);
     }
 
+    const tipHash = commits[tipIdx].hash;
+    // The remote tip is already part of the local branch's own history (local
+    // is ahead of or caught up with the remote) — nothing here is remote-only.
+    if (localAncestors.has(tipHash)) continue;
+
     // BFS from remote tip, stop at local branch ancestors
-    allSet.add(commits[tipIdx].hash);
+    tipSet.add(tipHash);
+    allSet.add(tipHash);
     const queue = [tipIdx];
     let qHead = 0;
     while (qHead < queue.length) {
@@ -212,6 +232,7 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
 
   return { tipSet, allSet };
 }
+/* SNIPCODE-HOOK end */
 
 // ── Local-only detection ──
 
