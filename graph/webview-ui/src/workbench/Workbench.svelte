@@ -24,6 +24,15 @@
     }
   }
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S14 Ctrl/Cmd+Enter commits from the textarea */
+  function onTextareaKeydown(e: KeyboardEvent): void {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && store.canCommit) {
+      e.preventDefault();
+      postCommit(false);
+    }
+  }
+  /* SNIPCODE-HOOK end */
 </script>
 
 <div class="commit-box">
@@ -39,6 +48,7 @@
     bind:value={store.message}
     placeholder="Commit 訊息（共用一則，套用到所有已暫存的 repo）"
     rows="3"
+    onkeydown={onTextareaKeydown}
   ></textarea>
 
   <div class="actions">
