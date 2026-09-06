@@ -431,6 +431,35 @@ describe('ChangesWorkbench index document invalidation', () => {
 
     expect(invalidateIndexDocuments).toHaveBeenCalledTimes(1);
   });
+
+  /* SNIPCODE-HOOK start: S12 show progress in the Changes view while refreshing */
+  it('shows progress scoped to the Changes view while refreshing (S12)', async () => {
+    const wb = new ChangesWorkbench();
+
+    await wb.refresh();
+
+    expect(vscode.window.withProgress).toHaveBeenCalledWith(
+      { location: { viewId: 'snipcode.changes' } },
+      expect.any(Function),
+    );
+  });
+
+  it('a repo whose status read fails ends up in the Repository Errors group, not silently dropped', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => { throw new Error('index.lock exists'); }),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+
+    await wb.refresh();
+
+    const groups = wb.tree.getChildren();
+    const errorGroup = groups.find((g) => g.kind === 'group' && g.group === 'error');
+    expect(errorGroup).toBeDefined();
+    if (errorGroup?.kind !== 'group') throw new Error('expected group node');
+    expect(errorGroup.repos[0]).toMatchObject({ repoName: 'a', error: 'index.lock exists' });
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
 
@@ -693,7 +722,52 @@ describe('Changes tree repo badges', () => {
     expect(provider.getTreeItem(fileNode).tooltip).toBe('both.ts\nConflicting (unresolved)');
   });
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S12 empty/error state */
+  it('collapses to an empty root (for viewsWelcome) when every group is empty', async () => {
+    const provider = new ChangesTreeProvider(async () => [repo({})]);
+    await provider.refresh();
+    expect(provider.getChildren()).toEqual([]);
+  });
+
+  it('sets snipcode.changes.hasRepos so viewsWelcome can tell "no repo" from "clean repo" apart', async () => {
+    const provider = new ChangesTreeProvider(async () => [repo({})]);
+    await provider.refresh();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.hasRepos', true);
+
+    const emptyProvider = new ChangesTreeProvider(async () => []);
+    await emptyProvider.refresh();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.hasRepos', false);
+  });
+
+  it('does not collapse the root when there is real content', async () => {
+    const provider = new ChangesTreeProvider(async () => status());
+    await provider.refresh();
+    expect(provider.getChildren()).toHaveLength(2);
+  });
+
+  it('renders a repo whose status failed to read as a warning node, not a silent drop', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { repoName: 'broken', repoPath: '/broken', branch: 'main', staged: [], unstaged: [], conflict: [], error: 'index.lock exists' },
+    ]);
+    await provider.refresh();
+    const groups = provider.getChildren();
+    // Staged/Unstaged stay in the tree (count 0, but the root isn't "every
+    // group empty" once the error group is non-zero) alongside Repository Errors.
+    const errorGroup = groups.find((g) => provider.getTreeItem(g).contextValue === 'group-error');
+    expect(errorGroup).toBeDefined();
+    const repoNode = provider.getChildren(errorGroup!)[0];
+    const item = provider.getTreeItem(repoNode);
+    expect(item.contextValue).toBe('repo-error');
+    expect(item.description).toBe('index.lock exists');
+    expect(item.collapsibleState).toBe(0); // None
+  });
+  /* SNIPCODE-HOOK end */
 });
+
+function repo(over: Partial<RepoStatus>): RepoStatus {
+  return { repoName: 'r', repoPath: '/r', branch: 'main', staged: [], unstaged: [], conflict: [], ...over };
+}
 
 function file(repoPath: string, path: string, group: 'staged' | 'unstaged'): FileNode {
   return { kind: 'file', repoPath, path, status: 'M', group };

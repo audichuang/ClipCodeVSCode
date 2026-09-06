@@ -37,6 +37,7 @@ vi.mock('vscode', () => ({
     activeTextEditor: undefined,
     registerWebviewViewProvider: vi.fn(() => ({ dispose() {} })),
     registerFileDecorationProvider: vi.fn(() => ({ dispose() {} })),
+    withProgress: vi.fn(async (_options: unknown, task: (progress: { report(): void }) => unknown) => task({ report() {} })),
   },
   commands: {
     registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => { H.registeredCommands.push(id); H.commandHandlers[id] = cb; return { dispose() {} }; },
