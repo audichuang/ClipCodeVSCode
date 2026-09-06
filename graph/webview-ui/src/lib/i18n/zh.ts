@@ -732,5 +732,14 @@ export const zh: Record<string, string> = {
   'pr.openNativeDiff': '打开原生 diff',
   'pr.collapseAll': '全部折叠',
   'pr.expandAll': '全部展开',
+  'pr.filterBranches': '筛选分支…',
+  'pr.noMatchingBranches': '没有匹配的分支',
+  'pr.swapBaseHead': '交换 base 和 head',
+  'pr.prevChange': '上一个变更',
+  'pr.nextChange': '下一个变更',
+  'pr.copyFullSource': '复制完整源码',
+  'pr.loading': '正在加载比较结果',
+  'pr.localBranches': '本地',
+  'pr.remoteBranches': '远程',
   /* SNIPCODE-HOOK end */
 };

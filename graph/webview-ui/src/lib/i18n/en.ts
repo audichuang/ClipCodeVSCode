@@ -734,5 +734,14 @@ export const en: Record<string, string> = {
   'pr.openNativeDiff': 'Open native diff',
   'pr.collapseAll': 'Collapse all',
   'pr.expandAll': 'Expand all',
+  'pr.filterBranches': 'Filter branches…',
+  'pr.noMatchingBranches': 'No matching branches',
+  'pr.swapBaseHead': 'Swap base and head',
+  'pr.prevChange': 'Previous change',
+  'pr.nextChange': 'Next change',
+  'pr.copyFullSource': 'Copy Full Source',
+  'pr.loading': 'Loading comparison',
+  'pr.localBranches': 'Local',
+  'pr.remoteBranches': 'Remote',
   /* SNIPCODE-HOOK end */
 };

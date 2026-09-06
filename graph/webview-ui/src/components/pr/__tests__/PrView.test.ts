@@ -1547,3 +1547,48 @@ describe('PrView — Collapse all / Expand all + current-file highlight (P8)', (
   });
 });
 // SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P-P2) dropdown Local/Remote grouping + loading text
+describe('PrView — dropdown Local/Remote grouping (P-P2)', () => {
+  it('groups the branch list under Local/Remote headers with the current branch pinned to the top of its group', async () => {
+    branchStore.branches = [
+      branch({ name: 'zzz-topic' }), // sorts after 'feat' alphabetically but must not come before it once pinned
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+      branch({ name: 'origin/develop', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]); // head dropdown
+
+    await waitFor(() => {
+      const groupLabels = Array.from(container.querySelectorAll('.repo-dropdown-group-label')).map((e) => e.textContent);
+      expect(groupLabels).toEqual(['Local', 'Remote']);
+    });
+    // Within the Local group, 'feat' (current) is pinned first even though
+    // 'zzz-topic' sorts after it alphabetically it was listed first in branchStore.
+    const localGroup = container.querySelector('.repo-dropdown-group-label')!;
+    const localItems: string[] = [];
+    let el = localGroup.nextElementSibling;
+    while (el && el.classList.contains('repo-dropdown-item')) {
+      localItems.push(el.querySelector('.repo-dropdown-item-name')!.textContent!);
+      el = el.nextElementSibling;
+    }
+    expect(localItems[0]).toBe('feat');
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P-P2) hardcoded-string i18n fixes
+describe('PrView — i18n text (P-P2)', () => {
+  it('uses a dedicated pr.loading key instead of borrowing reflog.loading', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    expect(container.textContent).toContain('Loading comparison');
+    expect(container.textContent).not.toContain('Loading reflog');
+  });
+});
+// SNIPCODE-HOOK end
