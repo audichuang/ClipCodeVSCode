@@ -801,7 +801,9 @@ export class MainPanel {
           // Same guard as getFileDiff: rapid switching between uncommitted files
           // must not let a slow earlier diff overwrite the current selection.
           const ticket = this.fileDiffSequence.issue();
-          const diff = await this.gitService.getUncommittedFileDiff(message.payload.file, message.payload.staged);
+          /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+          const diff = await this.gitService.getUncommittedFileDiff(message.payload.file, message.payload.staged, message.payload.oldPath);
+          /* SNIPCODE-HOOK end */
           if (!this.fileDiffSequence.isCurrent(ticket) || !this.isCurrentRepoSnapshot(repoAtMessageStart)) break;
           const key = (message.payload.staged ? 'staged' : 'unstaged') + ':' + message.payload.file;
           this.post({ type: 'fileDiffData', payload: { hash: 'UNCOMMITTED', file: message.payload.file, key, diff } });
