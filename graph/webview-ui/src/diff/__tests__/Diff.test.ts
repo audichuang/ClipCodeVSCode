@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import Diff from '../Diff.svelte';
 import { diffStore } from '../diff-store.svelte';
 import { i18n } from '../../lib/i18n/index.svelte';
@@ -236,6 +237,35 @@ describe('Diff.svelte file header (D6/X2)', () => {
     expect(stagedBadge.querySelector('.stat-del')!.textContent).toBe('−0');
     expect(unstagedBadge.querySelector('.stat-add')!.textContent).toBe('+0');
     expect(unstagedBadge.querySelector('.stat-del')!.textContent).toBe('−1');
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: D7 stop remounting the section on every stage */
+describe('Diff.svelte section identity across a stage/unstage re-push (D7)', () => {
+  it('keeps the same .diff-section DOM node when the store advances to a new generation', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null, 1);
+    const { container } = render(Diff);
+    const before = container.querySelector('.diff-section');
+    expect(before).not.toBeNull();
+
+    // Simulate the post-stage re-push: same repo/file/side, bumped generation
+    // (exactly what DiffPanel.refreshIfCurrent's diffShow does).
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null, 2);
+    await tick();
+
+    const after = container.querySelector('.diff-section');
+    expect(after).toBe(before); // same node — not torn down and recreated
+  });
+
+  it('DOES replace the section set when the side itself changes (staged -> also-unstaged)', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null, 1);
+    const { container } = render(Diff);
+    expect(container.querySelectorAll('.diff-section').length).toBe(1);
+
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff(), 2);
+    await tick();
+    expect(container.querySelectorAll('.diff-section').length).toBe(2);
   });
 });
 /* SNIPCODE-HOOK end */

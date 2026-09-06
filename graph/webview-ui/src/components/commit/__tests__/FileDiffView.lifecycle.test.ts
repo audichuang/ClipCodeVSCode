@@ -107,5 +107,50 @@ describe('FileDiffView lifecycle', () => {
 
     expect(highlightedAtNextTask).toBe(0);
   });
+
+  /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+  it('does not blank an unchanged line back to plain text when the diff prop changes (no flash)', async () => {
+    // Two-line diff on the SAME file/hunk position; only the second line's
+    // content differs between the "before" and "after" (simulating a re-push
+    // after staging a hunk elsewhere in the same file — the pathological case
+    // D7 fixes). Line A's cache key (file+hunkStart+lineIdx+content) is
+    // IDENTICAL across both renders and must stay highlighted throughout.
+    function twoLineDiff(contentB: string): DiffData {
+      return {
+        file: 'src/same.ts',
+        isBinary: false,
+        isImage: false,
+        hunks: [{
+          header: '@@ -1,2 +1,2 @@',
+          oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+          lines: [
+            { type: 'context', content: 'line A', oldLineNumber: 1, newLineNumber: 1 },
+            { type: 'context', content: contentB, oldLineNumber: 2, newLineNumber: 2 },
+          ],
+        }],
+      };
+    }
+
+    const view = render(FileDiffView, { diff: twoLineDiff('line B') });
+    await waitFor(() => {
+      const spans = view.container.querySelectorAll('.line-content [data-highlighted]');
+      expect(spans.length).toBe(2);
+    });
+
+    // Freeze the NEXT highlighter resolution so the re-highlight pass for the
+    // changed line ("line B v2") is still in flight when we inspect the DOM.
+    highlighterState.delayFromCall = highlighterState.calls + 1;
+    await view.rerender({ diff: twoLineDiff('line B v2') });
+
+    const lineContents = view.container.querySelectorAll('.line-content');
+    // Line A: same key as before -> must still be the highlighted span, not
+    // plain escaped text (that's the flash D7 removes).
+    expect(lineContents[0].querySelector('[data-highlighted]')).not.toBeNull();
+    expect(lineContents[0].textContent).toBe('line A');
+    // Line B: new key (content changed) -> not yet highlighted, plain text.
+    expect(lineContents[1].querySelector('[data-highlighted]')).toBeNull();
+    expect(lineContents[1].textContent).toBe('line B v2');
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
