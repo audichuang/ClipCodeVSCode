@@ -408,7 +408,11 @@ describe('ChangesWorkbench commit skips repos with conflicts (R3/S3)', () => {
     expect(view.message).toContain('a');
   });
 
-  it('throws when every checked repo has unresolved conflicts', async () => {
+  /* SNIPCODE-HOOK start: live-QA-3 this used to assert the generic "nothing
+     staged" text, which is what a real-VS Code pass reported as misleading: the
+     repo WAS checked and DID have staged files, conflicts were the reason.
+     Inverted with the fix — the error now names the blocked repos. */
+  it('throws naming the conflicted repos when every checked repo is blocked by conflicts', async () => {
     const a = mkSvc({
       getUncommittedDiff: vi.fn(async () => ({
         staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }],
@@ -417,9 +421,21 @@ describe('ChangesWorkbench commit skips repos with conflicts (R3/S3)', () => {
     setRepos(['/a'], { '/a': a });
     const wb = new ChangesWorkbench();
 
-    await expect(wb.commit('fix', false)).rejects.toThrow(/No repo checked to commit/);
+    await expect(wb.commit('fix', false)).rejects.toThrow(/unresolved conflicts in a\b/);
+    await expect(wb.commit('fix', false)).rejects.not.toThrow(/nothing staged/);
     expect(a.commitIndex).not.toHaveBeenCalled();
   });
+
+  it('still throws the generic message when the block is genuinely nothing staged', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [{ path: 'a.ts', status: 'M' }], conflict: [] })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+
+    await expect(wb.commit('fix', false)).rejects.toThrow(/No repo checked to commit/);
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
 

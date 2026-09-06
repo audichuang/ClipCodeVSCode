@@ -120,7 +120,8 @@
     pointer-events: auto;
   }
 
-  :global(body.vscode-light) .conflict-files-popover {
+  :global(body.vscode-light) .conflict-files-popover,
+  :global(body.vscode-high-contrast-light) .conflict-files-popover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   }
 

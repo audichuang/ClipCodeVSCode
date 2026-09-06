@@ -126,6 +126,7 @@
   "Discard changes to {0} file(s) in {1}? This cannot be undone.": "丢弃 {1} 中 {0} 个文件的更改？此操作无法撤销。",
   "Skipped repo(s) with unresolved conflicts: {0}": "已跳过含未解决冲突的仓库：{0}",
   "No repo checked to commit (or nothing staged)": "没有勾选要提交的仓库（或没有已暂存的更改）",
+  "Cannot commit: unresolved conflicts in {0}. Resolve them, then stage the files.": "无法提交：{0} 有未解决的冲突。请先解决冲突并暂存文件。",
   "No git repo detected": "没有检测到 git 仓库",
   "Snipcode Git: which repos to show": "Snipcode Git：显示哪些仓库",
   "Check the repos to show (all checked = show all)": "勾选要显示的仓库（全选＝显示全部）",

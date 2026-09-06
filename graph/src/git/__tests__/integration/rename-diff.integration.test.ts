@@ -67,18 +67,26 @@ describe('GitService integration — rename-aware diff pathspec', () => {
       commit(repo.path, 'base', { 'old.ts': BASE });
     });
 
-    it('WITHOUT oldPath (current buggy pathspec): a staged rename+modify renders as a whole-file add', async () => {
+    /* SNIPCODE-HOOK start: live-QA-2 this test used to assert the OPPOSITE — that
+       an un-told staged rename renders as a whole-file add. That was the status
+       quo, not the intent: the caller cannot always know the rename (the Diff
+       tab shows both sides of one file, and the unstaged node of a renamed+
+       edited file carries no oldPath), so GitService now resolves the side's
+       rename source from git status itself. Inverted with the fix. */
+    it('with NO oldPath argument: a staged rename+modify still pairs — the service resolves it from git status', async () => {
       runGit(repo.path, ['mv', 'old.ts', 'new.ts']);
       writeFile(repo.path, 'new.ts', renamedAndModified());
       runGit(repo.path, ['add', '-A']);
 
       const diff = await svc.getUncommittedFileDiff('new.ts', true);
       expect(diff).not.toBeNull();
-      expect(diff!.oldPath).toBeUndefined();
-      // Whole file rendered as added, not a small 2-line change.
-      expect(diff!.hunks[0].lines.every(l => l.type === 'add')).toBe(true);
-      expect(diff!.hunks[0].lines.length).toBeGreaterThan(15);
+      expect(diff!.oldPath).toBe('old.ts');
+      expect(diff!.similarity).toBeGreaterThanOrEqual(50);
+      // A small real change, NOT the whole file re-added.
+      const addCount = diff!.hunks.flatMap(h => h.lines).filter(l => l.type === 'add').length;
+      expect(addCount).toBeLessThan(6);
     });
+    /* SNIPCODE-HOOK end */
 
     it('WITH oldPath: a staged rename+modify pairs correctly — oldPath/similarity set, small real hunk', async () => {
       runGit(repo.path, ['mv', 'old.ts', 'new.ts']);
@@ -125,6 +133,63 @@ describe('GitService integration — rename-aware diff pathspec', () => {
       expect(unstaged).not.toBeNull();
       expect(unstaged!.oldPath).toBeUndefined(); // no rename on this side — correct
     });
+
+    /* SNIPCODE-HOOK start: live-QA-2 the reported failure, end to end. Opening
+       this file from the UNSTAGED node gave the panel no oldPath (that node is
+       plain `M`), and both sides were fetched with it — so the staged side lost
+       its `-M` and rendered the rename as a whole-file add. Per-side resolution
+       is what makes the two entry points agree. */
+    it('an RM file renders the SAME on both sides no matter which node opened it', async () => {
+      runGit(repo.path, ['mv', 'old.ts', 'new.ts']);
+      writeFile(repo.path, 'new.ts', renamedAndModified());
+      runGit(repo.path, ['add', 'new.ts']);
+      writeFile(repo.path, 'new.ts', renamedAndModified().replace('validateId', 'validateUserId'));
+
+      // Porcelain really does label the two sides differently — the premise.
+      const status = await svc.getUncommittedDiff();
+      expect(status.staged.find(f => f.path === 'new.ts')).toMatchObject({ status: 'R', oldPath: 'old.ts' });
+      expect(status.unstaged.find(f => f.path === 'new.ts')).toMatchObject({ status: 'M' });
+      expect(status.unstaged.find(f => f.path === 'new.ts')!.oldPath).toBeUndefined();
+
+      // Opened from the unstaged node: no oldPath is passed for either side.
+      const fromUnstagedNode = {
+        staged: await svc.getUncommittedFileDiff('new.ts', true),
+        unstaged: await svc.getUncommittedFileDiff('new.ts', false),
+      };
+      // Opened from the staged node: the panel used to pass 'old.ts' to BOTH.
+      const fromStagedNode = {
+        staged: await svc.getUncommittedFileDiff('new.ts', true, 'old.ts'),
+        unstaged: await svc.getUncommittedFileDiff('new.ts', false, 'old.ts'),
+      };
+
+      expect(fromUnstagedNode.staged!.oldPath).toBe('old.ts');
+      expect(fromUnstagedNode.staged!.fingerprint).toBe(fromStagedNode.staged!.fingerprint);
+      expect(fromUnstagedNode.unstaged!.fingerprint).toBe(fromStagedNode.unstaged!.fingerprint);
+      // Not a whole-file add: the staged side is a handful of changed lines.
+      const adds = fromUnstagedNode.staged!.hunks.flatMap(h => h.lines).filter(l => l.type === 'add').length;
+      expect(adds).toBeLessThan(6);
+    });
+
+    it('an un-told staged rename is refused by the rename guard, not mis-staged as a whole-file patch', async () => {
+      runGit(repo.path, ['mv', 'old.ts', 'new.ts']);
+      writeFile(repo.path, 'new.ts', renamedAndModified());
+      runGit(repo.path, ['add', '-A']);
+
+      // Rendered without oldPath, exactly as the Diff tab now fetches it.
+      const rendered = await svc.getUncommittedFileDiff('new.ts', true);
+      let caught: unknown;
+      try {
+        await svc.unstageHunks('new.ts', [0], rendered!.fingerprint!);
+      } catch (err) {
+        caught = err;
+      }
+      // The fingerprint still matches (both routes resolve the same oldPath),
+      // so this is the honest "can't per-hunk a rename" refusal, not a stale diff.
+      expect(caught).not.toBeInstanceOf(StaleDiffError);
+      expect((caught as Error).message).toMatch(/mode or rename/);
+      expect(runGit(repo.path, ['diff', '--cached', '--name-status', '-M'])).toMatch(/^R\d+\s+old\.ts\s+new\.ts/m);
+    });
+    /* SNIPCODE-HOOK end */
   });
 
   describe('committed (showCommitDiff / commitFileDiff)', () => {

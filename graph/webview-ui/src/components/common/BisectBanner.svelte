@@ -208,21 +208,25 @@
   }
 
   /* ---- Light theme overrides ---- */
-  :global(body.vscode-light) .bisect-banner {
+  :global(body.vscode-light) .bisect-banner,
+  :global(body.vscode-high-contrast-light) .bisect-banner {
     background: rgba(21, 101, 192, 0.07);
     border-color: rgba(21, 101, 192, 0.3);
   }
 
-  :global(body.vscode-light) .bisect-banner.finished {
+  :global(body.vscode-light) .bisect-banner.finished,
+  :global(body.vscode-high-contrast-light) .bisect-banner.finished {
     background: rgba(46, 125, 50, 0.07);
     border-color: rgba(46, 125, 50, 0.3);
   }
 
-  :global(body.vscode-light) .bisect-header i {
+  :global(body.vscode-light) .bisect-header i,
+  :global(body.vscode-high-contrast-light) .bisect-header i {
     color: #1565c0;
   }
 
-  :global(body.vscode-light) .bisect-banner.finished .bisect-header i {
+  :global(body.vscode-light) .bisect-banner.finished .bisect-header i,
+  :global(body.vscode-high-contrast-light) .bisect-banner.finished .bisect-header i {
     color: #2e7d32;
   }
 

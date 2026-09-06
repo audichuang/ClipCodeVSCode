@@ -1499,8 +1499,14 @@ describe('GitService', () => {
       mockExec(service, async (args) => { calls.push(args); return ''; });
 
       await service.getUncommittedFileDiff('src/foo.ts', true);
-      expect(calls[0]).toContain('--cached');
-      expect(calls[0]).toContain('src/foo.ts');
+      /* SNIPCODE-HOOK start: live-QA-2 a status read now precedes the diff — it
+         resolves THIS side's rename source, so the caller no longer has to know
+         it. Assert on the diff call itself, not on "the first exec". */
+      expect(calls[0][0]).toBe('status');
+      const diff = calls.find(a => a[0] === 'diff')!;
+      expect(diff).toContain('--cached');
+      expect(diff).toContain('src/foo.ts');
+      /* SNIPCODE-HOOK end */
     });
 
     it('omits --cached for unstaged files', async () => {
@@ -1508,8 +1514,11 @@ describe('GitService', () => {
       mockExec(service, async (args) => { calls.push(args); return ''; });
 
       await service.getUncommittedFileDiff('src/foo.ts', false);
-      expect(calls[0]).not.toContain('--cached');
-      expect(calls[0]).toContain('src/foo.ts');
+      /* SNIPCODE-HOOK start: live-QA-2 see the staged case above */
+      const diff = calls.find(a => a[0] === 'diff')!;
+      expect(diff).not.toContain('--cached');
+      expect(diff).toContain('src/foo.ts');
+      /* SNIPCODE-HOOK end */
     });
 
     /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */

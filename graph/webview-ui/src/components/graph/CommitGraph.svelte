@@ -2677,7 +2677,8 @@
     box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.12);
   }
 
-  :global(body.vscode-light) .ref-badge.drag-over {
+  :global(body.vscode-light) .ref-badge.drag-over,
+  :global(body.vscode-high-contrast-light) .ref-badge.drag-over {
     box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.06);
   }
 
@@ -2784,11 +2785,19 @@
   /* SNIPCODE-HOOK end */
 
   /* High contrast overrides */
-  :global(body.vscode-high-contrast) .ref-badge {
+  /* SNIPCODE-HOOK start: live-QA-1 HC DARK only. This block sits after the light
+     rules with equal specificity, so without the exclusion it won the cascade in
+     HC Light too and painted white text on the white badge — the branch name
+     vanished, leaving only its colored outline. `.badge-head` survived by being
+     one class more specific, which is why only ordinary branches looked broken.
+     The exclusion is a no-op wherever `vscode-high-contrast-light` is absent, so
+     HC Dark is untouched either way. */
+  :global(body.vscode-high-contrast:not(.vscode-high-contrast-light)) .ref-badge {
     background: transparent;
     color: #fff;
     border: 1px solid var(--badge-color);
   }
+  /* SNIPCODE-HOOK end */
 
   .badge-cloud-only {
     padding: 1px 5px 1px calc(var(--badge-bar-width, 4px) + 4px);
@@ -2816,8 +2825,11 @@
   }
 
   :global(body.vscode-light) .ref-badge:hover,
+  :global(body.vscode-high-contrast-light) .ref-badge:hover,
   :global(body.vscode-light) .badge-cloud-only:hover + .ref-badge,
-  :global(body.vscode-light) .badge-cloud-only:has(+ .ref-badge:hover) {
+  :global(body.vscode-high-contrast-light) .badge-cloud-only:hover + .ref-badge,
+  :global(body.vscode-light) .badge-cloud-only:has(+ .ref-badge:hover),
+  :global(body.vscode-high-contrast-light) .badge-cloud-only:has(+ .ref-badge:hover) {
     box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.06);
   }
 
@@ -2901,39 +2913,48 @@
   }
 
   /* ---- Light theme overrides ---- */
-  :global(body.vscode-light) .bisect-indicator {
+  :global(body.vscode-light) .bisect-indicator,
+  :global(body.vscode-high-contrast-light) .bisect-indicator {
     background: rgba(200, 40, 30, 0.08);
     border-color: rgba(200, 40, 30, 0.3);
     color: #b71c1c;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   }
 
-  :global(body.vscode-light) .bisect-indicator-hash {
+  :global(body.vscode-light) .bisect-indicator-hash,
+  :global(body.vscode-high-contrast-light) .bisect-indicator-hash {
     color: #b71c1c;
   }
 
-  :global(body.vscode-light) .bisect-indicator-cancel:hover {
+  :global(body.vscode-light) .bisect-indicator-cancel:hover,
+  :global(body.vscode-high-contrast-light) .bisect-indicator-cancel:hover {
     background: rgba(0, 0, 0, 0.06);
   }
 
   :global(body.vscode-light) .commit-row.compare-base,
-  :global(body.vscode-light) .commit-row.compare-active {
+  :global(body.vscode-high-contrast-light) .commit-row.compare-base,
+  :global(body.vscode-light) .commit-row.compare-active,
+  :global(body.vscode-high-contrast-light) .commit-row.compare-active {
     background: rgba(40, 100, 180, 0.08);
     box-shadow: inset 3px 0 0 #1a5fa0;
   }
 
   :global(body.vscode-light) .commit-row.bisect-bad,
-  :global(body.vscode-light) .commit-row.bisect-start-bad {
+  :global(body.vscode-high-contrast-light) .commit-row.bisect-bad,
+  :global(body.vscode-light) .commit-row.bisect-start-bad,
+  :global(body.vscode-high-contrast-light) .commit-row.bisect-start-bad {
     background: rgba(200, 40, 30, 0.08);
     box-shadow: inset 3px 0 0 #b71c1c;
   }
 
-  :global(body.vscode-light) .commit-row.bisect-start-good {
+  :global(body.vscode-light) .commit-row.bisect-start-good,
+  :global(body.vscode-high-contrast-light) .commit-row.bisect-start-good {
     background: rgba(46, 125, 50, 0.08);
     box-shadow: inset 3px 0 0 #2e7d32;
   }
 
-  :global(body.vscode-light) .commit-row.bisect-culprit {
+  :global(body.vscode-light) .commit-row.bisect-culprit,
+  :global(body.vscode-high-contrast-light) .commit-row.bisect-culprit {
     background: rgba(200, 100, 0, 0.08);
     box-shadow: inset 3px 0 0 #e65100;
   }
