@@ -517,6 +517,46 @@
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) +/- stats — computed straight from the
+     already-in-memory parsed diffs (diffs[].hunks[].lines), so no host/wire
+     change is needed for a "close enough to git" total. Only exact parity
+     with `git diff --numstat` would require a host round-trip; not needed
+     here. A file with no countable diff (binary, or missing from `diffs` —
+     the same placeholder-eligible set the Files sub-tab already falls back
+     for) returns null so callers can show "bin" instead of a false "+0 -0". */
+  function diffStats(d: DiffData | undefined): { add: number; del: number } | null {
+    if (!d || d.isBinary || d.hunks.length === 0) return null;
+    let add = 0;
+    let del = 0;
+    for (const h of d.hunks) {
+      for (const l of h.lines) {
+        if (l.type === 'add') add++;
+        else if (l.type === 'delete') del++;
+      }
+    }
+    return { add, del };
+  }
+
+  function fileStats(file: PrFile): { add: number; del: number } | null {
+    return diffStats(diffs.find((x) => x.file === file.path));
+  }
+
+  let totalStats = $derived.by(() => {
+    let add = 0;
+    let del = 0;
+    for (const f of files) {
+      const s = fileStats(f);
+      if (s) { add += s.add; del += s.del; }
+    }
+    return { add, del };
+  });
+
+  function copyMergeBase() {
+    if (!mergeBase) return;
+    vscode.postMessage({ type: 'copyToClipboard', payload: { text: mergeBase } });
+  }
+  /* SNIPCODE-HOOK end */
+
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
@@ -675,18 +715,28 @@
     <!-- SNIPCODE-HOOK end -->
   </div>
 
-  {#if behind > 0}
-    <div class="pr-banner pr-banner-warning">
-      <i class="codicon codicon-warning"></i>
-      {t('pr.behindWarning', { count: behind, base: base ?? '' })}
+  <!-- SNIPCODE-HOOK start: PR tab (P4/X2) merged stats row — replaces the two
+       separate ahead/behind banners (each its own full-width row, and the
+       ahead count duplicated the Commits sub-tab's own counter) with one
+       compact line: ahead/behind/merge-base/file-count/total +/-. Gated on
+       mergeBase !== null (only cleared on a fresh request or a host error —
+       see loadCommits/the error handler) so it disappears exactly when there
+       is no real compare loaded, and (P1/R7) stays up during a background
+       refresh instead of flickering. -->
+  {#if mergeBase !== null}
+    <div class="pr-stats-row">
+      {#if ahead > 0}<span class="pr-stat pr-stat-ahead"><i class="codicon codicon-arrow-up"></i>{t('pr.statsAhead', { count: ahead })}</span>{/if}
+      {#if behind > 0}<span class="pr-stat pr-stat-behind"><i class="codicon codicon-arrow-down"></i>{t('pr.statsBehind', { count: behind })}</span>{/if}
+      <button class="pr-stat pr-merge-base" onclick={copyMergeBase} use:tooltip={t('pr.copyMergeBase')}>
+        <i class="codicon codicon-git-commit"></i>{mergeBase.slice(0, 7)}
+      </button>
+      <span class="pr-stat">{t('pr.statsFiles', { count: files.length })}</span>
+      {#if totalStats.add > 0 || totalStats.del > 0}
+        <span class="pr-stat pr-stat-add">+{totalStats.add}</span><span class="pr-stat pr-stat-del">−{totalStats.del}</span>
+      {/if}
     </div>
   {/if}
-  {#if ahead > 0}
-    <div class="pr-banner pr-banner-info">
-      <i class="codicon codicon-arrow-up"></i>
-      {t('pr.aheadInfo', { count: ahead, base: base ?? '' })}
-    </div>
-  {/if}
+  <!-- SNIPCODE-HOOK end -->
 
   <div class="pr-subtabs">
     <button class="pr-subtab" class:active={subTab === 'files'} onclick={() => { subTab = 'files'; }}>
@@ -749,9 +799,14 @@
         <div class="pr-files-layout">
           <div class="pr-file-list" style="width: {fileListWidth}px; flex-shrink: 0;">
             {#each files as file (file.path)}
+              {@const s = fileStats(file)}
               <button class="pr-file-row" onclick={() => scrollToFile(file)}>
                 <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
                 <span class="pr-file-path">{file.path}</span>
+                <!-- SNIPCODE-HOOK: PR tab (P4/X2) per-file +/- stats -->
+                <span class="pr-file-stats">
+                  {#if s}<span class="pr-stat-add">+{s.add}</span><span class="pr-stat-del">−{s.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                </span>
               </button>
             {/each}
           </div>
@@ -986,24 +1041,49 @@
   }
   /* SNIPCODE-HOOK end */
 
-  .pr-banner {
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) merged stats row */
+  .pr-stats-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 4px 14px;
     padding: 8px 14px;
     font-size: inherit;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
   }
 
-  .pr-banner-warning {
-    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #ff9800) 12%, transparent);
-    color: var(--vscode-editorWarning-foreground, #ff9800);
+  .pr-stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: inherit;
+    font-family: var(--vscode-editor-font-family, monospace);
+    padding: 0;
   }
 
-  .pr-banner-info {
-    background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 12%, transparent);
+  .pr-stat-ahead { color: var(--vscode-button-background, #0e639c); }
+  .pr-stat-behind { color: var(--vscode-editorWarning-foreground, #ff9800); }
+
+  .pr-merge-base {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  .pr-merge-base:hover {
+    background: rgba(128, 128, 128, 0.15);
     color: var(--text-primary);
   }
+
+  .pr-stat-add { color: #4caf50; }
+  .pr-stat-del { color: #f44336; }
+  .pr-stat-bin { opacity: 0.6; }
+  /* SNIPCODE-HOOK end */
 
   .pr-subtabs {
     display: flex;
@@ -1217,6 +1297,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* SNIPCODE-HOOK start: PR tab (P4/X2) per-file +/- stats */
+  .pr-file-stats {
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+    font-size: 0.85em;
+    font-family: var(--vscode-editor-font-family, monospace);
+  }
+  /* SNIPCODE-HOOK end */
 
   .pr-commit-row {
     display: flex;

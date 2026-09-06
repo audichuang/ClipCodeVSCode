@@ -724,5 +724,10 @@ export const ko: Record<string, string> = {
   'pr.emptyError': '비교 결과를 불러오지 못했습니다: {message}',
   'pr.emptySameRef': '{base}와(과) {head}가 동일한 ref입니다 — 비교할 내용이 없습니다.',
   'pr.emptyUpToDate': '{head}는(은) 이미 {base}에 완전히 병합되어 있습니다.',
+  'pr.statsAhead': '{count}개 앞섬',
+  'pr.statsBehind': '{count}개 뒤처짐',
+  'pr.statsFiles': '파일 {count}개',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': 'merge-base 해시 복사',
   /* SNIPCODE-HOOK end */
 };

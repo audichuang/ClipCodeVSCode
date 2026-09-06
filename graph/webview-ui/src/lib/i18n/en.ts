@@ -726,5 +726,10 @@ export const en: Record<string, string> = {
   'pr.emptyError': 'Could not load comparison: {message}',
   'pr.emptySameRef': '{base} and {head} are the same ref — nothing to compare.',
   'pr.emptyUpToDate': '{head} is already fully merged into {base}.',
+  'pr.statsAhead': '{count} ahead',
+  'pr.statsBehind': '{count} behind',
+  'pr.statsFiles': '{count} files',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': 'Copy merge-base hash',
   /* SNIPCODE-HOOK end */
 };

@@ -127,14 +127,22 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     return render(PrView);
   }
 
-  it('shows the behind banner and ahead info once counts arrive', async () => {
+  // SNIPCODE-HOOK: PR tab (P4/X2) — replaces the old two-separate-banners
+  // assertion ("N commit(s) behind/ahead of ...") now that both banners are
+  // merged into one .pr-stats-row (ahead/behind/merge-base/file-count/+-).
+  it('shows a merged ahead/behind/merge-base/files stats row once counts arrive', async () => {
     const { container } = setup();
     deliver('commitsBetween', {
-      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 2, behind: 3, files: [],
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 2, behind: 3,
+      files: [{ path: 'a.ts', status: 'M' }],
     });
     await waitFor(() => {
-      expect(container.textContent).toContain('3 commit(s) behind origin/main');
-      expect(container.textContent).toContain('2 commit(s) ahead of origin/main');
+      const row = container.querySelector('.pr-stats-row');
+      expect(row).toBeTruthy();
+      expect(row!.textContent).toContain('2 ahead');
+      expect(row!.textContent).toContain('3 behind');
+      expect(row!.textContent).toContain('abcdef1'); // merge-base, sliced to 7 chars
+      expect(row!.textContent).toContain('1 files');
     });
   });
 
@@ -181,7 +189,9 @@ describe('PrView — commits, ahead/behind, and Files (Important 1: files come f
     });
     await new Promise((r) => setTimeout(r, 0));
     expect(container.textContent).not.toContain('stale.ts');
-    expect(container.textContent).not.toContain('5 commit(s) behind');
+    // SNIPCODE-HOOK: PR tab (P4/X2) — mergeBase (and so .pr-stats-row) never
+    // got set from the stale/mismatched response, so the row shouldn't exist.
+    expect(container.querySelector('.pr-stats-row')).toBeNull();
   });
 
   it('discards a commitsBetween response for a base no longer selected (defense in depth)', async () => {
@@ -1222,6 +1232,74 @@ describe('PrView — resizable file-list/diff splitter', () => {
     expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
     expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
     removeSpy.mockRestore();
+  });
+});
+// SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P4/X2) +/- stats — the merged
+// ahead/behind/merge-base/files/total-+- row (replacing the two separate
+// banners) and per-file +/- computed client-side from the already-parsed
+// diffs, with "bin" for a file that has no countable diff (binary, or a
+// hunkless placeholder-eligible entry).
+describe('PrView — stats row and per-file +/- (P4/X2)', () => {
+  function diffWithLines(file: string, adds: number, dels: number): DiffData {
+    const lines: Array<{ type: 'add' | 'delete' | 'context'; content: string }> = [];
+    for (let i = 0; i < adds; i++) lines.push({ type: 'add', content: `add${i}` });
+    for (let i = 0; i < dels; i++) lines.push({ type: 'delete', content: `del${i}` });
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: dels, newStart: 1, newLines: adds, lines }],
+    };
+  }
+
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    return render(PrView);
+  }
+
+  it('shows per-file +/- from the parsed diff, "bin" for a binary file, and a matching total in the stats row', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }, { path: 'assets/logo.png', status: 'M' }],
+      diffs: [diffWithLines('src/a.ts', 2, 1), { file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    });
+    await waitFor(() => {
+      const rows = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'));
+      const aRow = rows.find((b) => b.textContent?.includes('src/a.ts'))!;
+      expect(aRow.querySelector('.pr-file-stats')?.textContent).toContain('+2');
+      expect(aRow.querySelector('.pr-file-stats')?.textContent).toContain('−1');
+      const binRow = rows.find((b) => b.textContent?.includes('logo.png'))!;
+      expect(binRow.querySelector('.pr-file-stats')?.textContent).toContain('bin');
+      const statsRow = container.querySelector('.pr-stats-row')!;
+      expect(statsRow.textContent).toContain('+2');
+      expect(statsRow.textContent).toContain('−1');
+    });
+  });
+
+  it('clicking the merge-base hash copies the full hash via copyToClipboard', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'abcdef1234', ahead: 1, behind: 0, files: [],
+    });
+    const btn = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.pr-merge-base');
+      expect(b).toBeTruthy();
+      expect(b!.textContent).toContain('abcdef1');
+      return b!;
+    });
+    await fireEvent.click(btn);
+    const req = lastMessageOf('copyToClipboard');
+    expect(req?.payload).toEqual({ text: 'abcdef1234' });
+  });
+
+  it('the stats row disappears (no mergeBase) before any compare has loaded', () => {
+    branchStore.branches = [branch({ name: 'some-topic-branch' })];
+    const { container } = render(PrView);
+    expect(container.querySelector('.pr-stats-row')).toBeNull();
   });
 });
 // SNIPCODE-HOOK end
