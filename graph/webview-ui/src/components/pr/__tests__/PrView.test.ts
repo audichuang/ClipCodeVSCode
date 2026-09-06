@@ -1459,3 +1459,91 @@ describe('PrView — diff section header (P7)', () => {
   });
 });
 // SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all + left-column
+// current-file highlight — bulk controls over the same collapsedFiles Set
+// the per-file chevron (P7) toggles, plus a click-based `class:selected` on
+// both columns (the plan's explicitly-sanctioned minimal fallback over an
+// IntersectionObserver, which happy-dom/vitest can't exercise anyway).
+describe('PrView — Collapse all / Expand all + current-file highlight (P8)', () => {
+  function diffFixture(file: string, line: string): DiffData {
+    return {
+      file, isBinary: false, isImage: false,
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ type: 'add', content: line, newLineNumber: 1 }] }],
+    };
+  }
+
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const utils = render(PrView);
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/a.ts', status: 'M' }, { path: 'src/b.ts', status: 'M' }, { path: 'assets/logo.png', status: 'M' }],
+      diffs: [diffFixture('src/a.ts', 'hello-a'), diffFixture('src/b.ts', 'hello-b'), { file: 'assets/logo.png', isBinary: true, isImage: true, hunks: [] }],
+    });
+    return utils;
+  }
+
+  it('Collapse all hides every inline diff (skipping the placeholder-eligible binary file); Expand all brings them all back', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    const collapseBtn = container.querySelector<HTMLButtonElement>('[aria-label="Collapse all"]')!;
+    await fireEvent.click(collapseBtn);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(0);
+    // Headers (including the binary file's) stay — collapsing hides the body, not the row.
+    expect(container.querySelectorAll('.pr-diff-section-header').length).toBe(3);
+
+    const expandBtn = container.querySelector<HTMLButtonElement>('[aria-label="Expand all"]')!;
+    await fireEvent.click(expandBtn);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(2);
+  });
+
+  it('clicking a file in the left list highlights it (class:selected) in both the left row and the right section', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    const rowB = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/b.ts'))!;
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    await fireEvent.click(rowB);
+
+    expect(rowB.classList.contains('selected')).toBe(true);
+    const rowA = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/a.ts'))!;
+    expect(rowA.classList.contains('selected')).toBe(false);
+
+    const sectionB = container.querySelector('[data-pr-file="src/b.ts"]')!;
+    expect(sectionB.classList.contains('selected')).toBe(true);
+    const sectionA = container.querySelector('[data-pr-file="src/a.ts"]')!;
+    expect(sectionA.classList.contains('selected')).toBe(false);
+  });
+
+  it('resets the highlight and collapse state when the compare changes (swap)', async () => {
+    const { container } = setup();
+    await waitFor(() => expect(container.querySelectorAll('.diff-hunk').length).toBe(2));
+
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const rowB = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+      .find((b) => b.textContent?.includes('src/b.ts'))!;
+    await fireEvent.click(rowB);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Collapse all"]')!);
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(0);
+
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.pr-swap-btn')!);
+    deliver('commitsBetween', {
+      base: 'feat', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 0, behind: 0,
+      files: [{ path: 'src/c.ts', status: 'M' }],
+      diffs: [diffFixture('src/c.ts', 'hello-c')],
+    });
+    await waitFor(() => expect(container.textContent).toContain('hello-c'));
+    // The new compare's file starts expanded and unselected, not carrying
+    // over the previous compare's collapse/selection state.
+    expect(container.querySelector('.diff-hunk')).toBeTruthy();
+    expect(container.querySelector('.pr-file-row.selected')).toBeNull();
+  });
+});
+// SNIPCODE-HOOK end

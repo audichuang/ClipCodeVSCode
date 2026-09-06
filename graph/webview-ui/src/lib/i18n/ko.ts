@@ -730,5 +730,7 @@ export const ko: Record<string, string> = {
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': 'merge-base 해시 복사',
   'pr.openNativeDiff': '기본 diff 열기',
+  'pr.collapseAll': '모두 접기',
+  'pr.expandAll': '모두 펼치기',
   /* SNIPCODE-HOOK end */
 };

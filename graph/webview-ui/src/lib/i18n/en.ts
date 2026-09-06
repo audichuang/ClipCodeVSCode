@@ -732,5 +732,7 @@ export const en: Record<string, string> = {
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': 'Copy merge-base hash',
   'pr.openNativeDiff': 'Open native diff',
+  'pr.collapseAll': 'Collapse all',
+  'pr.expandAll': 'Expand all',
   /* SNIPCODE-HOOK end */
 };
