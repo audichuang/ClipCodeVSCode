@@ -707,6 +707,7 @@
     const g2Opacity = highlighted ? 1 : 0.35;
     return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: R1 — double-click on a row no longer checks out a
      branch with zero confirmation (R1). This function had no other caller
