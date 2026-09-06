@@ -335,8 +335,12 @@
   // Rows of breathing room kept between the selection and the viewport edge when
   // stepping with the arrow keys, so context above/below the selection stays visible.
   const KEYBOARD_NAV_SCROLL_MARGIN_ROWS = 3;
-  // SourceGit uses unitWidth=12 for X coordinates, we scale them up for display
-  const X_SCALE = 1.05; // multiply SourceGit X coords by this for pixel positions
+  // SourceGit uses unitWidth=12 for X coordinates, we scale them up for display.
+  /* SNIPCODE-HOOK start: G5 — 1.05 (12.6px lanes) left only 7.6px of clearance
+     between a dot and a neighboring line (vs IntelliJ's 11.25px); 1.25 (15px
+     lanes) brings that in line without the graph column ballooning. */
+  const X_SCALE = 1.25; // multiply SourceGit X coords by this for pixel positions
+  /* SNIPCODE-HOOK end */
   const BUFFER_ROWS = 20; // Larger buffer to keep lines visible during scroll
 
   let container: HTMLDivElement | undefined = $state();
