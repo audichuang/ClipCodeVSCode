@@ -126,7 +126,9 @@ export type WebviewMessage =
   | { type: 'showNotification'; payload: { message: string } }
   | { type: 'showTagDetails'; payload: { name: string } }
   | { type: 'getUncommittedDiff' }
-  | { type: 'getUncommittedFileDiff'; payload: { file: string; staged: boolean } }
+  /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+  | { type: 'getUncommittedFileDiff'; payload: { file: string; staged: boolean; oldPath?: string } }
+  /* SNIPCODE-HOOK end */
   | { type: 'getMultiCommitSections'; payload: { hashes: string[] } }
   | { type: 'getAvatar'; payload: { email: string; size: number } }
   | { type: 'openExternalUrl'; payload: { url: string } }

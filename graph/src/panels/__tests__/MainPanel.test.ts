@@ -18,6 +18,7 @@ const H = vi.hoisted(() => {
     showCommitDiff: vi.fn(async () => []),
     showCommitFiles: vi.fn(async () => []),
     getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [] })),
+    getUncommittedFileDiff: vi.fn(async () => null),
     resolveDiffBaseRef: vi.fn(async () => 'parentsha'),
     getConflictFiles: vi.fn(async () => []),
     getOperationState: vi.fn(async () => ({ type: null })),
@@ -392,6 +393,14 @@ describe('MainPanel orchestration logic', () => {
     H.git.showCommitDiff.mockResolvedValueOnce([{ file: 'new.ts', hunks: [], oldPath: 'old.ts' }] as never);
     await dispatch({ type: 'getFileDiff', payload: { hash: 'h', file: 'new.ts', oldPath: 'old.ts' } });
     expect(H.git.showCommitDiff).toHaveBeenCalledWith('h', 'new.ts', 'old.ts');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+  it('getUncommittedFileDiff forwards oldPath to gitService.getUncommittedFileDiff so a rename can be paired', async () => {
+    H.git.getUncommittedFileDiff.mockResolvedValueOnce({ file: 'new.ts', hunks: [], oldPath: 'old.ts' } as never);
+    await dispatch({ type: 'getUncommittedFileDiff', payload: { file: 'new.ts', staged: true, oldPath: 'old.ts' } });
+    expect(H.git.getUncommittedFileDiff).toHaveBeenCalledWith('new.ts', true, 'old.ts');
   });
   /* SNIPCODE-HOOK end */
 

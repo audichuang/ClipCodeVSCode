@@ -256,7 +256,7 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
   /** Revert the working-tree edits for the selected unstaged file(s) — tracked
-   *  paths restore from HEAD, untracked paths are deleted. Destructive and
+   *  paths restore from the index, untracked paths are deleted. Destructive and
    *  unrecoverable, so it always confirms via a modal warning first. */
   private async discard(nodes: FileNode[]): Promise<void> {
     if (nodes.length === 0) return;
