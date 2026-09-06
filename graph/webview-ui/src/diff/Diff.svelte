@@ -3,13 +3,23 @@
   import { diffStore, type DiffSide } from './diff-store.svelte';
   import { postStageHunk, postStageLines, postOpenSide } from './messaging';
   import { t } from '../lib/i18n/index.svelte';
+  import { getVsCodeApi } from '../lib/vscode-api';
   import FileDiffView from '../components/commit/FileDiffView.svelte';
 
   const store = diffStore;
-  // Default side-by-side; own the toggle locally (PrView pattern) so we can pass
-  // diffMode + hideModeToggle to FileDiffView while still letting the user flip.
-  // Shared across both sections.
-  let mode = $state<'inline' | 'side-by-side'>('side-by-side');
+  /* SNIPCODE-HOOK start: D5 default inline + remember the user's last choice */
+  // SBS is the least capable mode (no hunk header, no Stage Hunk, no line
+  // drag-select — see FileDiffView's SBS branch), so it should never be the
+  // silent default. Restore the user's last choice from webview state (this
+  // panel's own acquireVsCodeApi(), unrelated to any other webview) so a
+  // switch persists across reopening the Diff tab.
+  type DiffState = { diffMode?: 'inline' | 'side-by-side' };
+  let mode = $state<'inline' | 'side-by-side'>((getVsCodeApi().getState() as DiffState | undefined)?.diffMode ?? 'inline');
+  function setMode(next: 'inline' | 'side-by-side'): void {
+    mode = next;
+    getVsCodeApi().setState({ ...(getVsCodeApi().getState() as DiffState | undefined), diffMode: next });
+  }
+  /* SNIPCODE-HOOK end */
 
   // Per-side collapse; reset when the shown file changes. Keyed on repo + path so
   // the same relative path in a different repo doesn't inherit the prior collapse.
@@ -53,8 +63,8 @@
     {:else}
     <div class="mode-bar">
       <div class="diff-mode-toggle">
-        <button class:active={mode === 'inline'} onclick={() => { mode = 'inline'; }}>{t('details.inline')}</button>
-        <button class:active={mode === 'side-by-side'} onclick={() => { mode = 'side-by-side'; }}>{t('details.sideBySide')}</button>
+        <button class:active={mode === 'inline'} onclick={() => setMode('inline')}>{t('details.inline')}</button>
+        <button class:active={mode === 'side-by-side'} onclick={() => setMode('side-by-side')}>{t('details.sideBySide')}</button>
       </div>
     </div>
     <div class="sections">
