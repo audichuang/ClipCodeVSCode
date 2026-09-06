@@ -1182,19 +1182,21 @@
                 {/if}
               {/each}
             {/snippet}
+            <!-- SNIPCODE-HOOK start: M P2 — hardcoded English → i18n -->
             {#if uncommittedTab === 'staged'}
               {#if uncommittedFiles.staged.length > 0}
                 {@render renderUncommittedTree(stagedTree, 0, true)}
               {:else}
-                <div class="empty-state-text">No staged changes</div>
+                <div class="empty-state-text">{t('details.noStagedChanges')}</div>
               {/if}
             {:else}
               {#if uncommittedFiles.unstaged.length > 0}
                 {@render renderUncommittedTree(unstagedTree, 0, false)}
               {:else}
-                <div class="empty-state-text">No unstaged changes</div>
+                <div class="empty-state-text">{t('details.noUnstagedChanges')}</div>
               {/if}
             {/if}
+            <!-- SNIPCODE-HOOK end -->
           {:else if activeHash !== 'UNCOMMITTED'}
           {#snippet renderTree(nodes: FileTreeNode[], depth: number)}
             {#each nodes as node}

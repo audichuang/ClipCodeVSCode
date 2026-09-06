@@ -730,4 +730,7 @@ export const zh: Record<string, string> = {
   'details.expandAll': '全部展开',
   'details.collapseAll': '全部折叠',
   'details.workingTree': '工作树',
+  'flow.loading': '加载中……',
+  'details.noStagedChanges': '没有暂存的更改',
+  'details.noUnstagedChanges': '没有未暂存的更改',
 };
