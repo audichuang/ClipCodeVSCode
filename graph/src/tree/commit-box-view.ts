@@ -62,7 +62,9 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
           type: 'error',
           payload: { source: 'workbenchCommit', message: err instanceof Error ? err.message : String(err) },
         });
-        void vscode.window.showErrorMessage(`提交失敗：${err instanceof Error ? err.message : String(err)}`);
+        /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+        void vscode.window.showErrorMessage(vscode.l10n.t('Commit failed: {0}', err instanceof Error ? err.message : String(err)));
+        /* SNIPCODE-HOOK end */
       }
     });
   }

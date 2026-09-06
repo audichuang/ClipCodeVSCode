@@ -51,7 +51,9 @@ vi.mock('vscode', () => {
       }),
       /* SNIPCODE-HOOK end */
     },
-    l10n: { t: (s: string) => s },
+    /* SNIPCODE-HOOK start: X1-4 l10n mock substitutes {0}/{1}/… like the real API */
+    l10n: { t: (s: string, ...args: unknown[]) => s.replace(/\{(\d+)\}/g, (_m, i) => String(args[Number(i)])) },
+    /* SNIPCODE-HOOK end */
   };
 });
 vi.mock('../../services/repo-discovery', () => ({
@@ -217,7 +219,7 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     setRepos(['/a'], { '/a': a });
     const wb = new ChangesWorkbench();
     wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Discard' as never);
 
     const target = file('/a', 'a-worktree.ts', 'unstaged');
     await H.commands.get('snipcode.git.discard')!(target, [target]);
@@ -225,7 +227,7 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
       expect.stringContaining('a-worktree.ts'),
       { modal: true },
-      '捨棄',
+      'Discard',
     );
     expect(a.discardPaths).toHaveBeenCalledWith([target]);
   });
@@ -248,7 +250,7 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     setRepos(['/a'], { '/a': a });
     const wb = new ChangesWorkbench();
     wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Discard' as never);
 
     const repoNode = {
       kind: 'repo', repoName: 'a', repoPath: '/a', branch: 'main', group: 'unstaged',
@@ -415,7 +417,7 @@ describe('ChangesWorkbench commit skips repos with conflicts (R3/S3)', () => {
     setRepos(['/a'], { '/a': a });
     const wb = new ChangesWorkbench();
 
-    await expect(wb.commit('fix', false)).rejects.toThrow(/沒有勾選要提交/);
+    await expect(wb.commit('fix', false)).rejects.toThrow(/No repo checked to commit/);
     expect(a.commitIndex).not.toHaveBeenCalled();
   });
 });
@@ -477,7 +479,7 @@ describe('ChangesWorkbench activity-bar badge (S P2)', () => {
 
     await wb.refresh();
 
-    expect(view.badge).toEqual({ value: 1, tooltip: '1 個 repo 待提交' });
+    expect(view.badge).toEqual({ value: 1, tooltip: '1 repo(s) awaiting commit' });
   });
 
   it('clears the badge when nothing is staged', async () => {
@@ -578,7 +580,7 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
     await new ChangesWorkbench().fetchAll();
     expect(b.fetch).toHaveBeenCalled(); // kept going past /a's failure
     const msg = vi.mocked(vscode.window.showErrorMessage).mock.calls[0][0] as string;
-    expect(msg).toContain('1/2 成功');
+    expect(msg).toContain('1/2 succeeded');
     expect(msg).toContain('a: auth denied');
   });
 
@@ -612,7 +614,7 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
     expect(b.pushCurrentBranch).toHaveBeenCalled();
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
     const msg = vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0] as string;
-    expect(msg).toContain('略過');
+    expect(msg).toContain('skipped');
   });
 
   it('says so when the workspace has no repos', async () => {
