@@ -1,6 +1,9 @@
 <script lang="ts">
   import { workbenchStore } from './workbench-store.svelte';
   import { postCommit, saveDraft, requestAmendPrefill } from './messaging';
+  /* SNIPCODE-HOOK start: X1-5 workbench strings through webview i18n */
+  import { t } from '../lib/i18n/index.svelte';
+  /* SNIPCODE-HOOK end */
 
   const store = workbenchStore;
 
@@ -41,12 +44,12 @@
   {:else if failures.length}
     <p class="banner error"><span class="codicon codicon-error"></span>{failures.map((f) => `${f.repoName}: ${f.error}`).join('；')}</p>
   {:else if okCount > 0}
-    <p class="banner ok"><span class="codicon codicon-check"></span>已提交 {okCount} 個 repo</p>
+    <p class="banner ok"><span class="codicon codicon-check"></span>{t('workbench.committedCount', { count: okCount })}</p>
   {/if}
 
   <textarea
     bind:value={store.message}
-    placeholder="Commit 訊息（共用一則，套用到所有已暫存的 repo）"
+    placeholder={t('workbench.messagePlaceholder')}
     rows="3"
     onkeydown={onTextareaKeydown}
   ></textarea>
@@ -54,21 +57,21 @@
   <div class="actions">
     <button class="btn primary" disabled={!store.canCommit} onclick={() => postCommit(false)}>
       {#if store.committing}<span class="codicon codicon-loading spin"></span>{:else}<span class="codicon codicon-check"></span>{/if}
-      Commit
+      {t('workbench.commit')}
     </button>
     <button
       class="btn secondary"
       disabled={!store.canAmend}
       onclick={onAmendClick}
-      title="Amend 上一個 commit（僅單一 repo；訊息空白時會先帶入舊訊息）"
+      title={t('workbench.amendTitle')}
     >
-      Amend
+      {t('workbench.amend')}
     </button>
   </div>
 
   <!-- SNIPCODE-HOOK start: S13 "already pushed" warning for Amend -->
   {#if store.amendTargetPushed}
-    <p class="banner warning"><span class="codicon codicon-warning"></span>此 commit 已推送到遠端，Amend 會改寫已推送的歷史。</p>
+    <p class="banner warning"><span class="codicon codicon-warning"></span>{t('workbench.amendPushedWarning')}</p>
   {/if}
   <!-- SNIPCODE-HOOK end -->
 </div>

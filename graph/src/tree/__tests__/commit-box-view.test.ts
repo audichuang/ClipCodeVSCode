@@ -8,6 +8,10 @@ const H = vi.hoisted(() => ({
 vi.mock('vscode', () => ({
   Uri: { joinPath: (_root: unknown, ...parts: string[]) => parts.join('/') },
   window: { showErrorMessage: vi.fn() },
+  /* SNIPCODE-HOOK start: X1-5 workbench locale — same auto/env.language pattern as MainPanel/DiffPanel */
+  workspace: { getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }) },
+  env: { language: 'en' },
+  /* SNIPCODE-HOOK end */
 }));
 vi.mock('../../panels/MainPanel', () => ({ MainPanel: { assetRootUri: {} } }));
 
@@ -43,7 +47,7 @@ describe('CommitBoxViewProvider', () => {
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'workbenchCommitState',
-      payload: { stagedRepoCount: 1, amendTargetPushed: false },
+      payload: { stagedRepoCount: 1, amendTargetPushed: false, locale: 'en' },
     });
   });
 

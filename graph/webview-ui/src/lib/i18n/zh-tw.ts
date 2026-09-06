@@ -65,6 +65,17 @@ export const zhTw: Record<string, string> = {
   'sidebar.pushAllTags': '推送所有標籤',
   'sidebar.deleteRemoteTag': '從遠端儲存庫刪除',
 
+  /* SNIPCODE-HOOK start: X1-5 Commit workbench webview i18n */
+  // Commit workbench (the small webview above the Changes tree)
+  'workbench.commitTimeout': '提交逾時，未收到結果，請重新整理後確認狀態。',
+  'workbench.committedCount': '已提交 {count} 個儲存庫',
+  'workbench.messagePlaceholder': '提交訊息（共用一則，套用到所有已暫存的儲存庫）',
+  'workbench.commit': '提交',
+  'workbench.amend': '修正',
+  'workbench.amendTitle': '修正上一次提交（僅單一儲存庫；訊息空白時會先帶入舊訊息）',
+  'workbench.amendPushedWarning': '此 commit 已推送到遠端，Amend 會改寫已推送的歷史。',
+  /* SNIPCODE-HOOK end */
+
   // Create branch modal
   'createBranch.title': '建立分支',
   'createBranch.desc': '建立新分支',

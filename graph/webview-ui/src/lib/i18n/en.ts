@@ -62,6 +62,17 @@ export const en: Record<string, string> = {
   'sidebar.pushAllTags': 'Push All Tags',
   'sidebar.deleteRemoteTag': 'Delete from Remote',
 
+  /* SNIPCODE-HOOK start: X1-5 Commit workbench webview i18n */
+  // Commit workbench (the small webview above the Changes tree)
+  'workbench.commitTimeout': 'Commit timed out — no result was received. Refresh and check the status.',
+  'workbench.committedCount': 'Committed {count} repo(s)',
+  'workbench.messagePlaceholder': 'Commit message (shared; applies to every staged repo)',
+  'workbench.commit': 'Commit',
+  'workbench.amend': 'Amend',
+  'workbench.amendTitle': 'Amend the previous commit (single repo only; an empty message fetches the previous one first)',
+  'workbench.amendPushedWarning': 'This commit has already been pushed to the remote. Amending rewrites already-pushed history.',
+  /* SNIPCODE-HOOK end */
+
   // Create branch modal
   'createBranch.title': 'Create Branch',
   'createBranch.desc': 'Create new branch',

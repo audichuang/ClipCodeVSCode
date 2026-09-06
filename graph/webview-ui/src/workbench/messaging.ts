@@ -2,6 +2,9 @@
 // so Workbench.svelte can import postCommit without a Workbench.svelte <-> entry
 // circular import (entry mounts the component; the component posts messages).
 import { workbenchStore } from './workbench-store.svelte';
+/* SNIPCODE-HOOK start: X1-5 workbench locale (reuses the graph i18n dictionaries) */
+import { i18n, t } from '../lib/i18n/index.svelte';
+/* SNIPCODE-HOOK end */
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -54,6 +57,9 @@ export function listenForHostMessages(): void {
         /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
         workbenchStore.amendTargetPushed = Boolean(msg.payload?.amendTargetPushed);
         /* SNIPCODE-HOOK end */
+        /* SNIPCODE-HOOK start: X1-5 workbench locale rides the existing boot/refresh message */
+        if (typeof msg.payload?.locale === 'string') i18n.setLocale(msg.payload.locale);
+        /* SNIPCODE-HOOK end */
         break;
       /* SNIPCODE-HOOK end */
       case 'workbenchCommitResult':
@@ -87,7 +93,9 @@ export function postCommit(amend: boolean): void {
   commitTimer = setTimeout(() => {
     commitTimer = null;
     workbenchStore.committing = false;
-    workbenchStore.commitError = '提交逾時，未收到結果，請重新整理後確認狀態。';
+    /* SNIPCODE-HOOK start: X1-5 workbench string through webview i18n */
+    workbenchStore.commitError = t('workbench.commitTimeout');
+    /* SNIPCODE-HOOK end */
   }, COMMIT_TIMEOUT_MS);
   vscode.postMessage({
     type: 'workbenchCommit',
