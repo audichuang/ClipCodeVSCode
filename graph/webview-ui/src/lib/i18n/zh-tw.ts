@@ -69,6 +69,7 @@ export const zhTw: Record<string, string> = {
   // Commit workbench (the small webview above the Changes tree)
   'workbench.commitTimeout': '提交逾時，未收到結果，請重新整理後確認狀態。',
   'workbench.committedCount': '已提交 {count} 個儲存庫',
+  'workbench.commitScope': '提交範圍：{repos} 個儲存庫 · {files} 個檔案',
   'workbench.messagePlaceholder': '提交訊息（共用一則，套用到所有已暫存的儲存庫）',
   'workbench.commit': '提交',
   'workbench.amend': '修正',

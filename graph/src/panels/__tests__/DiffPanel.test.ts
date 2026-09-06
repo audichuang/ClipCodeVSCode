@@ -69,15 +69,19 @@ beforeEach(() => {
 });
 
 describe('DiffPanel', () => {
-  /* SNIPCODE-HOOK start: D6/X2 tab title carries the dir */
-  it('titles the tab "Diff: dir/base" for a nested file (basename-only collides across folders)', async () => {
+  /* SNIPCODE-HOOK start: D6/X2 basename-only editor tab */
+  it('titles the tab with the basename while the webview keeps the full path', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb); // shows /r : a.ts (root-level)
     expect((H.panel as unknown as { title: string }).title).toBe('Diff: a.ts');
 
     const dp2 = DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+    H.panel!.webview.postMessage.mockClear();
     dp2.show('/r', 'src/api/users.ts');
-    expect((H.panel as unknown as { title: string }).title).toBe('Diff: src/api/users.ts');
+    await H.messageHandler!({ type: 'diffReady' });
+    await flush();
+    expect((H.panel as unknown as { title: string }).title).toBe('Diff: users.ts');
+    expect(diffShows()[0].payload.file).toBe('src/api/users.ts');
   });
   /* SNIPCODE-HOOK end */
 
@@ -119,6 +123,7 @@ describe('DiffPanel', () => {
     const wb = makeWorkbench();
     const dp = await shownPanel(wb);
     H.panel!.webview.postMessage.mockClear();
+    (H.panel as unknown as { reveal: ReturnType<typeof vi.fn> }).reveal.mockClear();
     dp.refreshIfCurrent('/r', 'other.ts');
     dp.refreshIfCurrent('/other-repo', 'a.ts');
     await flush();
@@ -126,6 +131,7 @@ describe('DiffPanel', () => {
     dp.refreshIfCurrent('/r', 'a.ts');
     await flush();
     expect(diffShows()).toHaveLength(1);
+    expect((H.panel as unknown as { reveal: ReturnType<typeof vi.fn> }).reveal).not.toHaveBeenCalled();
   });
 
   it('a slower older push never overwrites a newer one (latest-wins ticket)', async () => {

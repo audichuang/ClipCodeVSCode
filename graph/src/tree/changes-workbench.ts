@@ -396,6 +396,10 @@ export class ChangesWorkbench implements vscode.Disposable {
     for (const r of status) {
       try {
         await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).commitIndex(message, { amend }));
+        /* SNIPCODE-HOOK start: refresh an already-open matching Diff tab after
+           a successful commit; unrelated tabs stay untouched. */
+        for (const file of r.staged) this.diffPanel?.refreshIfCurrent(r.repoPath, file.path);
+        /* SNIPCODE-HOOK end */
         results.push({ repoName: r.repoName, ok: true });
       } catch (err) {
         results.push({ repoName: r.repoName, ok: false, error: err instanceof Error ? err.message : String(err) });

@@ -237,13 +237,13 @@
                 <span class="codicon {section.side === 'staged' ? 'codicon-check' : 'codicon-diff-modified'}"></span>
                 {section.label}
                 <span class="side-status status-{section.status}" title={section.status}>{section.status}</span>
-                {#if section.stats.add || section.stats.del}
-                  <span class="side-stats">
-                    <span class="stat-add">+{section.stats.add}</span>
-                    <span class="stat-del">−{section.stats.del}</span>
-                  </span>
-                {/if}
               </span>
+              {#if section.stats.add || section.stats.del}
+                <span class="side-stats" aria-label={`+${section.stats.add} −${section.stats.del}`}>
+                  <span class="stat-add">+{section.stats.add}</span>
+                  <span class="stat-del">−{section.stats.del}</span>
+                </span>
+              {/if}
               <!-- SNIPCODE-HOOK end -->
             </button>
             <button
@@ -350,7 +350,7 @@
   .section-open-btn:hover { color: var(--vscode-foreground); }
   .side-badge {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    font-size: 10px; padding: 2px 7px; border-radius: 8px;
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
   }
   /* SNIPCODE-HOOK start: D6/X2 badge icon + status letter + stats, tinted per side */
@@ -363,7 +363,11 @@
     font-weight: 700;
     opacity: 0.9;
   }
-  .side-stats { display: inline-flex; gap: 4px; opacity: 0.9; }
+  .side-stats {
+    display: inline-flex; gap: 6px; margin-left: 2px; padding: 1px 4px;
+    font-size: 11px; font-weight: 700; opacity: 1;
+    background: var(--vscode-editor-background, transparent);
+  }
   .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); }
   .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
   /* SNIPCODE-HOOK end */

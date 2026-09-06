@@ -67,6 +67,12 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       .filter(repo => this.isCheckedForCommit(repo.repoPath)).length;
   }
 
+  getStagedFileCount(): number {
+    return (this.groups.find(group => group.group === 'staged')?.repos ?? [])
+      .filter(repo => this.isCheckedForCommit(repo.repoPath))
+      .reduce((total, repo) => total + repo.files.length, 0);
+  }
+
   notifyCommitSelectionChanged(): void {
     this._onDidChangeTreeData.fire();
   }
@@ -127,11 +133,15 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
         return errItem;
       }
       /* SNIPCODE-HOOK end */
-      const item = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.Expanded);
+      /* SNIPCODE-HOOK start: compact multi-repo summaries — keep the first
+         paint useful on large workspaces; files are one explicit expansion
+         away while the repo row remains a compact summary. */
+      const item = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.Collapsed);
       // IntelliJ-style incoming/outgoing badges; zero or no-upstream sides drop out.
-      item.description = node.branch
+      item.description = `${node.files.length} · ${node.branch}`
         + (node.behind ? ` ↓${node.behind}` : '')
         + (node.ahead ? ` ↑${node.ahead}` : '');
+      /* SNIPCODE-HOOK end */
       item.contextValue = `repo-${node.group}`;
       item.iconPath = new vscode.ThemeIcon('repo');
       // Distinguish the same repo appearing under both groups.

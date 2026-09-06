@@ -54,6 +54,7 @@ export function listenForHostMessages(): void {
       /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
       case 'workbenchCommitState':
         workbenchStore.stagedRepoCount = Number(msg.payload?.stagedRepoCount ?? 0);
+        workbenchStore.stagedFileCount = Number(msg.payload?.stagedFileCount ?? 0);
         /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
         workbenchStore.amendTargetPushed = Boolean(msg.payload?.amendTargetPushed);
         /* SNIPCODE-HOOK end */

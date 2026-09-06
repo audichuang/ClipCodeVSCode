@@ -54,6 +54,8 @@
     onkeydown={onTextareaKeydown}
   ></textarea>
 
+  <p class="commit-scope">{t('workbench.commitScope', { repos: store.stagedRepoCount, files: store.stagedFileCount })}</p>
+
   <div class="actions">
     <button class="btn primary" disabled={!store.canCommit} onclick={() => postCommit(false)}>
       {#if store.committing}<span class="codicon codicon-loading spin"></span>{:else}<span class="codicon codicon-check"></span>{/if}
@@ -104,6 +106,7 @@
   textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
   textarea:focus { border-color: var(--vscode-focusBorder); }
   .actions { display: flex; gap: 8px; }
+  .commit-scope { margin: -2px 0 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .btn {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 12px; border: 1px solid transparent; border-radius: 4px;

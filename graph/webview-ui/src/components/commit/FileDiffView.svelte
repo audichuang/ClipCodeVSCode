@@ -690,11 +690,12 @@
                       <!-- SNIPCODE-HOOK end -->
                     </button>
                   {/if}
-                  <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
+                    <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
                           disabled={stageBusy}
                           aria-label={staged ? t('file.unstageHunk') : t('file.stageHunk')}
                           title={staged ? t('file.unstageHunk') : t('file.stageHunk')}>
                     <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
+                    <span>{staged ? t('file.unstageHunk') : t('file.stageHunk')}</span>
                   </button>
                 {/if}
                 <!-- SNIPCODE-HOOK end -->
@@ -877,7 +878,7 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    opacity: 0.55;
+    opacity: 0.9;
     font-weight: normal;
   }
 
@@ -960,7 +961,9 @@
     gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
-    padding: 1px 6px;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 4px 8px;
     background: transparent;
     border: none;
     cursor: pointer;
@@ -984,10 +987,10 @@
   .hunk-stage-btn {
     color: var(--vscode-charts-green, #48bf91);
     /* SNIPCODE-HOOK start: ui/diff D10 discoverable by default (was opacity:0,
-       hover-only — the SBS equivalent, .sbs-block-stage-btn, is already .55
+       hover-only — the SBS equivalent, .sbs-block-stage-btn, is also visible
        by default; this matches it instead of hiding the only whole-hunk
        stage affordance in inline mode until the user happens to hover). */
-    opacity: 0.55;
+    opacity: 0.9;
     /* SNIPCODE-HOOK end */
   }
   .diff-hunk.reversible:hover .hunk-stage-btn,
@@ -1007,12 +1010,12 @@
     align-self: center;
     flex-shrink: 0;
     z-index: 2;
-    opacity: 0.55;
+    opacity: 0.9;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: 26px;
+    height: 26px;
     padding: 0;
     border: 1px solid var(--vscode-focusBorder, #4a9eff);
     border-radius: 4px;
@@ -1057,7 +1060,7 @@
   }
 
   .hunk-action-btn:hover {
-    background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #f44336) 25%, transparent);
+    background: var(--vscode-toolbar-hoverBackground, var(--bg-hover));
   }
 
   .hunk-action-btn i {

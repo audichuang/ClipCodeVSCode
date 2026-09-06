@@ -1175,7 +1175,7 @@ describe('PrView — resizable file-list/diff splitter', () => {
     return utils;
   }
 
-  it('renders a resize handle between the file list and diff stack, with the file list at the default 240px width', async () => {
+  it('renders a resize handle between the file list and diff stack, with the file list at the default 280px width', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
     // SNIPCODE-HOOK: PR tab resize handle (review fix, High) — Svelte's
@@ -1186,10 +1186,10 @@ describe('PrView — resizable file-list/diff splitter', () => {
     // verification that the handle spans the row's full height in-app.
     expect(container.querySelector('.pr-resize-handle')).toBeTruthy();
     const fileList = container.querySelector<HTMLElement>('.pr-file-list')!;
-    expect(fileList.style.width).toBe('240px');
+    expect(fileList.style.width).toBe('280px');
   });
 
-  it('dragging the handle resizes the file list, clamped to 120-600px', async () => {
+  it('dragging the handle resizes the file list, clamped to 160-600px', async () => {
     const { container } = setupWithDiffs();
     await waitFor(() => expect(container.textContent).toContain('hello-from-a'));
     const handle = container.querySelector<HTMLElement>('.pr-resize-handle')!;
@@ -1197,10 +1197,10 @@ describe('PrView — resizable file-list/diff splitter', () => {
 
     await fireEvent.mouseDown(handle, { clientX: 100 });
     await fireEvent(document, new MouseEvent('mousemove', { clientX: 150 }));
-    expect(fileList.style.width).toBe('290px'); // 240 + (150 - 100)
+    expect(fileList.style.width).toBe('330px'); // 280 + (150 - 100)
 
     await fireEvent(document, new MouseEvent('mousemove', { clientX: -10000 }));
-    expect(fileList.style.width).toBe('120px'); // clamped to min
+    expect(fileList.style.width).toBe('160px'); // clamped to min
 
     await fireEvent(document, new MouseEvent('mousemove', { clientX: 10000 }));
     expect(fileList.style.width).toBe('600px'); // clamped to max
@@ -1214,11 +1214,11 @@ describe('PrView — resizable file-list/diff splitter', () => {
 
     await fireEvent.mouseDown(handle, { clientX: 100 });
     await fireEvent(document, new MouseEvent('mousemove', { clientX: 150 }));
-    expect(fileList.style.width).toBe('290px');
+    expect(fileList.style.width).toBe('330px');
 
     await fireEvent(document, new MouseEvent('mouseup'));
     await fireEvent(document, new MouseEvent('mousemove', { clientX: 400 }));
-    expect(fileList.style.width).toBe('290px');
+    expect(fileList.style.width).toBe('330px');
   });
 
   it('removes the document mousemove/mouseup listeners on unmount (no leak)', async () => {

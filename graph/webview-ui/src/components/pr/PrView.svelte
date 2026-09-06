@@ -381,7 +381,7 @@
      file-list/diff split, which previously had a CSS-fixed width
      (.pr-files-layout .pr-file-list). Not persisted across sessions, same as
      CommitDetails' filesPanelWidth. */
-  let fileListWidth = $state(240);
+  let fileListWidth = $state(280);
   let isResizingFiles = $state(false);
   let resizeStartX = 0;
   let resizeStartWidth = 0;
@@ -398,7 +398,7 @@
   }
 
   function onResizeMove(e: MouseEvent) {
-    fileListWidth = Math.min(600, Math.max(120, resizeStartWidth + (e.clientX - resizeStartX)));
+    fileListWidth = Math.min(600, Math.max(160, resizeStartWidth + (e.clientX - resizeStartX)));
   }
 
   function stopResize() {
@@ -1005,7 +1005,7 @@
                   <span class="pr-file-stats">
                     {#if fs}<span class="pr-stat-add">+{fs.add}</span><span class="pr-stat-del">−{fs.del}</span>{:else if isPureRename(file)}<span class="pr-stat-bin">{t('pr.statsRenamed')}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
                   </span>
-                  <button class="pr-open-native-btn" onclick={() => openFile(file)}>
+                  <button class="pr-open-native-btn" onclick={() => openFile(file)} aria-label={t('pr.openNativeDiff')} use:tooltip={t('pr.openNativeDiff')}>
                     <i class="codicon codicon-diff"></i> {t('pr.openNativeDiff')}
                   </button>
                 </div>
@@ -1264,8 +1264,8 @@
     color: var(--text-primary);
   }
 
-  .pr-stat-add { color: #4caf50; }
-  .pr-stat-del { color: #f44336; }
+  .pr-stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-testing-iconPassed, #4caf50)); }
+  .pr-stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-testing-iconFailed, #f44336)); }
   .pr-stat-bin { opacity: 0.6; }
   /* SNIPCODE-HOOK end */
 
@@ -1483,11 +1483,14 @@
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
-    padding: 3px 10px;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 3px 7px;
     font-size: 0.85em;
     border-radius: 4px;
-    background: var(--button-bg);
-    color: var(--button-fg);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
   }
   /* SNIPCODE-HOOK end */
 
