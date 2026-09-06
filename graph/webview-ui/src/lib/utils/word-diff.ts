@@ -21,6 +21,13 @@ const MAX_REWRITE_LINES = 400;
 /* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
 const MAX_LINE_ALIGNMENT_CELLS = 4_000;
 /* SNIPCODE-HOOK end */
+/* SNIPCODE-HOOK start: ui/diff D12 minimum similarity to pair a delete/add as a "replace" */
+// Below this, two lines share only a stray bigram or two (whitespace,
+// punctuation) — pairing them produces intraline highlight noise rather than
+// a meaningful "this became that". Below this score they're left unpaired
+// (ordinal fallback / no word-diff at all for that line).
+const MIN_REWRITE_SIMILARITY = 35;
+/* SNIPCODE-HOOK end */
 
 function lineLevelFallback(oldLine: string, newLine: string): WordDiffResult {
   return {
@@ -95,10 +102,27 @@ export function computeWordDiff(oldLine: string, newLine: string): WordDiffResul
   while (i < n) { delChanged[i] = true; i++; }
   while (j < m) { addChanged[j] = true; j++; }
 
-  return {
-    delRanges: tokensToRanges(a, delChanged),
-    addRanges: tokensToRanges(b, addChanged),
-  };
+  const delRanges = tokensToRanges(a, delChanged);
+  const addRanges = tokensToRanges(b, addChanged);
+
+  /* SNIPCODE-HOOK start: ui/diff D12 fall back to whole-line for over-fragmented diffs */
+  // A near-total rewrite (few/no shared tokens) still LCS-matches on stray
+  // whitespace/punctuation, producing a scatter of 2-3 char highlighted
+  // fragments across the whole line — noise, not signal (IntelliJ/VS Code
+  // both have an equivalent heuristic). Ratio is highlighted-chars-summed
+  // over line-length-summed (not per-side) so a short "Mac"->"asdsadadMac"
+  // tail-only change — where the ADD side alone is >65% changed but the
+  // total edit is still small and worth showing — doesn't trip this.
+  const totalRanges = delRanges.length + addRanges.length;
+  if (totalRanges > 5) return lineLevelFallback(oldLine, newLine);
+  const highlightedChars = (ranges: Range[]) => ranges.reduce((s, r) => s + (r.end - r.start), 0);
+  const totalLen = oldLine.length + newLine.length;
+  if (totalLen > 0 && (highlightedChars(delRanges) + highlightedChars(addRanges)) / totalLen > 0.65) {
+    return lineLevelFallback(oldLine, newLine);
+  }
+  /* SNIPCODE-HOOK end */
+
+  return { delRanges, addRanges };
 }
 
 /* SNIPCODE-HOOK start: Batch D LCS-based rewrite-line pairing. */
@@ -142,7 +166,7 @@ function pairRewriteLines(deletes: DiffLineLite[], adds: DiffLineLite[]): Array<
   const dp: number[][] = Array.from({ length: deletes.length + 1 }, () => new Array<number>(adds.length + 1).fill(0));
   for (let i = deletes.length - 1; i >= 0; i--) {
     for (let j = adds.length - 1; j >= 0; j--) {
-      const paired = scores[i][j] > 0 ? scores[i][j] + dp[i + 1][j + 1] : -1;
+      const paired = scores[i][j] >= MIN_REWRITE_SIMILARITY ? scores[i][j] + dp[i + 1][j + 1] : -1;
       dp[i][j] = Math.max(paired, dp[i + 1][j], dp[i][j + 1]);
     }
   }
@@ -151,7 +175,7 @@ function pairRewriteLines(deletes: DiffLineLite[], adds: DiffLineLite[]): Array<
   let i = 0;
   let j = 0;
   while (i < deletes.length && j < adds.length) {
-    const paired = scores[i][j] > 0 ? scores[i][j] + dp[i + 1][j + 1] : -1;
+    const paired = scores[i][j] >= MIN_REWRITE_SIMILARITY ? scores[i][j] + dp[i + 1][j + 1] : -1;
     if (paired === dp[i][j] && paired >= dp[i + 1][j] && paired >= dp[i][j + 1]) {
       pairs.push([i++, j++]);
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
