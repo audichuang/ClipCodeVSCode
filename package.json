@@ -254,25 +254,25 @@
         "command": "snipcode.git.stage",
         "title": "Stage",
         "category": "Snipcode Git",
-        "icon": "$(add)"
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstage",
         "title": "Unstage",
         "category": "Snipcode Git",
-        "icon": "$(remove)"
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.stageRepo",
         "title": "Stage All in Repo",
         "category": "Snipcode Git",
-        "icon": "$(add)"
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstageRepo",
         "title": "Unstage All in Repo",
         "category": "Snipcode Git",
-        "icon": "$(remove)"
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.copyAsClipCode",
@@ -300,13 +300,13 @@
         "command": "snipcode.git.stageAll",
         "title": "Stage All",
         "category": "Snipcode Git",
-        "icon": "$(add)"
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstageAll",
         "title": "Unstage All",
         "category": "Snipcode Git",
-        "icon": "$(remove)"
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.refresh",
@@ -492,37 +492,37 @@
         {
           "command": "snipcode.git.stageAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@1"
+          "group": "1_bulk@1"
         },
         {
           "command": "snipcode.git.unstageAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@2"
+          "group": "1_bulk@2"
         },
         {
           "command": "snipcode.git.refresh",
           "when": "view == snipcode.changes",
-          "group": "navigation@3"
+          "group": "1_bulk@3"
         },
         {
           "command": "snipcode.git.fetchAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@4"
+          "group": "navigation@1"
         },
         {
           "command": "snipcode.git.pullAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@5"
+          "group": "navigation@2"
         },
         {
           "command": "snipcode.git.pushAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@6"
+          "group": "navigation@3"
         },
         {
           "command": "gitGraphPlus.open",
           "when": "view == snipcode.changes",
-          "group": "navigation@7"
+          "group": "navigation@4"
         },
         {
           "command": "clipcode.history.switchRepository",
