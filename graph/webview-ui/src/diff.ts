@@ -1,4 +1,5 @@
 import { mount } from 'svelte';
+import './styles/global.css';
 import Diff from './diff/Diff.svelte';
 import { listenForHostMessages } from './diff/messaging';
 import { getVsCodeApi } from './lib/vscode-api';
