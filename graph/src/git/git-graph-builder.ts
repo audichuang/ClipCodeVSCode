@@ -266,7 +266,8 @@ function buildPushedSet(commits: Commit[], hashIndex: Map<string, number>): Set<
   return pushed;
 }
 
-function pickColor(unsolved: PathHelper[]): number {
+/* SNIPCODE-HOOK start: G1 — stable per-branch color */
+function pickColor(unsolved: PathHelper[], preferred?: number): number {
   // Track used colors in a bitmask (palette is < 32 colors) instead of allocating an
   // array + Set on every call. O(lanes), allocation-free. This runs once per new
   // branch head and per merge parent, so it adds up on graphs with many lanes.
@@ -275,12 +276,49 @@ function pickColor(unsolved: PathHelper[]): number {
     const c = unsolved[j].path.color;
     if (c >= 0 && c < 32) mask |= 1 << c;
   }
+  if (preferred !== undefined && (mask & (1 << preferred)) === 0) return preferred;
   for (let i = 0; i < COLOR_PALETTE.length; i++) {
     if ((mask & (1 << i)) === 0) return i;
   }
   return 0;
 }
 
+/** First naming ref on a commit, preferring head > branch > remote-branch —
+ *  NOT `%D` order, which is git's listing order and not stable across repos
+ *  (a commit carrying both `feature` and `origin/feature` would otherwise
+ *  hash to a different color depending on which git happened to list first). */
+function findNamingRef(c: Commit) {
+  return c.refs.find(r => r.type === 'head')
+    ?? c.refs.find(r => r.type === 'branch')
+    ?? c.refs.find(r => r.type === 'remote-branch');
+}
+
+// Small deterministic string hash (djb2-ish) — same branch name always maps
+// to the same palette slot across refreshes/reloads (G1), independent of
+// rail-creation order.
+function hashStringToIndex(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % COLOR_PALETTE.length;
+}
+
+/** Preferred palette index for a new rail's starting commit (G1). Looks at
+ *  the commit's own naming ref first; when the commit has none of its own
+ *  (the synthetic UNCOMMITTED row, or a merge-parent commit that isn't itself
+ *  a branch tip), falls through to its first parent's naming ref once — that
+ *  parent is what actually identifies the branch visually. Returns undefined
+ *  when no name is found anywhere, so pickColor just uses the lowest free slot. */
+function preferredIndexForCommit(commit: Commit, commits: Commit[], hashIndex: Map<string, number>): number | undefined {
+  let ref = findNamingRef(commit);
+  if (!ref && commit.parents.length > 0) {
+    const pIdx = hashIndex.get(commit.parents[0]);
+    if (pIdx !== undefined) ref = findNamingRef(commits[pIdx]);
+  }
+  if (!ref) return undefined;
+  const name = ref.type === 'remote-branch' ? `${ref.remote}/${ref.name}` : ref.name;
+  return hashStringToIndex(name);
+}
+/* SNIPCODE-HOOK end */
 // ── Main parse function (SourceGit CommitGraph.Parse port) ──
 
 export function buildFullGraph(
@@ -384,10 +422,15 @@ export function buildFullGraph(
     if (major === null) {
       offsetX += UNIT_W;
       if (commit.parents.length > 0) {
-        major = new PathHelper(commit.parents[0], pickColor(unsolved), { x: offsetX, y: offsetY });
+        /* SNIPCODE-HOOK start: G1/G2/G7 */
+        const preferred = preferredIndexForCommit(commit, commits, hashIndex);
+        major = new PathHelper(commit.parents[0], pickColor(unsolved, preferred), { x: offsetX, y: offsetY });
+        major.path.highlighted = isHighlighted(commit.hash);
         unsolved.push(major);
         trackNext(major);
         result.paths.push(major.path);
+        major.path.pathIndex = result.paths.length - 1;
+        /* SNIPCODE-HOOK end */
       }
     }
 
@@ -400,7 +443,10 @@ export function buildFullGraph(
 
     // Dot
     const position = { x: major?.lastX ?? offsetX, y: offsetY };
-    const dotColor = major?.path.color ?? 0;
+    /* SNIPCODE-HOOK start: G1/P2 — root commit (no rail) still gets a stable
+       preferred color instead of always falling back to palette[0]. */
+    const dotColor = major?.path.color ?? (preferredIndexForCommit(commit, commits, hashIndex) ?? 0);
+    /* SNIPCODE-HOOK end */
     // For parentless (root) commits major is null and carries no path; fall back to tipColorMap.
     const dotColorOverride = major?.path.colorOverride ?? tipColorMap.get(commit.hash);
     const isRemoteOnly = remoteOnlySet.has(commit.hash);
@@ -427,12 +473,21 @@ export function buildFullGraph(
             colorOverride: parent.path.colorOverride,
           });
         } else {
-          // New path for merge parent
+          // New path for merge parent. No separate GraphLink here — the
+          // connecting curve from the merge commit down to this rail's start
+          // is baked directly into the new path's own points (the `to` arg
+          // below), same as upstream.
           offsetX += UNIT_W;
-          const l = new PathHelper(parentHash, pickColor(unsolved), position, { x: offsetX, y: position.y + HALF_H });
+          /* SNIPCODE-HOOK start: G1/G2/G7 */
+          const parentIdx = hashIndex.get(parentHash);
+          const preferred = parentIdx !== undefined ? preferredIndexForCommit(commits[parentIdx], commits, hashIndex) : undefined;
+          const l = new PathHelper(parentHash, pickColor(unsolved, preferred), position, { x: offsetX, y: position.y + HALF_H });
+          l.path.highlighted = isHighlighted(commit.hash);
           unsolved.push(l);
           trackNext(l);
           result.paths.push(l.path);
+          l.path.pathIndex = result.paths.length - 1;
+          /* SNIPCODE-HOOK end */
         }
       }
     }
