@@ -187,9 +187,11 @@ class BranchLeafItem extends vscode.TreeItem {
       this.description = 'current';
     }
 
+    /* SNIPCODE-HOOK start: S17/X5 unify ↓behind ↑ahead order with the Changes tree */
     const badges: string[] = [];
-    if (branch.ahead > 0) { badges.push(`↑${branch.ahead}`); }
     if (branch.behind > 0) { badges.push(`↓${branch.behind}`); }
+    if (branch.ahead > 0) { badges.push(`↑${branch.ahead}`); }
+    /* SNIPCODE-HOOK end */
     if (badges.length > 0) {
       this.description = (this.description ? this.description + ' ' : '') + badges.join(' ');
     }
