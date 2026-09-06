@@ -731,4 +731,5 @@ export const en: Record<string, string> = {
   'details.flatView': 'Flat',
   'details.expandAll': 'Expand All',
   'details.collapseAll': 'Collapse All',
+  'details.workingTree': 'Working tree',
 };

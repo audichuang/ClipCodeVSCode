@@ -290,6 +290,33 @@ describe('CommitDetails — empty / compare', () => {
       expect(queryByText('old.txt')).toBeNull();
     });
   });
+
+  /* SNIPCODE-HOOK start: P3 — compare mode shows which two refs are being diffed */
+  it('shows a ref1 → ref2 header (7-char short hashes) when comparing two commits', () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaaaaaaaaaa';
+    uiStore.compareRef2 = 'bbbbbbbbbbbb';
+    const { container } = render(CommitDetails);
+    const header = container.querySelector('.compare-header');
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toContain('aaaaaaa');
+    expect(header!.textContent).toContain('bbbbbbb');
+  });
+
+  it('shows "Working tree" as the target when comparing a commit to local changes (compareRef2 null)', () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaaaaaaaaaa';
+    uiStore.compareRef2 = null;
+    const { container } = render(CommitDetails);
+    expect(container.querySelector('.compare-header')?.textContent?.toLowerCase()).toContain('working tree');
+  });
+
+  it('does not show the compare header for a normal single-commit selection', () => {
+    uiStore.comparing = false;
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    expect(container.querySelector('.compare-header')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — SHA copy buttons', () => {

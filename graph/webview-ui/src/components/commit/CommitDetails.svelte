@@ -788,6 +788,22 @@
       <button class="top-tab" class:active={activeTab === 'changes'} onclick={() => { activeTab = 'changes'; }}>
         {t('details.changes')} <span class="tab-count">{files.length}</span>
       </button>
+      <!-- SNIPCODE-HOOK start: P3 — compare mode had no header saying which two refs
+           are being diffed (unlike the PR tab). 7-char short hash, full ref in the tooltip. -->
+      {#if !commit && uiStore.comparing}
+        <span class="compare-header">
+          {#if uiStore.compareRef1}
+            <span class="compare-ref" use:tooltip={uiStore.compareRef1}>{uiStore.compareRef1.substring(0, 7)}</span>
+          {/if}
+          <i class="codicon codicon-arrow-right compare-arrow"></i>
+          {#if uiStore.compareRef2}
+            <span class="compare-ref" use:tooltip={uiStore.compareRef2}>{uiStore.compareRef2.substring(0, 7)}</span>
+          {:else}
+            <span class="compare-ref" use:tooltip={t('details.workingTree')}>{t('details.workingTree')}</span>
+          {/if}
+        </span>
+      {/if}
+      <!-- SNIPCODE-HOOK end -->
     {/if}
     <div class="tabs-actions">
       <button class="tab-action-btn" aria-label={uiStore.commitDetailFullscreen ? t('details.restore') : t('details.fullscreen')} use:tooltip={uiStore.commitDetailFullscreen ? t('details.restore') : t('details.fullscreen')} onclick={() => { uiStore.commitDetailFullscreen = !uiStore.commitDetailFullscreen; }}>
@@ -1543,6 +1559,29 @@
     align-items: center;
     gap: 2px;
   }
+
+  /* SNIPCODE-HOOK start: P3 — compare mode ref1 → ref2 header */
+  .compare-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .compare-ref {
+    font-family: var(--vscode-editor-font-family, monospace);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+
+  .compare-arrow {
+    font-size: 11px;
+    opacity: 0.7;
+  }
+  /* SNIPCODE-HOOK end */
 
   .tab-action-btn {
     display: flex;
