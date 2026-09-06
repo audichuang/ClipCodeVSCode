@@ -101,21 +101,26 @@
   // but logically identical (e.g., file watcher refresh while only the synthesized
   // "Uncommitted changes" virtual node body changes — first/last hash, length, and
   // branch sync state stay stable).
+  /* SNIPCODE-HOOK start: G9 — dropped `currentBranchRemoteAhead` (was BFS 3
+     below): its only consumer was the row's remote-only indicator, which now
+     reads the builder's `dot.remoteTip` (X6-fixed, covers every branch, not
+     just the current one). `currentBranchLocalOnly` (BFS 2) stays — besides
+     feeding the same row indicator, SquashModal's hasPushedCommits still
+     depends on it (see the squashChain guard further down). */
   type BranchSets = {
     currentBranchCommits: Set<string>;
     currentBranchLocalOnly: Set<string>;
-    currentBranchRemoteAhead: Set<string>;
   };
   let branchSetsCache: { fp: string; value: BranchSets } | null = null;
 
   // Single pass: build hashIndex once, run all BFS traversals together
   const branchSets = $derived.by<BranchSets>(() => {
     const commits = commitStore.commits;
-    const empty: BranchSets = { currentBranchCommits: new Set(), currentBranchLocalOnly: new Set(), currentBranchRemoteAhead: new Set() };
+    const empty: BranchSets = { currentBranchCommits: new Set(), currentBranchLocalOnly: new Set() };
     if (commits.length === 0) return empty;
 
     const current = branchStore.currentBranch;
-    const fp = `${commits.length}|${commits[0].hash}|${commits[commits.length - 1].hash}|${current?.name ?? ''}|${current?.upstream ?? ''}|${current?.ahead ?? 0}|${current?.behind ?? 0}`;
+    const fp = `${commits.length}|${commits[0].hash}|${commits[commits.length - 1].hash}|${current?.name ?? ''}|${current?.upstream ?? ''}|${current?.ahead ?? 0}`;
     if (branchSetsCache && branchSetsCache.fp === fp) return branchSetsCache.value;
 
     const hashIndex = new Map<string, number>();
@@ -140,7 +145,6 @@
     }
 
     const currentBranchLocalOnly = new Set<string>();
-    const currentBranchRemoteAhead = new Set<string>();
 
     if (current?.upstream) {
       const [remote, ...rest] = current.upstream.split('/');
@@ -167,35 +171,17 @@
             if (!upstreamReachable.has(hash)) currentBranchLocalOnly.add(hash);
           }
         }
-
-        // BFS 3: commits reachable from upstream tip but not on current branch
-        if (current.behind > 0) {
-          const queue: string[] = [remoteTipCommit.hash];
-          let head = 0;
-          while (head < queue.length) {
-            const hash = queue[head++];
-            if (currentBranchRemoteAhead.has(hash) || currentBranchCommits.has(hash)) continue;
-            currentBranchRemoteAhead.add(hash);
-            const idx = hashIndex.get(hash);
-            if (idx === undefined) continue;
-            for (const parent of commits[idx].parents) {
-              if (!currentBranchRemoteAhead.has(parent) && !currentBranchCommits.has(parent)) {
-                queue.push(parent);
-              }
-            }
-          }
-        }
       }
     }
 
-    const value: BranchSets = { currentBranchCommits, currentBranchLocalOnly, currentBranchRemoteAhead };
+    const value: BranchSets = { currentBranchCommits, currentBranchLocalOnly };
     branchSetsCache = { fp, value };
     return value;
   });
 
   const currentBranchCommits = $derived(branchSets.currentBranchCommits);
   const currentBranchLocalOnly = $derived(branchSets.currentBranchLocalOnly);
-  const currentBranchRemoteAhead = $derived(branchSets.currentBranchRemoteAhead);
+  /* SNIPCODE-HOOK end */
 
   let bisectBadCommit = $state<string | null>(null);
   let bisectStartBad = $state<string | null>(null);
@@ -1606,11 +1592,17 @@
             }}
           >
             <div class="col-message" style="padding-left: {(displayLeftMargin[index] ?? 0) * X_SCALE + 4}px;">
-              {#if currentBranchLocalOnly.has(commit.hash)}
-                <span class="local-dot" use:tooltip={t('graph.notPushed')}></span>
-              {:else if currentBranchRemoteAhead.has(commit.hash)}
-                <span class="remote-dot" use:tooltip={t('graph.remoteOnly')}></span>
+              <!-- SNIPCODE-HOOK start: G9 — was a 5px dot (read as a stray
+                   node on top of a lane, and only ever computed for the
+                   current branch); now an icon sourced from the builder's
+                   dot.localOnly / dot.remoteTip (X6-fixed, so this is
+                   correct for every branch, not only HEAD's). -->
+              {#if dot?.localOnly}
+                <i class="codicon codicon-arrow-up local-dot" style="color: {nodeColor}" use:tooltip={t('graph.notPushed')}></i>
+              {:else if dot?.remoteTip}
+                <i class="codicon codicon-cloud remote-dot" use:tooltip={t('graph.remoteOnly')}></i>
               {/if}
+              <!-- SNIPCODE-HOOK end -->
               {#each commit.refs.filter(r => {
                   if (r.type === 'working-dir') return false;
                   if (r.type === 'remote-branch') {
@@ -2373,27 +2365,21 @@
   .meta-row.bisect-start-good { background-color: color-mix(in srgb, #4caf50 12%, var(--bg-primary)); }
   .meta-row.bisect-culprit { background-color: color-mix(in srgb, #ff9800 15%, var(--bg-primary)); }
 
-  .local-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
+  /* SNIPCODE-HOOK start: G9 — was a 5px dot indistinguishable from a lane
+     node at 1x zoom (sat right where a lower lane's X crossed it); an icon
+     reads as "status", not "another commit". local-dot colors to the row's
+     own lane (inline style="color") so it still carries that association;
+     remote-dot stays neutral (it's not "this branch", just "not pulled"). */
+  .local-dot, .remote-dot {
     flex-shrink: 0;
-    background: #4da6ff;
-    opacity: 0.8;
-  }
-
-  :global(body.vscode-light) .local-dot {
-    background: #1565c0;
+    font-size: 12px;
+    line-height: 1;
   }
 
   .remote-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: var(--text-secondary, #888);
-    opacity: 0.8;
+    color: var(--text-secondary, #888);
   }
+  /* SNIPCODE-HOOK end */
 
   .col-author {
     width: 120px;
