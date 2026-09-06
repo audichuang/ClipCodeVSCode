@@ -345,14 +345,22 @@ export class ChangesWorkbench implements vscode.Disposable {
     return results;
   }
 
+  /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+  /** The inline go-to-file icon: open the file itself, not VS Code's own diff
+   *  view (that was a silent second diff UI alongside the Snipcode Diff tab —
+   *  see S9 in the sidebar audit). The native diff is still reachable via the
+   *  "Open Changes (VS Code)" context-menu entry, openChangeNative below. */
   private async openChange(node: FileNode): Promise<void> {
     const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
-    try {
-      await vscode.commands.executeCommand('git.openChange', uri);
-    } catch {
-      await vscode.commands.executeCommand('vscode.open', uri);
-    }
+    await vscode.commands.executeCommand('vscode.open', uri);
   }
+
+  /** Right-click-only: VS Code's built-in diff view for this change. */
+  private async openChangeNative(node: FileNode): Promise<void> {
+    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
+    await vscode.commands.executeCommand('git.openChange', uri);
+  }
+  /* SNIPCODE-HOOK end */
 
   /** Read a file's parsed DiffData (staged or unstaged side) for the Diff panel.
    *  Reuses getUncommittedFileDiff so the hunk order aligns with the raw
@@ -495,6 +503,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.pullAll', () => this.pullAll());
     reg('snipcode.git.pushAll', () => this.pushAll());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
+    /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+    reg('snipcode.git.openChangeNative', (n) => this.openChangeNative(n as FileNode));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.showDiff', (n) => this.showInDiffView(n as FileNode));
     reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(sel<ChangeTreeNode>(n, ns)));
     reg('snipcode.git.filterRepos', () => this.filterRepos());

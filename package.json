@@ -295,6 +295,10 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "snipcode.git.openChangeNative",
+        "title": "Snipcode Git: Open Changes (VS Code)"
+      },
+      {
         "command": "snipcode.git.markResolved",
         "title": "Snipcode Git: Mark Resolved",
         "icon": "$(check)"
@@ -607,6 +611,11 @@
           "command": "snipcode.git.showDiff",
           "when": "view == snipcode.changes && viewItem =~ /^file-/",
           "group": "2_open@2"
+        },
+        {
+          "command": "snipcode.git.openChangeNative",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@3"
         },
         {
           "command": "snipcode.git.discard",

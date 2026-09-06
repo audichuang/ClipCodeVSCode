@@ -434,6 +434,37 @@ describe('ChangesWorkbench index document invalidation', () => {
 });
 /* SNIPCODE-HOOK end */
 
+/* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+describe('ChangesWorkbench openChange / openChangeNative (S9)', () => {
+  it('the inline command opens the plain file via vscode.open, not a diff', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    const node = file('/a', 'src/foo.ts', 'unstaged');
+
+    await H.commands.get('snipcode.git.openChange')!(node);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.open', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
+    );
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('git.openChange', expect.anything());
+  });
+
+  it('the "Open Changes (VS Code)" command still opens the native diff', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    const node = file('/a', 'src/foo.ts', 'unstaged');
+
+    await H.commands.get('snipcode.git.openChangeNative')!(node);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'git.openChange', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
+    );
+  });
+});
+/* SNIPCODE-HOOK end */
+
 describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
   it('fetchAll fetches every repo with prune and reports success in the status bar', async () => {
     const a = mkSvc(); const b = mkSvc();
@@ -663,3 +694,7 @@ describe('Changes tree repo badges', () => {
   });
   /* SNIPCODE-HOOK end */
 });
+
+function file(repoPath: string, path: string, group: 'staged' | 'unstaged'): FileNode {
+  return { kind: 'file', repoPath, path, status: 'M', group };
+}
