@@ -110,7 +110,10 @@ export class ChangesWorkbench implements vscode.Disposable {
           if (strict && !uncheckedSnapshot.has(r.path)) {
             throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
-          return { staged: [], unstaged: [], conflict: [] };
+          /* SNIPCODE-HOOK start: S12 a read failure stays visible instead of vanishing */
+          const message = err instanceof Error ? err.message : String(err);
+          return { staged: [], unstaged: [], conflict: [], error: message };
+          /* SNIPCODE-HOOK end */
         }),
         svc.branches().catch(() => []),
         svc.aheadBehind(), // never throws; null when no upstream
@@ -124,6 +127,9 @@ export class ChangesWorkbench implements vscode.Disposable {
         /* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
         conflict: diff.conflict ?? [],
         /* SNIPCODE-HOOK end */
+        /* SNIPCODE-HOOK start: S12 a read failure stays visible instead of vanishing */
+        error: (diff as { error?: string }).error,
+        /* SNIPCODE-HOOK end */
       });
     }
     return out;
@@ -132,7 +138,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
   async refresh(): Promise<void> {
-    await this.tree.refresh();
+    /* SNIPCODE-HOOK start: S12 show progress in the Changes view while refreshing */
+    await vscode.window.withProgress({ location: { viewId: 'snipcode.changes' } }, () => this.tree.refresh());
+    /* SNIPCODE-HOOK end */
     this.diffPanel?.invalidateIndexDocuments();
   }
   /* SNIPCODE-HOOK end */

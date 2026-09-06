@@ -74,4 +74,25 @@ describe('buildChangeTree', () => {
     expect(unstaged.repos).toEqual([]);
   });
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S12 error group */
+  it('omits the Repository Errors group when every repo read cleanly', () => {
+    const groups = buildChangeTree([repo({})]);
+    expect(groups.some((g) => g.group === 'error')).toBe(false);
+  });
+
+  it('puts a repo whose status failed to read in a trailing Repository Errors group', () => {
+    const groups = buildChangeTree([
+      repo({ repoName: 'ok', repoPath: '/ok', staged: [{ path: 'a.ts', status: 'M' }] }),
+      repo({ repoName: 'broken', repoPath: '/broken', error: 'index.lock exists' }),
+    ]);
+    const errorGroup = groups[groups.length - 1];
+    expect(errorGroup.group).toBe('error');
+    expect(errorGroup.label).toBe('Repository Errors');
+    expect(errorGroup.count).toBe(1);
+    expect(errorGroup.repos).toEqual([
+      { kind: 'repo', repoName: 'broken', repoPath: '/broken', branch: 'main', group: 'error', files: [], error: 'index.lock exists' },
+    ]);
+  });
+  /* SNIPCODE-HOOK end */
 });

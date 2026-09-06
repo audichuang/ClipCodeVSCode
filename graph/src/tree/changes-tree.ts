@@ -44,9 +44,19 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   async refresh(): Promise<void> {
     /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
     const ticket = this.refreshSequence.issue();
-    const groups = buildChangeTree(await this.loadStatus());
+    const repos = await this.loadStatus();
     if (!this.refreshSequence.isCurrent(ticket)) return;
-    this.groups = groups;
+    const groups = buildChangeTree(repos);
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: S12 empty/no-repo state drives viewsWelcome */
+    // Lets package.json's viewsWelcome tell "no repo in this workspace" apart
+    // from "repo(s), but nothing to commit" (both otherwise render as an empty
+    // root — see the `groups.every` below).
+    void vscode.commands.executeCommand('setContext', 'snipcode.changes.hasRepos', repos.length > 0);
+    // A totally clean workspace (or no repos at all) would otherwise paint a
+    // permanent "Staged 0 / Unstaged 0" — collapse to an empty root instead so
+    // the "No changes" / "No git repository" welcome content can show through.
+    this.groups = groups.every((g) => g.count === 0) ? [] : groups;
     /* SNIPCODE-HOOK end */
     this._onDidChangeTreeData.fire();
   }
@@ -74,14 +84,29 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
       item.description = `${node.count}`;
       item.contextValue = `group-${node.group}`;
-      /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color */
-      item.iconPath = node.group === 'conflict'
-        ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('gitDecoration.conflictingResourceForeground'))
-        : new vscode.ThemeIcon(node.group === 'staged' ? 'check' : 'diff-modified');
+      /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color; S12 error group */
+      if (node.group === 'conflict') {
+        item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('gitDecoration.conflictingResourceForeground'));
+      } else if (node.group === 'error') {
+        item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('errorForeground'));
+      } else {
+        item.iconPath = new vscode.ThemeIcon(node.group === 'staged' ? 'check' : 'diff-modified');
+      }
       /* SNIPCODE-HOOK end */
       return item;
     }
     if (node.kind === 'repo') {
+      /* SNIPCODE-HOOK start: S12 a repo whose status failed to read stays visible */
+      if (node.group === 'error') {
+        const errItem = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.None);
+        errItem.description = node.error ?? 'unknown error';
+        errItem.tooltip = `${node.repoPath}\n${node.error ?? 'unknown error'}`;
+        errItem.contextValue = 'repo-error';
+        errItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('errorForeground'));
+        errItem.id = `error:${node.repoPath}`;
+        return errItem;
+      }
+      /* SNIPCODE-HOOK end */
       const item = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.Expanded);
       // IntelliJ-style incoming/outgoing badges; zero or no-upstream sides drop out.
       item.description = node.branch

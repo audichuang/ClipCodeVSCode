@@ -432,6 +432,16 @@
       {
         "view": "gitGraphPlus.branches",
         "contents": "No git repository found.\n[Open Folder](command:vscode.openFolder)"
+      },
+      {
+        "view": "snipcode.changes",
+        "contents": "No changes.",
+        "when": "snipcode.changes.hasRepos"
+      },
+      {
+        "view": "snipcode.changes",
+        "contents": "No git repository found.\n[Open Folder](command:vscode.openFolder)",
+        "when": "!snipcode.changes.hasRepos"
       }
     ],
     "menus": {
