@@ -16,6 +16,19 @@ function textDiff(file = 'src/a.ts'): DiffData {
 function binaryDiff(file = 'img.png'): DiffData {
   return { file, isBinary: true, isImage: false, hunks: [] };
 }
+/* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+function twoHunkDiff(file = 'src/a.ts'): DiffData {
+  return {
+    file, isBinary: false, isImage: false, fingerprint: 'rendered-fp',
+    hunks: [
+      { header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
+        lines: [{ type: 'add', content: 'x', newLineNumber: 1 }] },
+      { header: '@@ -10 +10 @@', oldStart: 10, oldLines: 1, newStart: 10, newLines: 1,
+        lines: [{ type: 'add', content: 'y', newLineNumber: 10 }] },
+    ],
+  };
+}
+/* SNIPCODE-HOOK end */
 
 beforeEach(() => {
   diffStore.reset();
@@ -266,6 +279,85 @@ describe('Diff.svelte section identity across a stage/unstage re-push (D7)', () 
     diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff(), 2);
     await tick();
     expect(container.querySelectorAll('.diff-section').length).toBe(2);
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
+describe('Diff.svelte next/prev hunk navigation (D11)', () => {
+  it('Next change lands on hunk 0 first, then hunk 1; Previous change goes back', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { getByLabelText, container } = render(Diff);
+    const hunks = () => [...container.querySelectorAll('.diff-hunk')];
+
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
+    expect(hunks()[1].classList.contains('current-hunk')).toBe(false);
+
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(false);
+    expect(hunks()[1].classList.contains('current-hunk')).toBe(true);
+
+    // Already at the last hunk — Next is a no-op, not a wrap to hunk 0.
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(hunks()[1].classList.contains('current-hunk')).toBe(true);
+
+    await fireEvent.click(getByLabelText('Previous change'));
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
+
+    // Already at the first hunk — Previous is a no-op, not a wrap to the last.
+    await fireEvent.click(getByLabelText('Previous change'));
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
+  });
+
+  it('Alt+ArrowDown / Alt+ArrowUp drive the same navigation as the buttons', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { container } = render(Diff);
+    const hunks = () => [...container.querySelectorAll('.diff-hunk')];
+
+    await fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
+
+    await fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(hunks()[1].classList.contains('current-hunk')).toBe(true);
+
+    await fireEvent.keyDown(window, { key: 'ArrowUp', altKey: true });
+    expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
+  });
+
+  it('ignores plain arrow keys (no Alt) so it does not fight normal scrolling/typing', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { container } = render(Diff);
+    await fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(container.querySelector('.current-hunk')).toBeNull();
+  });
+
+  it('resets navigation when switching diff mode (inline <-> SBS render different DOM)', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { getByLabelText, getByText, container } = render(Diff);
+    await fireEvent.click(getByLabelText('Next change'));
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(container.querySelectorAll('.diff-hunk')[1].classList.contains('current-hunk')).toBe(true);
+
+    await fireEvent.click(getByText('Side by Side'));
+    await tick();
+    expect(container.querySelector('.current-hunk')).toBeNull();
+
+    // And the next click starts fresh at hunk 0 again, not wherever it left off.
+    await fireEvent.click(getByLabelText('Next change'));
+    const sbsHunks = [...container.querySelectorAll('.sbs-left .sbs-hunk')];
+    expect(sbsHunks[0].classList.contains('current-hunk')).toBe(true);
+  });
+
+  it('resets navigation when the shown file changes', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { getByLabelText, container } = render(Diff);
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(container.querySelector('.current-hunk')).not.toBeNull();
+
+    diffStore.setDiffs('/r', 'src/b.ts', twoHunkDiff('src/b.ts'), null);
+    await tick();
+    expect(container.querySelector('.current-hunk')).toBeNull();
   });
 });
 /* SNIPCODE-HOOK end */

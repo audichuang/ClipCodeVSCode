@@ -725,4 +725,6 @@ export const zh: Record<string, string> = {
   'diff.newFile': '新文件',
   'diff.deletedFile': '已删除的文件',
   'diff.mixedLineEndings': '此行以 CRLF 结尾，与文件其余部分不同',
+  'diff.prevHunk': '上一个更改',
+  'diff.nextHunk': '下一个更改',
 };

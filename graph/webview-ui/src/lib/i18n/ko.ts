@@ -725,4 +725,6 @@ export const ko: Record<string, string> = {
   'diff.newFile': '새 파일',
   'diff.deletedFile': '삭제된 파일',
   'diff.mixedLineEndings': '이 줄은 파일의 나머지 부분과 달리 CRLF로 끝납니다',
+  'diff.prevHunk': '이전 변경 사항',
+  'diff.nextHunk': '다음 변경 사항',
 };
