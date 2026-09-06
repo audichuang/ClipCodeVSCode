@@ -718,4 +718,30 @@ export const en: Record<string, string> = {
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
   'pr.into': 'into',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': 'Select a base branch to compare against.',
+  'pr.emptyDetached': 'HEAD is detached — checkout a branch to compare.',
+  'pr.emptyError': 'Could not load comparison: {message}',
+  'pr.emptySameRef': '{base} and {head} are the same ref — nothing to compare.',
+  'pr.emptyUpToDate': '{head} is already fully merged into {base}.',
+  'pr.statsAhead': '{count} ahead',
+  'pr.statsBehind': '{count} behind',
+  'pr.statsFiles': '{count} files',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': 'Copy merge-base hash',
+  'pr.openNativeDiff': 'Open native diff',
+  'pr.collapseAll': 'Collapse all',
+  'pr.expandAll': 'Expand all',
+  'pr.filterBranches': 'Filter branches…',
+  'pr.noMatchingBranches': 'No matching branches',
+  'pr.swapBaseHead': 'Swap base and head',
+  'pr.prevChange': 'Previous change',
+  'pr.nextChange': 'Next change',
+  'pr.copyFullSource': 'Copy Full Source',
+  'pr.loading': 'Loading comparison',
+  'pr.localBranches': 'Local',
+  'pr.remoteBranches': 'Remote',
+  /* SNIPCODE-HOOK end */
 };
