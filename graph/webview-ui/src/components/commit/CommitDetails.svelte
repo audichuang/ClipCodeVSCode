@@ -16,6 +16,7 @@
   import LinkifiedText from '../common/LinkifiedText.svelte';
   import Markdown from '../common/Markdown.svelte';
   import { hasMarkdown } from '../../lib/markdown-detect';
+  import { formatCommitDate } from '../../lib/utils/format-date';
 
   interface Props {
     commit?: Commit;
@@ -396,9 +397,12 @@
     return () => window.removeEventListener('message', handleMessage);
   });
 
+  /* SNIPCODE-HOOK start: M7 — one shared date format (see lib/utils/format-date.ts);
+     CommitGraph's graph-row date is unified to the same format separately. */
   function formatFullDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleString();
+    return formatCommitDate(dateStr);
   }
+  /* SNIPCODE-HOOK end */
 
   function handleParentMouseEnter(e: MouseEvent, hash: string) {
     if (previewTimeout) clearTimeout(previewTimeout);

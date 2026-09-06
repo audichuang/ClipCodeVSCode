@@ -2,6 +2,7 @@
   import type { Commit } from '../../lib/types';
   import { avatarStore } from '../../lib/stores/avatars.svelte';
   import { onMount } from 'svelte';
+  import { formatCommitDate } from '../../lib/utils/format-date';
 
   interface Props {
     commit: Commit;
@@ -14,9 +15,11 @@
   let { commit, x, y, onClose, onNavigate }: Props = $props();
   let cardEl: HTMLDivElement | undefined = $state();
 
+  /* SNIPCODE-HOOK start: M7 — same shared date format as CommitDetails/CommitGraph */
   function formatFullDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleString();
+    return formatCommitDate(dateStr);
   }
+  /* SNIPCODE-HOOK end */
 
   // Keep within viewport
   // svelte-ignore state_referenced_locally
