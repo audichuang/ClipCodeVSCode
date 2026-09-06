@@ -5,6 +5,39 @@
   import { t } from '../lib/i18n/index.svelte';
   import { getVsCodeApi } from '../lib/vscode-api';
   import FileDiffView from '../components/commit/FileDiffView.svelte';
+  import type { DiffData } from '../lib/types';
+
+  /* SNIPCODE-HOOK start: D6/X2 file header — dir/base, status letter, +/- stats */
+  function dirOf(path: string): string {
+    const i = path.lastIndexOf('/');
+    return i === -1 ? '' : path.slice(0, i + 1);
+  }
+  function baseOf(path: string): string {
+    const i = path.lastIndexOf('/');
+    return i === -1 ? path : path.slice(i + 1);
+  }
+  // Derived from the parser's own header metadata (D3), not a tree-supplied
+  // status — works today without any host/tree wiring. A rename beats
+  // new/deleted (a renamed file can ALSO be marked new/deleted-looking by
+  // git in edge cases, but oldPath is the authoritative signal here).
+  function statusLetter(diff: DiffData): 'R' | 'A' | 'D' | 'M' {
+    if (diff.oldPath) return 'R';
+    if (diff.newFile) return 'A';
+    if (diff.deletedFile) return 'D';
+    return 'M';
+  }
+  function lineStats(diff: DiffData): { add: number; del: number } {
+    let add = 0;
+    let del = 0;
+    for (const hunk of diff.hunks) {
+      for (const line of hunk.lines) {
+        if (line.type === 'add') add++;
+        else if (line.type === 'delete') del++;
+      }
+    }
+    return { add, del };
+  }
+  /* SNIPCODE-HOOK end */
 
   const store = diffStore;
   /* SNIPCODE-HOOK start: D5 default inline + remember the user's last choice */
@@ -39,8 +72,20 @@
     ([
       { side: 'staged' as DiffSide, diff: store.stagedDiff, label: t('details.staged') },
       { side: 'unstaged' as DiffSide, diff: store.unstagedDiff, label: t('details.unstaged') },
-    ]).filter((s) => s.diff !== null)
+    ])
+      .filter((s) => s.diff !== null)
+      /* SNIPCODE-HOOK start: D6/X2 file header — dir/base, status letter, +/- stats */
+      // Computed per SIDE, not one combined total: staged (HEAD->index) and
+      // unstaged (index->working) are different baselines, so summing them
+      // would double-count a line staged then edited again.
+      .map((s) => ({ ...s, status: statusLetter(s.diff!), stats: lineStats(s.diff!) }))
+      /* SNIPCODE-HOOK end */
   );
+
+  /* SNIPCODE-HOOK start: D6/X2 file header — dir/base, status letter, +/- stats */
+  const fileDir = $derived(dirOf(store.file));
+  const fileBase = $derived(baseOf(store.file));
+  /* SNIPCODE-HOOK end */
 </script>
 
 <div class="diff-app-root">
@@ -62,6 +107,15 @@
       {/if}
     {:else}
     <div class="mode-bar">
+      <!-- SNIPCODE-HOOK start: D6/X2 file header — dir/base -->
+      <!-- Diff tab hides FileDiffView's own toolbar (below), so this is the
+           ONLY place the full path is visible; per-side status/± live on
+           each section's badge instead (see .side-badge). -->
+      <span class="mode-bar-file" title={store.file}>
+        {#if fileDir}<span class="file-dir">{fileDir}</span>{/if}
+        <span class="file-base">{fileBase}</span>
+      </span>
+      <!-- SNIPCODE-HOOK end -->
       <div class="diff-mode-toggle">
         <button class:active={mode === 'inline'} onclick={() => setMode('inline')}>{t('details.inline')}</button>
         <button class:active={mode === 'side-by-side'} onclick={() => setMode('side-by-side')}>{t('details.sideBySide')}</button>
@@ -80,7 +134,19 @@
               onclick={() => { collapsed[section.side] = !collapsed[section.side]; }}
             >
               <span class="codicon {collapsed[section.side] ? 'codicon-chevron-right' : 'codicon-chevron-down'}"></span>
-              <span class="side-badge {section.side}">{section.label}</span>
+              <!-- SNIPCODE-HOOK start: D6/X2 file header — status letter, +/- stats, icon per side -->
+              <span class="side-badge {section.side}">
+                <span class="codicon {section.side === 'staged' ? 'codicon-check' : 'codicon-diff-modified'}"></span>
+                {section.label}
+                <span class="side-status status-{section.status}" title={section.status}>{section.status}</span>
+                {#if section.stats.add || section.stats.del}
+                  <span class="side-stats">
+                    <span class="stat-add">+{section.stats.add}</span>
+                    <span class="stat-del">−{section.stats.del}</span>
+                  </span>
+                {/if}
+              </span>
+              <!-- SNIPCODE-HOOK end -->
             </button>
             <button
               class="section-open-btn"
@@ -127,10 +193,19 @@
     background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
   }
   .mode-bar {
-    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
     padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border, transparent);
     font-family: var(--vscode-font-family); flex-shrink: 0;
   }
+  /* SNIPCODE-HOOK start: D6/X2 file header — dir/base */
+  .mode-bar-file {
+    flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+    font-size: var(--vscode-font-size, 13px);
+    display: flex; align-items: baseline; gap: 0;
+  }
+  .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; }
+  .file-base { flex-shrink: 0; font-weight: 600; }
+  /* SNIPCODE-HOOK end */
   .diff-mode-toggle { display: flex; gap: 2px; background: rgba(128,128,128,0.15); border-radius: 3px; padding: 1px; }
   .diff-mode-toggle button {
     padding: 2px 8px; font-size: 0.75em; border-radius: 2px;
@@ -161,9 +236,24 @@
   }
   .section-open-btn:hover { color: var(--vscode-foreground); }
   .side-badge {
+    display: inline-flex; align-items: center; gap: 4px;
     font-size: 10px; padding: 1px 6px; border-radius: 8px;
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
   }
+  /* SNIPCODE-HOOK start: D6/X2 badge icon + status letter + stats, tinted per side */
+  .side-badge .codicon { font-size: 11px; }
+  /* Distinct tint per side (on top of the shared icon) so Staged/Unstaged
+     don't read as the same badge at a glance. */
+  .side-badge.staged { background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, var(--vscode-badge-background)); }
+  .side-badge.unstaged { background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #63b0f4) 25%, var(--vscode-badge-background)); }
+  .side-status {
+    font-weight: 700;
+    opacity: 0.9;
+  }
+  .side-stats { display: inline-flex; gap: 4px; opacity: 0.9; }
+  .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); }
+  .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  /* SNIPCODE-HOOK end */
 
   /* Each FileDiffView renders its own sticky filename toolbar. In this unified
      single-file view that is redundant (the panel title already names the file)

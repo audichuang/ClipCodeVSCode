@@ -177,3 +177,65 @@ describe('Diff.svelte unified view', () => {
   });
   /* SNIPCODE-HOOK end */
 });
+
+/* SNIPCODE-HOOK start: D6/X2 file header — dir/base, status letter, +/- stats */
+describe('Diff.svelte file header (D6/X2)', () => {
+  it('splits the file path into dir/ and base in the mode-bar', () => {
+    diffStore.setDiffs('/r', 'src/api/users.ts', textDiff('src/api/users.ts'), null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.file-dir')!.textContent).toBe('src/api/');
+    expect(container.querySelector('.file-base')!.textContent).toBe('users.ts');
+  });
+
+  it('shows no dir segment for a root-level file', () => {
+    diffStore.setDiffs('/r', 'README.md', textDiff('README.md'), null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.file-dir')).toBeNull();
+    expect(container.querySelector('.file-base')!.textContent).toBe('README.md');
+  });
+
+  it('shows the M status letter and +/- counts for an ordinary modify', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null);
+    const { container } = render(Diff);
+    const badge = container.querySelector('.side-badge.staged')!;
+    expect(badge.querySelector('.side-status')!.textContent).toBe('M');
+    expect(badge.querySelector('.stat-add')!.textContent).toBe('+1');
+    expect(badge.querySelector('.stat-del')!.textContent).toBe('−0');
+  });
+
+  it('shows R for a renamed file (from DiffData.oldPath, no host wiring needed)', () => {
+    const renamed: DiffData = { ...textDiff('new.ts'), oldPath: 'old.ts', similarity: 90 };
+    diffStore.setDiffs('/r', 'new.ts', renamed, null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.side-status')!.textContent).toBe('R');
+  });
+
+  it('shows A for a new file and D for a deleted file', () => {
+    diffStore.setDiffs('/r', 'n.ts', { ...textDiff('n.ts'), newFile: true }, null);
+    const added = render(Diff);
+    expect(added.container.querySelector('.side-status')!.textContent).toBe('A');
+    added.unmount();
+
+    diffStore.setDiffs('/r', 'n.ts', { ...textDiff('n.ts'), deletedFile: true }, null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.side-status')!.textContent).toBe('D');
+  });
+
+  it('computes stats independently per side (no double-counting across staged/unstaged)', () => {
+    const staged = textDiff('a.ts'); // +1/-0
+    const unstaged: DiffData = {
+      ...textDiff('a.ts'),
+      hunks: [{ header: '@@ -1 +1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
+        lines: [{ type: 'delete', content: 'y', oldLineNumber: 1 }] }], // -1
+    };
+    diffStore.setDiffs('/r', 'a.ts', staged, unstaged);
+    const { container } = render(Diff);
+    const stagedBadge = container.querySelector('.side-badge.staged')!;
+    const unstagedBadge = container.querySelector('.side-badge.unstaged')!;
+    expect(stagedBadge.querySelector('.stat-add')!.textContent).toBe('+1');
+    expect(stagedBadge.querySelector('.stat-del')!.textContent).toBe('−0');
+    expect(unstagedBadge.querySelector('.stat-add')!.textContent).toBe('+0');
+    expect(unstagedBadge.querySelector('.stat-del')!.textContent).toBe('−1');
+  });
+});
+/* SNIPCODE-HOOK end */

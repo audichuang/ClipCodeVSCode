@@ -69,6 +69,18 @@ beforeEach(() => {
 });
 
 describe('DiffPanel', () => {
+  /* SNIPCODE-HOOK start: D6/X2 tab title carries the dir */
+  it('titles the tab "Diff: dir/base" for a nested file (basename-only collides across folders)', async () => {
+    const wb = makeWorkbench();
+    await shownPanel(wb); // shows /r : a.ts (root-level)
+    expect((H.panel as unknown as { title: string }).title).toBe('Diff: a.ts');
+
+    const dp2 = DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+    dp2.show('/r', 'src/api/users.ts');
+    expect((H.panel as unknown as { title: string }).title).toBe('Diff: src/api/users.ts');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('show() fetches both sides and posts one diffShow with stagedDiff + unstagedDiff', async () => {
     const wb = makeWorkbench();
     await shownPanel(wb);
