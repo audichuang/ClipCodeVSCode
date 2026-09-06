@@ -16,6 +16,7 @@
   import LinkifiedText from '../common/LinkifiedText.svelte';
   import Markdown from '../common/Markdown.svelte';
   import { hasMarkdown } from '../../lib/markdown-detect';
+  import { formatCommitDate } from '../../lib/utils/format-date';
 
   interface Props {
     commit?: Commit;
@@ -187,12 +188,23 @@
   // passed to FileDiffView and the tree's "Reverse File" action.
   const canReverseInThisView = $derived(!!commit && stashIndex === null);
 
+  /* SNIPCODE-HOOK start: M12 — Changes tree small toolbar (Tree/Flat + Expand/Collapse all) */
+  let filesViewMode = $state<'tree' | 'flat'>('tree');
+  /* SNIPCODE-HOOK end */
   let filesPanelWidth = $state(240);
   let isResizing = $state(false);
   let resizeStartX = 0;
   let resizeStartWidth = 0;
+  /* SNIPCODE-HOOK start: M2 — initializing to 'commit' for an UNCOMMITTED commit
+     rendered the Commit-tab content (author/committer/date, avatar) for one frame
+     before the hash-tracking $effect below flips this to 'changes': the synthetic
+     UNCOMMITTED commit has empty author/committer info, so that frame is at best
+     a blank flash. Special-case it here instead. */
   // svelte-ignore state_referenced_locally
-  let activeTab = $state<'commit' | 'changes'>(commit ? 'commit' : 'changes');
+  let activeTab = $state<'commit' | 'changes'>(
+    commit?.hash === 'UNCOMMITTED' ? 'changes' : (commit ? 'commit' : 'changes'),
+  );
+  /* SNIPCODE-HOOK end */
   let uncommittedTab = $state<'staged' | 'unstaged'>('staged');
 
   let activeHash = $state('');
@@ -307,7 +319,17 @@
     if (selectedFile && activeHash && activeHash !== 'UNCOMMITTED') {
       // Check if we already have the diff
       if (!diffs.some(d => d.file === selectedFile)) {
-         vscode.postMessage({ type: 'getFileDiff', payload: { hash: activeHash, file: selectedFile } });
+        /* SNIPCODE-HOOK start: X3 — carry oldPath so a rename/copy resolves the
+           pre-rename blob on the host side (mirrors PrView.svelte's openDiff call).
+           message-bus.ts's getFileDiff payload doesn't declare oldPath yet on this
+           branch (added on ui/diff, pending merge) — `as` cast bypasses the excess-
+           property check until the branches merge and the type catches up. */
+        const oldPath = files.find(f => f.path === selectedFile)?.oldPath;
+        vscode.postMessage({
+          type: 'getFileDiff',
+          payload: { hash: activeHash, file: selectedFile, oldPath } as { hash: string; file: string; oldPath?: string },
+        });
+        /* SNIPCODE-HOOK end */
       }
     }
   });
@@ -396,9 +418,12 @@
     return () => window.removeEventListener('message', handleMessage);
   });
 
+  /* SNIPCODE-HOOK start: M7 — one shared date format (see lib/utils/format-date.ts);
+     CommitGraph's graph-row date is unified to the same format separately. */
   function formatFullDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleString();
+    return formatCommitDate(dateStr);
   }
+  /* SNIPCODE-HOOK end */
 
   function handleParentMouseEnter(e: MouseEvent, hash: string) {
     if (previewTimeout) clearTimeout(previewTimeout);
@@ -477,6 +502,44 @@
 
     return sortTree(root.children);
   }
+
+  /* SNIPCODE-HOOK start: M12 — flat view: no directory grouping, just the files
+     sorted by path. Reuses the exact same FileTreeNode shape (isFile:true, no
+     children) so the existing renderTree/renderUncommittedTree snippets — and
+     every selection/context-menu handler they carry — need no duplication. */
+  function buildFlatList(commitFiles: CommitFile[]): FileTreeNode[] {
+    return [...commitFiles]
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .map(({ path, status }) => ({ name: path, path, children: [], isFile: true, status }));
+  }
+
+  // Every directory path in a tree, for Expand all / Collapse all.
+  function allDirPaths(nodes: FileTreeNode[]): string[] {
+    const out: string[] = [];
+    for (const n of nodes) {
+      if (!n.isFile) {
+        out.push(n.path);
+        out.push(...allDirPaths(n.children));
+      }
+    }
+    return out;
+  }
+
+  function expandAllDirs() {
+    if (activeHash === 'UNCOMMITTED') {
+      const dirs = new Set<string>();
+      for (const d of allDirPaths(stagedTree)) dirs.add(`staged:${d}`);
+      for (const d of allDirPaths(unstagedTree)) dirs.add(`unstaged:${d}`);
+      expandedDirs = dirs;
+    } else {
+      expandedDirs = new Set(allDirPaths(fileTree));
+    }
+  }
+
+  function collapseAllDirs() {
+    expandedDirs = new Set();
+  }
+  /* SNIPCODE-HOOK end */
 
   // All changed-file paths under a tree node (the node itself if it's a file).
   function collectFilePaths(node: FileTreeNode): string[] {
@@ -600,13 +663,19 @@
     return keysUnder.length > 0 && keysUnder.every(k => selectedUncommittedFiles.has(k));
   }
 
-  let fileTree = $derived(buildFileTree(files));
+  /* SNIPCODE-HOOK start: M12 — flat view swaps buildFileTree for buildFlatList */
+  let fileTree = $derived(filesViewMode === 'flat' ? buildFlatList(files) : buildFileTree(files));
   // Memoize the uncommitted trees too. They were rebuilt inline in the
   // template ({@render renderUncommittedTree(buildFileTree(...))}), so any
   // reactive change (selection, expand/collapse) re-ran buildFileTree over
   // both lists on every render.
-  let stagedTree = $derived(uncommittedFiles ? buildFileTree(uncommittedFiles.staged) : []);
-  let unstagedTree = $derived(uncommittedFiles ? buildFileTree(uncommittedFiles.unstaged) : []);
+  let stagedTree = $derived(uncommittedFiles
+    ? (filesViewMode === 'flat' ? buildFlatList(uncommittedFiles.staged) : buildFileTree(uncommittedFiles.staged))
+    : []);
+  let unstagedTree = $derived(uncommittedFiles
+    ? (filesViewMode === 'flat' ? buildFlatList(uncommittedFiles.unstaged) : buildFileTree(uncommittedFiles.unstaged))
+    : []);
+  /* SNIPCODE-HOOK end */
 
   // Mirror the local file selection into the store so the global Esc handler can
   // tell whether a file is selected. Cleared on unmount so a closed panel never
@@ -727,6 +796,22 @@
       <button class="top-tab" class:active={activeTab === 'changes'} onclick={() => { activeTab = 'changes'; }}>
         {t('details.changes')} <span class="tab-count">{files.length}</span>
       </button>
+      <!-- SNIPCODE-HOOK start: P3 — compare mode had no header saying which two refs
+           are being diffed (unlike the PR tab). 7-char short hash, full ref in the tooltip. -->
+      {#if !commit && uiStore.comparing}
+        <span class="compare-header">
+          {#if uiStore.compareRef1}
+            <span class="compare-ref" use:tooltip={uiStore.compareRef1}>{uiStore.compareRef1.substring(0, 7)}</span>
+          {/if}
+          <i class="codicon codicon-arrow-right compare-arrow"></i>
+          {#if uiStore.compareRef2}
+            <span class="compare-ref" use:tooltip={uiStore.compareRef2}>{uiStore.compareRef2.substring(0, 7)}</span>
+          {:else}
+            <span class="compare-ref" use:tooltip={t('details.workingTree')}>{t('details.workingTree')}</span>
+          {/if}
+        </span>
+      {/if}
+      <!-- SNIPCODE-HOOK end -->
     {/if}
     <div class="tabs-actions">
       <button class="tab-action-btn" aria-label={uiStore.commitDetailFullscreen ? t('details.restore') : t('details.fullscreen')} use:tooltip={uiStore.commitDetailFullscreen ? t('details.restore') : t('details.fullscreen')} onclick={() => { uiStore.commitDetailFullscreen = !uiStore.commitDetailFullscreen; }}>
@@ -911,6 +996,39 @@
   {:else if activeTab === 'changes'}
     <div class="changes-tab-content">
       <div class="files-panel" style="width: {filesPanelWidth}px">
+        <!-- SNIPCODE-HOOK start: M12 — Changes tree small toolbar: Tree/Flat toggle
+             + Expand all/Collapse all (disabled in flat view — no directories). -->
+        <div class="files-toolbar">
+          <div class="files-view-toggle" role="group">
+            <button
+              class="files-view-btn"
+              class:active={filesViewMode === 'tree'}
+              onclick={() => { filesViewMode = 'tree'; }}
+            >{t('details.treeView')}</button>
+            <button
+              class="files-view-btn"
+              class:active={filesViewMode === 'flat'}
+              onclick={() => { filesViewMode = 'flat'; }}
+            >{t('details.flatView')}</button>
+          </div>
+          <div class="files-toolbar-actions">
+            <button
+              class="files-toolbar-btn"
+              disabled={filesViewMode === 'flat'}
+              onclick={expandAllDirs}
+              aria-label={t('details.expandAll')}
+              use:tooltip={t('details.expandAll')}
+            ><i class="codicon codicon-expand-all"></i></button>
+            <button
+              class="files-toolbar-btn"
+              disabled={filesViewMode === 'flat'}
+              onclick={collapseAllDirs}
+              aria-label={t('details.collapseAll')}
+              use:tooltip={t('details.collapseAll')}
+            ><i class="codicon codicon-collapse-all"></i></button>
+          </div>
+        </div>
+        <!-- SNIPCODE-HOOK end -->
         <div class="files-list">
           {#if activeHash === 'UNCOMMITTED' && uncommittedFiles}
             {#snippet renderUncommittedTree(nodes: FileTreeNode[], depth: number, staged: boolean)}
@@ -1072,19 +1190,21 @@
                 {/if}
               {/each}
             {/snippet}
+            <!-- SNIPCODE-HOOK start: M P2 — hardcoded English → i18n -->
             {#if uncommittedTab === 'staged'}
               {#if uncommittedFiles.staged.length > 0}
                 {@render renderUncommittedTree(stagedTree, 0, true)}
               {:else}
-                <div class="empty-state-text">No staged changes</div>
+                <div class="empty-state-text">{t('details.noStagedChanges')}</div>
               {/if}
             {:else}
               {#if uncommittedFiles.unstaged.length > 0}
                 {@render renderUncommittedTree(unstagedTree, 0, false)}
               {:else}
-                <div class="empty-state-text">No unstaged changes</div>
+                <div class="empty-state-text">{t('details.noUnstagedChanges')}</div>
               {/if}
             {/if}
+            <!-- SNIPCODE-HOOK end -->
           {:else if activeHash !== 'UNCOMMITTED'}
           {#snippet renderTree(nodes: FileTreeNode[], depth: number)}
             {#each nodes as node}
@@ -1408,19 +1528,14 @@
 {/if}
 
 {#if previewCommit && previewPos}
+  <!-- SNIPCODE-HOOK start: X7 — onNavigate removed (dead: CommitHoverCard never called it) -->
   <CommitHoverCard
     commit={previewCommit}
     x={previewPos.x}
     y={previewPos.y}
     onClose={handleParentMouseLeave}
-    onNavigate={() => {
-      if (previewCommit) {
-        uiStore.selectedCommitHash = previewCommit.hash;
-        vscode.postMessage({ type: 'searchByHash', payload: { hash: previewCommit.hash } });
-        handleParentMouseLeave();
-      }
-    }}
   />
+  <!-- SNIPCODE-HOOK end -->
 {/if}
 
 <style>
@@ -1449,6 +1564,29 @@
     align-items: center;
     gap: 2px;
   }
+
+  /* SNIPCODE-HOOK start: P3 — compare mode ref1 → ref2 header */
+  .compare-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .compare-ref {
+    font-family: var(--vscode-editor-font-family, monospace);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+
+  .compare-arrow {
+    font-size: 11px;
+    opacity: 0.7;
+  }
+  /* SNIPCODE-HOOK end */
 
   .tab-action-btn {
     display: flex;
@@ -1822,6 +1960,69 @@
     flex-direction: column;
     overflow: hidden;
   }
+
+  /* SNIPCODE-HOOK start: M12 — Changes tree small toolbar */
+  .files-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .files-view-toggle {
+    display: flex;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .files-view-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    border: 1px solid var(--vscode-panel-border);
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    border-radius: 3px;
+  }
+
+  .files-view-btn.active {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
+    color: var(--vscode-foreground);
+  }
+
+  .files-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .files-toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 13px;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 3px;
+  }
+
+  .files-toolbar-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .files-toolbar-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* SNIPCODE-HOOK end */
 
   .resize-handle {
     width: 4px;

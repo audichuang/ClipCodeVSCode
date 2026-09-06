@@ -62,6 +62,17 @@ describe('Toolbar — view tabs', () => {
     await fireEvent.click(tabs[0]); // back to graph
     expect(uiStore.viewMode).toBe('graph');
   });
+
+  /* SNIPCODE-HOOK start: M4 — view tabs expose a real tablist to a11y tools */
+  it('exposes role=tablist on the container and role=tab + aria-selected on each tab', () => {
+    const { container } = render(Toolbar);
+    expect(container.querySelector('.toolbar-center')?.getAttribute('role')).toBe('tablist');
+    const tabs = container.querySelectorAll<HTMLButtonElement>('.view-tab');
+    tabs.forEach(tab => expect(tab.getAttribute('role')).toBe('tab'));
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[1].getAttribute('aria-selected')).toBe('false');
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
 

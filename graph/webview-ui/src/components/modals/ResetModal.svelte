@@ -47,8 +47,12 @@
   </div>
   <div class="form-actions">
     <button onclick={onClose}>{t('common.cancel')}</button>
-    <button class="primary" onclick={() => { onConfirm(resetMode); onClose(); }}>
+    <!-- SNIPCODE-HOOK start: R2 — Reset (can be --hard) is destructive: use .danger-btn,
+         not .primary, so Modal's fallback-Enter handler (which only targets
+         button.primary) can't trigger it accidentally. -->
+    <button class="danger-btn" onclick={() => { onConfirm(resetMode); onClose(); }}>
       {t('reset.resetBtn')}
     </button>
+    <!-- SNIPCODE-HOOK end -->
   </div>
 </Modal>

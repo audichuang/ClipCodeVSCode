@@ -1,9 +1,23 @@
 <script lang="ts">
-  import { onDestroy, untrack } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { commitStore } from '../../lib/stores/commits.svelte';
+  import { uiStore } from '../../lib/stores/ui.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { tooltip } from '../../lib/actions/tooltip';
+  import { getVsCodeApi } from '../../lib/vscode-api';
   import type { BranchInfo } from '../../lib/types';
+
+  const vscode = getVsCodeApi();
+  /* SNIPCODE-HOOK start: M9 — hash-shaped queries (7-40 hex) that match nothing in
+     the loaded window fall back to the host's searchByHash, which searches the
+     whole repo (see message-bus.ts). This only tells us the commit exists
+     somewhere — not that it's loaded — so it deliberately does NOT fake a
+     matched/navigable result; it just swaps the "No results" copy for one that
+     says the commit exists outside the loaded range. */
+  const HASH_RE = /^[0-9a-f]{7,40}$/i;
+  let lastHashLookupQuery = '';
+  let hashNotLoaded = $state(false);
+  /* SNIPCODE-HOOK end */
 
   interface Props {
     onResults: (matchedHashes: Set<string> | null) => void;
@@ -133,6 +147,18 @@
     if (navigate && matched.length > 0) {
       onNavigate(matched[currentIndex]);
     }
+
+    /* SNIPCODE-HOOK start: M9 — hash-shaped no-match falls back to searchByHash */
+    if (matched.length === 0 && HASH_RE.test(q)) {
+      if (q !== lastHashLookupQuery) {
+        lastHashLookupQuery = q;
+        hashNotLoaded = false;
+        vscode.postMessage({ type: 'searchByHash', payload: { hash: q } });
+      }
+    } else {
+      hashNotLoaded = false;
+    }
+    /* SNIPCODE-HOOK end */
   }
 
   function doSearch() {
@@ -176,6 +202,10 @@
       } else {
         clear();
         inputEl?.blur();
+        /* SNIPCODE-HOOK start: M9 — hand focus back to the graph so arrow-key
+           navigation works immediately instead of requiring an extra click. */
+        document.querySelector<HTMLElement>('.commit-graph')?.focus();
+        /* SNIPCODE-HOOK end */
       }
     }
   }
@@ -184,8 +214,39 @@
     query = '';
     matchedHashes = [];
     currentIndex = -1;
+    /* SNIPCODE-HOOK start: M9 */
+    hashNotLoaded = false;
+    lastHashLookupQuery = '';
+    /* SNIPCODE-HOOK end */
     onResults(null);
   }
+
+  /* SNIPCODE-HOOK start: M9 — reuse the exact "Load more" message CommitGraph's
+     own load-more button posts (graph-navigation is off limits; this is the
+     independent SearchBar copy of the same protocol). */
+  function handleLoadMore() {
+    commitStore.setLoadingMore(true);
+    vscode.postMessage({ type: 'getLog', payload: { limit: commitStore.currentLimit + uiStore.loadMoreCount } });
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: M9 — correlate the searchByHash reply back to the query
+     that triggered it (no requestId on this message type), and only accept it
+     while that exact query is still in the box — guards against an unrelated
+     searchByHash reply (e.g. CommitDetails' parent-link click) flipping this. */
+  onMount(() => {
+    function handleMessage(event: MessageEvent) {
+      const msg = event.data;
+      if (msg?.type !== 'searchResults') return;
+      const q = query.trim().toLowerCase();
+      if (!lastHashLookupQuery || q !== lastHashLookupQuery) return;
+      const found = (msg.payload?.commits as Array<{ hash: string }> | undefined)?.[0];
+      hashNotLoaded = !!found && found.hash.toLowerCase().startsWith(lastHashLookupQuery);
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  });
+  /* SNIPCODE-HOOK end */
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -237,10 +298,30 @@
       <span class="search-count" class:empty={matchedHashes.length === 0}>
         {#if matchedHashes.length > 0}
           <span class="count-current">{currentIndex + 1}</span><span class="count-sep">/</span><span class="count-total">{matchedHashes.length}</span>
+        {:else if hashNotLoaded}
+          <!-- SNIPCODE-HOOK start: M9 — a hash-shaped query with no local match, but
+               searchByHash confirms the commit exists outside the loaded window. -->
+          {t('search.hashNotLoaded')}
+          <!-- SNIPCODE-HOOK end -->
         {:else}
-          {t('search.noResults')}
+          <!-- SNIPCODE-HOOK start: M9 — "No results" was a false negative: search only
+               scans the loaded window, so name it and offer to load more. -->
+          {t('search.noResultsLoaded', { count: String(commitStore.commits.length) })}
+          <!-- SNIPCODE-HOOK end -->
         {/if}
       </span>
+      {#if matchedHashes.length === 0 && commitStore.hasMore}
+        <!-- SNIPCODE-HOOK start: M9 — Load more, same message as CommitGraph's own button -->
+        <button
+          class="nav-btn load-more-btn"
+          onclick={handleLoadMore}
+          disabled={commitStore.loadingMore}
+          use:tooltip={t('graph.loadMore')}
+        >
+          {#if commitStore.loadingMore}<span class="spinner"></span>{:else}<i class="codicon codicon-chevron-down"></i>{/if}
+        </button>
+        <!-- SNIPCODE-HOOK end -->
+      {/if}
       <span class="nav-divider"></span>
       <button class="nav-btn" onclick={navigatePrev} disabled={matchedHashes.length === 0} aria-label={t('search.prev')} use:tooltip={t('search.prev')}>
         <i class="codicon codicon-chevron-up"></i>
@@ -285,15 +366,18 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="backdrop" onclick={() => { filterOpen = false; }}></div>
       <div class="dropdown">
+        <!-- SNIPCODE-HOOK start: M9 — "All"/"Local" were hardcoded English; reuse the
+             existing translated words (same generic meaning elsewhere in the app). -->
         <button class="dd-item" class:active={!filterActive} onclick={clearFilter}>
           <input type="checkbox" checked={!filterActive} readonly />
-          All
+          {t('search.allBranches')}
         </button>
         <div class="dd-sep"></div>
         <button class="dd-item" class:active={remoteFilter.includes('local')} onclick={() => toggleFilter('local')}>
           <input type="checkbox" checked={remoteFilter.includes('local')} readonly />
-          Local
+          {t('sidebar.local')}
         </button>
+        <!-- SNIPCODE-HOOK end -->
         {#if remotes.length > 0}
           <div class="dd-sep"></div>
           {#each remotes as remote}
@@ -342,7 +426,9 @@
         </button>
         {#if filteredByQuery(localBranches).length > 0}
           <div class="dd-sep"></div>
-          <div class="dd-section-header">LOCAL</div>
+          <!-- SNIPCODE-HOOK start: M9 — reuse sidebar.local; CSS uppercases this header -->
+          <div class="dd-section-header">{t('sidebar.local')}</div>
+          <!-- SNIPCODE-HOOK end -->
           {#each filteredByQuery(localBranches) as b}
             <button
               class="dd-item"

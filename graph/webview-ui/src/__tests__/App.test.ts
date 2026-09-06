@@ -4,8 +4,9 @@ import App from '../App.svelte';
 import { i18n } from '../lib/i18n/index.svelte';
 import { commitStore } from '../lib/stores/commits.svelte';
 import { branchStore } from '../lib/stores/branches.svelte';
-import { uiStore } from '../lib/stores/ui.svelte';
+import { uiStore, BOTTOM_PANEL_MAX_RATIO } from '../lib/stores/ui.svelte';
 import { modalStore } from '../lib/stores/modals.svelte';
+import { getVsCodeApi } from '../lib/vscode-api';
 
 function postMsg(type: string, payload?: unknown) {
   window.dispatchEvent(new MessageEvent('message', { data: { type, payload } }));
@@ -276,6 +277,14 @@ describe('App — keyboard shortcuts', () => {
     await fireEvent.keyDown(window, { key: '3', ctrlKey: true });
     expect(uiStore.viewMode).toBe('stats');
   });
+
+  /* SNIPCODE-HOOK start: M4 — Ctrl+4 switches to the PR tab */
+  it('Ctrl+4 switches to PR view', async () => {
+    render(App);
+    await fireEvent.keyDown(window, { key: '4', ctrlKey: true });
+    expect(uiStore.viewMode).toBe('pr');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('Ctrl+R re-requests log and branches', async () => {
     render(App);
@@ -1136,6 +1145,48 @@ describe('App — bottom panel resize handle', () => {
     expect(uiStore.bottomPanelHeight).not.toBe(startHeight);
     await fireEvent.mouseUp(window);
   });
+
+  /* SNIPCODE-HOOK start: M11 — bottom-panel height persists across sessions via
+     vscode.setState/getState (BOTTOM_PANEL_DEFAULT_RATIO only applies when
+     nothing was saved yet). */
+  it('drag end persists the resulting height as a ratio via vscode.setState', async () => {
+    uiStore.selectedCommitHash = 'h1';
+    uiStore.showBottomPanel = true;
+    commitStore.commits = [{
+      hash: 'h1', abbreviatedHash: 'h1',
+      author: { name: 'A', email: 'a@x.com', date: '' },
+      committer: { name: 'A', email: 'a@x.com', date: '' },
+      subject: 'fix', body: '', parents: [], refs: [],
+    }];
+    const setStateSpy = vi.spyOn(getVsCodeApi(), 'setState');
+    const { container } = render(App);
+    await waitFor(() => container.querySelector('.resize-handle-h'));
+    const handle = container.querySelector<HTMLDivElement>('.resize-handle-h')!;
+    await fireEvent.mouseDown(handle, { clientY: 500 });
+    await fireEvent.mouseMove(window, { clientY: 400 });
+    await fireEvent.mouseUp(window);
+    expect(setStateSpy).toHaveBeenCalled();
+    const saved = setStateSpy.mock.calls.at(-1)![0] as { bottomPanelRatio: number };
+    expect(saved.bottomPanelRatio).toBeCloseTo(uiStore.bottomPanelHeight / window.innerHeight, 5);
+    expect(saved.bottomPanelRatio).toBeLessThanOrEqual(BOTTOM_PANEL_MAX_RATIO + 0.01);
+  });
+
+  it('reads back a saved ratio on mount instead of the hardcoded default', async () => {
+    vi.spyOn(getVsCodeApi(), 'getState').mockReturnValueOnce({ bottomPanelRatio: 0.5 });
+    render(App);
+    await waitFor(() => {
+      expect(uiStore.bottomPanelHeight).toBe(Math.round(window.innerHeight * 0.5));
+    });
+  });
+
+  it('clamps an out-of-range saved ratio into [MIN, MAX] instead of trusting it blindly', async () => {
+    vi.spyOn(getVsCodeApi(), 'getState').mockReturnValueOnce({ bottomPanelRatio: 5 });
+    render(App);
+    await waitFor(() => {
+      expect(uiStore.bottomPanelHeight).toBe(Math.round(window.innerHeight * BOTTOM_PANEL_MAX_RATIO));
+    });
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('App — modal cancel/close callbacks', () => {

@@ -246,6 +246,24 @@ describe('CommitDetails — tabs', () => {
     expect(tabs.some(t => t.includes('staged'))).toBe(true);
     expect(tabs.some(t => t.includes('unstaged'))).toBe(true);
   });
+
+  /* SNIPCODE-HOOK start: M2 — mounting directly on an UNCOMMITTED commit (the
+     shape uiStore.selectCommit('UNCOMMITTED') will produce once the graph wires
+     up single-click selection) must render the Staged/Unstaged tree, not the
+     dead Commit-tab content, and must request getUncommittedDiff. */
+  it('mounting directly on commit.hash === "UNCOMMITTED" requests getUncommittedDiff and never renders Commit-tab content', () => {
+    const { container } = render(CommitDetails, {
+      commit: commit({ hash: 'UNCOMMITTED', subject: 'Uncommitted changes (2)', author: { name: '', email: '', date: '' }, committer: { name: '', email: '', date: '' } }),
+    });
+    expect(globalThis.__postedMessages.some(
+      (m) => (m.data as { type?: string }).type === 'getUncommittedDiff'
+    )).toBe(true);
+    // The Commit tab (author/committer info, avatar) must not appear even for
+    // the very first render — the synthetic commit has no real author/date.
+    expect(container.querySelector('.info-section')).toBeNull();
+    expect(container.querySelector('.avatar-lg')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — header actions', () => {
@@ -290,6 +308,33 @@ describe('CommitDetails — empty / compare', () => {
       expect(queryByText('old.txt')).toBeNull();
     });
   });
+
+  /* SNIPCODE-HOOK start: P3 — compare mode shows which two refs are being diffed */
+  it('shows a ref1 → ref2 header (7-char short hashes) when comparing two commits', () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaaaaaaaaaa';
+    uiStore.compareRef2 = 'bbbbbbbbbbbb';
+    const { container } = render(CommitDetails);
+    const header = container.querySelector('.compare-header');
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toContain('aaaaaaa');
+    expect(header!.textContent).toContain('bbbbbbb');
+  });
+
+  it('shows "Working tree" as the target when comparing a commit to local changes (compareRef2 null)', () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaaaaaaaaaa';
+    uiStore.compareRef2 = null;
+    const { container } = render(CommitDetails);
+    expect(container.querySelector('.compare-header')?.textContent?.toLowerCase()).toContain('working tree');
+  });
+
+  it('does not show the compare header for a normal single-commit selection', () => {
+    uiStore.comparing = false;
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    expect(container.querySelector('.compare-header')).toBeNull();
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — SHA copy buttons', () => {
@@ -417,6 +462,23 @@ describe('CommitDetails — file tree & diff', () => {
     });
     await waitFor(() => container.querySelector('.diff-toolbar'));
   });
+
+  /* SNIPCODE-HOOK start: X3 — getFileDiff must carry oldPath for a rename/copy so
+     the host can resolve the pre-rename blob (mirrors PrView.svelte's openDiff). */
+  it('clicking a renamed file posts getFileDiff with oldPath', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', [{ path: 'new.ts', status: 'R', oldPath: 'old.ts' } as { path: string; status: string; oldPath?: string }]);
+    const changesTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /change/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(changesTab);
+    await waitFor(() => container.querySelector('.file-item'));
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.file-item')!);
+    const msg = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'getFileDiff'
+    );
+    expect((msg!.data as { payload: unknown }).payload).toMatchObject({ hash: 'h1', file: 'new.ts', oldPath: 'old.ts' });
+  });
+  /* SNIPCODE-HOOK end */
 
   it('clicking a file twice deselects it', async () => {
     const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
@@ -777,7 +839,10 @@ describe('CommitDetails — hover preview cache & navigate', () => {
     });
   });
 
-  it('clicking the hover card navigates and clears the preview', async () => {
+  /* SNIPCODE-HOOK start: X7 — CommitHoverCard's onNavigate prop was dead code
+     (nothing in its template ever called it) and has been removed; this test
+     now just exercises the card's own onmouseleave → onClose wiring. */
+  it('mouseleave on the hover card clears the preview', async () => {
     vi.useFakeTimers();
     commitStore.commits = [commit({ hash: 'parent1', subject: 'parent commit' })];
     const { container } = render(CommitDetails, { commit: commit({ parents: ['parent1'] }) });
@@ -787,15 +852,12 @@ describe('CommitDetails — hover preview cache & navigate', () => {
     vi.advanceTimersByTime(400);
     vi.useRealTimers();
     await waitFor(() => container.querySelector('.commit-hover-card'));
-    // CommitHoverCard exposes an onNavigate handler that the parent uses to
-    // jump to the previewed commit; clicking the card surface triggers it.
-    // Simulate the navigate path via clicking the card body — this exercises
-    // App's parent-link onclick contract via mouseleave path instead.
     await fireEvent.mouseLeave(container.querySelector('.commit-hover-card')!);
     await waitFor(() => {
       expect(container.querySelector('.commit-hover-card')).toBeNull();
     });
   });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — multi-commit sections (3+ mode)', () => {
@@ -1340,3 +1402,62 @@ describe('CommitDetails — reverse changes (committed view)', () => {
     expect(msg!.payload).toMatchObject({ commit: 'h1', file: 'src/a.ts', hunkIndex: 0, lineIndices: [1, 2] });
   });
 });
+
+/* SNIPCODE-HOOK start: M12 — Changes tree small toolbar (Tree/Flat + Expand/Collapse all) */
+describe('CommitDetails — M12 files toolbar (tree/flat, expand/collapse all)', () => {
+  async function openChanges(files: Array<{ path: string; status: string }>) {
+    const r = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', files);
+    const changesTab = Array.from(r.container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /change/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(changesTab);
+    await waitFor(() => r.container.querySelector('.files-toolbar'));
+    return r;
+  }
+
+  it('defaults to Tree view with directory grouping', async () => {
+    const { container } = await openChanges([
+      { path: 'src/a.ts', status: 'M' },
+      { path: 'src/b.ts', status: 'M' },
+    ]);
+    await waitFor(() => container.querySelector('.dir-item'));
+    expect(container.querySelector('.files-view-btn.active')?.textContent?.toLowerCase()).toContain('tree');
+  });
+
+  it('Flat view lists full paths with no directory nodes', async () => {
+    const { container } = await openChanges([
+      { path: 'src/a.ts', status: 'M' },
+      { path: 'src/b.ts', status: 'M' },
+    ]);
+    await waitFor(() => container.querySelector('.dir-item'));
+    const flatBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.files-view-btn'))
+      .find(b => /flat/i.test(b.textContent ?? ''))!;
+    await fireEvent.click(flatBtn);
+    await waitFor(() => {
+      expect(container.querySelector('.dir-item')).toBeNull();
+      const names = Array.from(container.querySelectorAll('.file-name')).map(el => el.textContent);
+      expect(names).toEqual(['src/a.ts', 'src/b.ts']);
+    });
+  });
+
+  it('Collapse all hides file rows, Expand all brings them back', async () => {
+    const { container } = await openChanges([{ path: 'dir/a.ts', status: 'M' }]);
+    await waitFor(() => container.querySelector('.file-item'));
+    const collapseBtn = container.querySelector<HTMLButtonElement>('.files-toolbar-actions button:nth-child(2)')!;
+    await fireEvent.click(collapseBtn);
+    await waitFor(() => expect(container.querySelector('.file-item')).toBeNull());
+    const expandBtn = container.querySelector<HTMLButtonElement>('.files-toolbar-actions button:nth-child(1)')!;
+    await fireEvent.click(expandBtn);
+    await waitFor(() => expect(container.querySelector('.file-item')).not.toBeNull());
+  });
+
+  it('Expand/Collapse all are disabled in Flat view (no directories to toggle)', async () => {
+    const { container } = await openChanges([{ path: 'dir/a.ts', status: 'M' }]);
+    const flatBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.files-view-btn'))
+      .find(b => /flat/i.test(b.textContent ?? ''))!;
+    await fireEvent.click(flatBtn);
+    const actionBtns = container.querySelectorAll<HTMLButtonElement>('.files-toolbar-actions button');
+    actionBtns.forEach(b => expect(b.disabled).toBe(true));
+  });
+});
+/* SNIPCODE-HOOK end */
