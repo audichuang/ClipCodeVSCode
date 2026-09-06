@@ -721,4 +721,8 @@ export const en: Record<string, string> = {
 
   // ui/main
   'common.closeEsc': 'Close (Esc)',
+  'toolbar.historyDesc': 'Graph (Ctrl+1)',
+  'toolbar.logDesc': 'Reflog (Ctrl+2)',
+  'toolbar.statsDesc': 'Stats (Ctrl+3)',
+  'toolbar.prDesc': 'PR (Ctrl+4)',
 };

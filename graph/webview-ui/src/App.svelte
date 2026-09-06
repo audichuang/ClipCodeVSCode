@@ -285,6 +285,9 @@ import RewordModal from './components/modals/RewordModal.svelte';
     if (ctrl && e.key === '1') { e.preventDefault(); uiStore.viewMode = 'graph'; }
     if (ctrl && e.key === '2') { e.preventDefault(); uiStore.viewMode = 'log'; }
     if (ctrl && e.key === '3') { e.preventDefault(); uiStore.viewMode = 'stats'; }
+    /* SNIPCODE-HOOK start: M4 — Ctrl+4 for the PR tab (SNIPCODE-HOOK PR tab (Task G3) added the tab but missed this binding) */
+    if (ctrl && e.key === '4') { e.preventDefault(); uiStore.setViewMode('pr'); }
+    /* SNIPCODE-HOOK end */
 
     if (ctrl && e.key === 'f' && uiStore.viewMode === 'graph') {
       e.preventDefault();

@@ -190,33 +190,48 @@
     {/if}
   </div>
 
-  <div class="toolbar-center">
+  <!-- SNIPCODE-HOOK start: M4 — view tabs are a real tablist: role=tablist on the
+       container, role=tab + aria-selected on each tab, tooltip names the keybinding. -->
+  <div class="toolbar-center" role="tablist">
     <button
       class="view-tab"
+      role="tab"
+      aria-selected={uiStore.viewMode === 'graph'}
       class:active={uiStore.viewMode === 'graph'}
       onclick={switchToGraph}
+      use:tooltip={t('toolbar.historyDesc')}
     >
       {t('toolbar.history')}
     </button>
     <button
       class="view-tab"
+      role="tab"
+      aria-selected={uiStore.viewMode === 'log'}
       class:active={uiStore.viewMode === 'log'}
       onclick={() => { uiStore.viewMode = 'log'; }}
+      use:tooltip={t('toolbar.logDesc')}
     >
       {t('toolbar.log')}
     </button>
     <button
       class="view-tab"
+      role="tab"
+      aria-selected={uiStore.viewMode === 'stats'}
       class:active={uiStore.viewMode === 'stats'}
       onclick={() => { uiStore.viewMode = 'stats'; }}
+      use:tooltip={t('toolbar.statsDesc')}
     >
       {t('toolbar.stats')}
     </button>
-    <!-- SNIPCODE-HOOK start: PR tab (Task G3) — 4th view tab -->
+  <!-- SNIPCODE-HOOK end -->
+    <!-- SNIPCODE-HOOK start: PR tab (Task G3) — 4th view tab; role/aria-selected/tooltip added by M4 -->
     <button
       class="view-tab"
+      role="tab"
+      aria-selected={uiStore.viewMode === 'pr'}
       class:active={uiStore.viewMode === 'pr'}
       onclick={() => uiStore.setViewMode('pr')}
+      use:tooltip={t('toolbar.prDesc')}
     >
       {t('toolbar.pr')}
     </button>
@@ -353,14 +368,17 @@
       {/if}
     </div>
     <span class="separator"></span>
+    <!-- SNIPCODE-HOOK start: M4 — Refresh has a Ctrl+R shortcut; use the existing
+         toolbar.refreshDesc key (previously defined but never wired to a tooltip). -->
     <button
       class="toolbar-btn"
       onclick={refresh}
       disabled={uiStore.operating !== null}
-      use:tooltip={t('toolbar.refresh')}
+      use:tooltip={t('toolbar.refreshDesc')}
     >
       {#if uiStore.operating === 'refresh'}<span class="spinner"></span>{:else}<i class="codicon codicon-refresh"></i>{/if}
     </button>
+    <!-- SNIPCODE-HOOK end -->
     <button
       class="toolbar-btn"
       onclick={() => { vscode.postMessage({ type: 'openExtensionSettings' }); }}
