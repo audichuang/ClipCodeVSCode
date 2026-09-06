@@ -646,6 +646,12 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     const btn = container.querySelector('.hunk-stage-lines-btn');
     expect(btn).toBeTruthy();
     expect(btn!.getAttribute('aria-label')).toBe('Stage Selected Lines');
+    /* SNIPCODE-HOOK start: ui/diff D10 label the line-stage button */
+    // Previously just a bare count ("1"); now carries the same text as the
+    // aria-label so the button is legible without a tooltip hover.
+    expect(btn!.textContent).toContain('Stage Selected Lines');
+    expect(btn!.textContent).toContain('1');
+    /* SNIPCODE-HOOK end */
     await fireEvent.click(btn!);
 
     expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });

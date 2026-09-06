@@ -54,6 +54,12 @@
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: ui/diff D10 sticky hunk header — measure the section
+     header's real rendered height (varies with font-size/zoom) so the hunk
+     header can stick just below it instead of a guessed pixel constant. */
+  let sectionHeaderHeight = $state(0);
+  /* SNIPCODE-HOOK end */
+
   // Per-side collapse; reset when the shown file changes. Keyed on repo + path so
   // the same relative path in a different repo doesn't inherit the prior collapse.
   let collapsed = $state<{ staged: boolean; unstaged: boolean }>({ staged: false, unstaged: false });
@@ -133,10 +139,14 @@
            which its own $effect keys off directly. -->
       {#each sections as section (`${store.repoPath}\u0000${section.side}`)}
       <!-- SNIPCODE-HOOK end -->
-        <section class="diff-section">
+        <!-- SNIPCODE-HOOK start: ui/diff D10 sticky hunk header offset -->
+        <section class="diff-section" style="--section-h: {sectionHeaderHeight}px">
+        <!-- SNIPCODE-HOOK end -->
           <!-- A row, not one button: the open-diff action must not toggle collapse
                (and a button can't nest inside a button). -->
-          <div class="section-header">
+          <!-- SNIPCODE-HOOK start: ui/diff D10 sticky hunk header offset -->
+          <div class="section-header" bind:clientHeight={sectionHeaderHeight}>
+          <!-- SNIPCODE-HOOK end -->
             <button
               class="section-toggle"
               aria-expanded={!collapsed[section.side]}
@@ -269,4 +279,20 @@
      and it would sticky-overlap the Staged/Unstaged section header. Hide it —
      the section header is the only sticky bar we want per section. */
   .diff-section :global(.diff-toolbar) { display: none; }
+
+  /* SNIPCODE-HOOK start: ui/diff D10 sticky hunk header */
+  /* Long hunks used to scroll their own header off-screen while the user was
+     still dragging a line selection within them. Pin it just below THIS
+     section's own sticky header (--section-h, measured via bind:clientHeight
+     above — not a guessed constant, since font-size/zoom changes its real
+     height) rather than top:0, which would slide it under the section header
+     instead of sitting below it. z-index 2 sits between the section header
+     (3, above everything) and the sticky line-gutter (1, below the hunk
+     header when both are visible at once). */
+  .diff-section :global(.diff-hunk-header) {
+    position: sticky;
+    top: var(--section-h, 0);
+    z-index: 2;
+  }
+  /* SNIPCODE-HOOK end */
 </style>

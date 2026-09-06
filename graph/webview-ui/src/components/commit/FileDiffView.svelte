@@ -674,7 +674,9 @@
                             aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
                             title={staged ? t('file.unstageLines') : t('file.stageLines')}>
                       <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                      <span>{selectedChangedIndices.length}</span>
+                      <!-- SNIPCODE-HOOK start: ui/diff D10 label the line-stage button (was a bare number) -->
+                      <span>{staged ? t('file.unstageLines') : t('file.stageLines')} ({selectedChangedIndices.length})</span>
+                      <!-- SNIPCODE-HOOK end -->
                     </button>
                   {/if}
                   <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
@@ -970,7 +972,12 @@
   /* SNIPCODE-HOOK start (B-2c): stage/unstage buttons (green accent). */
   .hunk-stage-btn {
     color: var(--vscode-charts-green, #48bf91);
-    opacity: 0;
+    /* SNIPCODE-HOOK start: ui/diff D10 discoverable by default (was opacity:0,
+       hover-only — the SBS equivalent, .sbs-block-stage-btn, is already .55
+       by default; this matches it instead of hiding the only whole-hunk
+       stage affordance in inline mode until the user happens to hover). */
+    opacity: 0.55;
+    /* SNIPCODE-HOOK end */
   }
   .diff-hunk.reversible:hover .hunk-stage-btn,
   .hunk-stage-btn:focus {
