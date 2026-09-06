@@ -83,6 +83,39 @@ describe('PrView — default base selection', () => {
     // head pill is now first (GitHub-style "head into base" layout)
     expect(pills[0].textContent).toContain('HEAD');
   });
+
+  // SNIPCODE-HOOK start: PR tab (P0-2/P2) local-branch fallback — a repo with
+  // no remote configured at all used to leave `base` permanently null (the
+  // "pickBase" empty state forever); falls back to a conventional local
+  // mainline branch instead.
+  it('falls back to a local "develop" branch when there is no upstream and no remotes at all', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true }),
+      branch({ name: 'develop' }),
+    ];
+    render(PrView);
+    const req = lastMessageOf('getCommitsBetween');
+    expect(req?.payload).toEqual({ base: 'develop', head: 'feat', requestId: currentRequestId() });
+  });
+
+  it('prefers "main" over "develop" when both exist locally (no upstream/remotes)', () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true }),
+      branch({ name: 'develop' }),
+      branch({ name: 'main' }),
+    ];
+    render(PrView);
+    const req = lastMessageOf('getCommitsBetween');
+    expect(req?.payload).toEqual({ base: 'main', head: 'feat', requestId: currentRequestId() });
+  });
+
+  it('does not fall back to the current branch itself even if it is named "main"', () => {
+    branchStore.branches = [branch({ name: 'main', current: true })];
+    const { container } = render(PrView);
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+    expect(container.textContent).toContain('Select a base branch to compare against.');
+  });
+  // SNIPCODE-HOOK end
 });
 
 describe('PrView — commits, ahead/behind, and Files (Important 1: files come from commitsBetween itself)', () => {
@@ -483,6 +516,77 @@ describe('PrView — head selectable + swap', () => {
     expect(req?.payload).toEqual({ file: 'src/new.ts', oldPath: undefined, ref1: 'mb', ref2: 'dev' });
   });
 });
+
+// SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — "No changed
+// files"/"No commits" used to be shared by four unrelated situations
+// (nothing picked yet, detached HEAD, a host error, a genuine no-diff
+// compare); each now gets its own message via PrView's emptyReason().
+describe('PrView — empty-state machine (P0-2/P2)', () => {
+  it('"pickBase": no current branch marked and no remotes/local-mainline fallback — shows the pick-a-base message', async () => {
+    branchStore.branches = [branch({ name: 'some-topic-branch' })];
+    const { container } = render(PrView);
+    await waitFor(() => {
+      expect(container.textContent).toContain('Select a base branch to compare against.');
+    });
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+  });
+
+  it('"detached": HEAD detached — shows the detached message even though other local branches exist', async () => {
+    branchStore.branches = [
+      branch({ name: '(HEAD detached at abc1234)', current: true, detached: true }),
+      branch({ name: 'develop' }),
+      branch({ name: 'main' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => {
+      expect(container.textContent).toContain('HEAD is detached');
+    });
+    expect(lastMessageOf('getCommitsBetween')).toBeUndefined();
+  });
+
+  it('"error": a host error while a compare is configured — shows the error message inline instead of "No changed files"', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+    deliver('error', { message: 'unknown revision', source: 'getCommitsBetween' });
+    await waitFor(() => {
+      expect(container.textContent).toContain('Could not load comparison: unknown revision');
+      expect(container.textContent).not.toContain('No changed files');
+    });
+  });
+
+  it('"sameRef": base and head selected to the same branch — shows the same-ref message, not "No changed files"', async () => {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    const { container } = render(PrView);
+    await waitFor(() => expect(lastMessageOf('getCommitsBetween')).toBeDefined());
+
+    // Pick 'origin/main' (the current base) as head too, via the head dropdown.
+    const pills = container.querySelectorAll<HTMLButtonElement>('.base-pill');
+    await fireEvent.click(pills[0]); // head pill is first
+    const sameRefItem = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>('.repo-dropdown-item'))
+        .find((b) => b.textContent?.includes('origin/main'));
+      expect(btn).toBeDefined();
+      return btn!;
+    });
+    await fireEvent.click(sameRefItem);
+
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'origin/main', ahead: 0, behind: 0, files: [],
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain('are the same ref');
+      expect(container.textContent).not.toContain('No changed files');
+    });
+  });
+});
+// SNIPCODE-HOOK end
 
 // SNIPCODE-HOOK start: PR tab branch-dropdown type-to-filter — both the base
 // and head dropdowns gain a filter input at the top; typing narrows the list

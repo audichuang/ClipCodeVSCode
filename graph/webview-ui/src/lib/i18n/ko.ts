@@ -716,4 +716,13 @@ export const ko: Record<string, string> = {
   'pr.aheadInfo': '{base}보다 {count}개 커밋 앞섬',
   'pr.into': '→',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': '비교할 기준 브랜치를 선택하세요.',
+  'pr.emptyDetached': 'HEAD가 detached 상태입니다 — 비교하려면 브랜치를 checkout 하세요.',
+  'pr.emptyError': '비교 결과를 불러오지 못했습니다: {message}',
+  'pr.emptySameRef': '{base}와(과) {head}가 동일한 ref입니다 — 비교할 내용이 없습니다.',
+  'pr.emptyUpToDate': '{head}는(은) 이미 {base}에 완전히 병합되어 있습니다.',
+  /* SNIPCODE-HOOK end */
 };
