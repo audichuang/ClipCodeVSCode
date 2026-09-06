@@ -729,5 +729,6 @@ export const ko: Record<string, string> = {
   'pr.statsFiles': '파일 {count}개',
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': 'merge-base 해시 복사',
+  'pr.openNativeDiff': '기본 diff 열기',
   /* SNIPCODE-HOOK end */
 };

@@ -174,6 +174,7 @@
        refresh doesn't leave stale data on screen looking current.) */
     currentHunk = -1; // new compare, new hunk list
     lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — clear any previous error for this new attempt
+    collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — new compare, fresh collapse state
     /* SNIPCODE-HOOK end */
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
@@ -289,6 +290,7 @@
       loadingCommits = false;
       loadingFiles = false;
       lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — an old repo's error must not leak into the new repo's empty state
+      collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — repo switch, fresh collapse state
     }
   });
 
@@ -389,6 +391,21 @@
       payload: { file: file.path, oldPath: file.oldPath, ref1: mergeBase ?? base ?? undefined, ref2: head ?? 'HEAD' },
     });
   }
+
+  /* SNIPCODE-HOOK start: PR tab (P7/P8) per-file collapse — a plain Set is not
+     itself reactive (Svelte 5's proxy wraps objects/arrays, not Set/Map), so
+     every mutation reassigns a NEW Set (mirrors CommitDetails.svelte's
+     expandedDirs pattern) rather than calling .add/.delete on the existing
+     one in place. */
+  let collapsedFiles = $state<Set<string>>(new Set());
+
+  function toggleCollapse(path: string) {
+    const next = new Set(collapsedFiles);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    collapsedFiles = next;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file-list click
      now scrolls to that file's stacked FileDiffView section instead of
@@ -850,37 +867,62 @@
           <div class="pr-diff-stack" bind:this={prContentEl}>
             {#each files as file (file.path)}
               {@const d = diffs.find((x) => x.file === file.path)}
+              {@const hasDiff = !!d && !d.isBinary && d.hunks.length > 0}
+              {@const fs = fileStats(file)}
+              <!-- SNIPCODE-HOOK start: PR tab (P7) self-made section header —
+                   replaces the old `heading={file.path}` prop (FileDiffView
+                   already renders its own `.diff-file-name`, so the path used
+                   to show twice with no status letter, no rename old -> new).
+                   `:global(.diff-toolbar){display:none}` below hides
+                   FileDiffView's own toolbar entirely (mirrors
+                   diff/Diff.svelte's identical technique for its
+                   Staged/Unstaged sections) since this header now owns path +
+                   status + stats + open-native-diff; FileDiffView's own
+                   inline/side-by-side toggle stays hidden via hideModeToggle
+                   same as before (PrView drives one shared toggle for every
+                   file — see .pr-diff-mode-toggle above).
+                   (P7/P8) The chevron doubles as the collapse toggle
+                   introduced this same change — collapsedFiles/toggleCollapse
+                   above; a file with nothing to show (hasDiff false) gets no
+                   chevron since there's nothing to expand/collapse. -->
               <div class="pr-diff-file" data-pr-file={file.path}>
+                <div class="pr-diff-section-header">
+                  <button
+                    class="pr-diff-toggle"
+                    disabled={!hasDiff}
+                    aria-expanded={hasDiff && !collapsedFiles.has(file.path)}
+                    onclick={() => toggleCollapse(file.path)}
+                  >
+                    {#if hasDiff}<i class="codicon {collapsedFiles.has(file.path) ? 'codicon-chevron-right' : 'codicon-chevron-down'}"></i>{/if}
+                    <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
+                    <span class="pr-file-path" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>{#if file.oldPath}<span class="pr-rename-old">{file.oldPath}</span>{' → '}{/if}{#if fileDir(file.path)}<span class="pr-dir">{fileDir(file.path)}</span>{/if}<span class="pr-base">{fileBaseName(file.path)}</span></span>
+                  </button>
+                  <span class="pr-file-stats">
+                    {#if fs}<span class="pr-stat-add">+{fs.add}</span><span class="pr-stat-del">−{fs.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                  </span>
+                  <button class="pr-open-native-btn" onclick={() => openFile(file)}>
+                    <i class="codicon codicon-diff"></i> {t('pr.openNativeDiff')}
+                  </button>
+                </div>
                 <!-- SNIPCODE-HOOK: PR tab inline diff (Task D2 fix, blocking review
-                     finding) — binary diffs (incl. images) fall through to the
-                     placeholder instead of FileDiffView. FileDiffView's
+                     finding) — binary diffs (incl. images) fall through to no
+                     inline body instead of FileDiffView. FileDiffView's
                      isBinary&&isImage branch renders <ImageDiff> with no
                      commitHash prop here (PrView has no single commit — it's a
                      base..head range), which defaults ImageDiff to comparing the
                      index against the working tree, not the PR's mergeBase->head.
-                     The placeholder's "Open native diff" button (openFile) posts
-                     the correct ref1=mergeBase/ref2=head via openDiff instead. -->
-                <!-- SNIPCODE-HOOK start: PR tab (Minor) — pure renames,
-                     mode-only changes, and empty add/delete parse to a
-                     DiffData entry that is NOT binary but has hunks: [], so
-                     the old `d && !d.isBinary` guard rendered an empty
-                     FileDiffView with nothing to show and no escape hatch.
-                     Requiring d.hunks.length > 0 routes these to the same
-                     placeholder + "Open native diff" fallback already used
-                     for binary/image files. -->
-                {#if d && !d.isBinary && d.hunks.length > 0}
-                  <FileDiffView diff={d} stacked diffMode={diffMode} hideModeToggle heading={file.path} />
-                {:else}
-                  <div class="pr-diff-placeholder">
-                    <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
-                    <span class="pr-file-path">{file.path}</span>
-                    <button class="pr-open-native-btn" onclick={() => openFile(file)}>
-                      <i class="codicon codicon-diff"></i> Open native diff
-                    </button>
-                  </div>
+                     The header's "Open native diff" button (openFile) posts
+                     the correct ref1=mergeBase/ref2=head via openDiff instead.
+                     (Minor, folded in) pure renames, mode-only changes, and
+                     empty add/delete parse to a DiffData entry that is NOT
+                     binary but has hunks: [] — hasDiff (above) requires
+                     d.hunks.length > 0 so these also get no inline body rather
+                     than an empty FileDiffView with nothing to show. -->
+                {#if hasDiff && !collapsedFiles.has(file.path)}
+                  <FileDiffView diff={d!} stacked diffMode={diffMode} hideModeToggle />
                 {/if}
-                <!-- SNIPCODE-HOOK end -->
               </div>
+              <!-- SNIPCODE-HOOK end -->
             {/each}
           </div>
         </div>
@@ -1267,19 +1309,57 @@
     overflow-y: auto; /* SNIPCODE-HOOK: PR tab (P5) — own scroll, independent of the file list */
   }
 
-  .pr-diff-placeholder {
+  /* SNIPCODE-HOOK start: PR tab (P7) self-made diff section header — mirrors
+     diff/Diff.svelte's .section-header/.section-toggle pattern. */
+  .pr-diff-section-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 4px 10px;
+    background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.08));
     border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .pr-diff-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .pr-diff-toggle:disabled {
+    cursor: default;
+  }
+
+  .pr-diff-toggle .codicon {
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+
+  /* FileDiffView renders its own sticky filename toolbar (path + inline/
+     side-by-side toggle). In this stacked-per-file layout that toolbar would
+     duplicate the path already shown in .pr-diff-section-header above and
+     sticky-overlap it — hide it, same technique as diff/Diff.svelte's
+     `.diff-section :global(.diff-toolbar){display:none}`. */
+  .pr-diff-file :global(.diff-toolbar) {
+    display: none;
   }
 
   .pr-open-native-btn {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
+    flex-shrink: 0;
     padding: 3px 10px;
     font-size: 0.85em;
     border-radius: 4px;

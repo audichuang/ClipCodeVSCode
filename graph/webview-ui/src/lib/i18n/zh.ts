@@ -729,5 +729,6 @@ export const zh: Record<string, string> = {
   'pr.statsFiles': '{count} 个文件',
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': '复制 merge-base 哈希',
+  'pr.openNativeDiff': '打开原生 diff',
   /* SNIPCODE-HOOK end */
 };
