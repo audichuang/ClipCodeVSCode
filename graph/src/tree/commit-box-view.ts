@@ -25,7 +25,12 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
     const postCommitState = () => {
       void view.webview.postMessage({
         type: 'workbenchCommitState',
-        payload: { stagedRepoCount: this.workbench.tree.getStagedRepoCount() },
+        payload: {
+          stagedRepoCount: this.workbench.tree.getStagedRepoCount(),
+          /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
+          amendTargetPushed: this.workbench.tree.getAmendTargetPushed(),
+          /* SNIPCODE-HOOK end */
+        },
       });
     };
     const treeSubscription = this.workbench.tree.onDidChangeTreeData(postCommitState);
@@ -37,6 +42,13 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
       /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
       if (msg?.type === 'workbenchReady') {
         postCommitState();
+        return;
+      }
+      /* SNIPCODE-HOOK end */
+      /* SNIPCODE-HOOK start: S13 Amend prefill */
+      if (msg?.type === 'workbenchRequestAmendPrefill') {
+        const message = await this.workbench.amendPrefillMessage().catch(() => null);
+        void view.webview.postMessage({ type: 'amendPrefill', payload: { message } });
         return;
       }
       /* SNIPCODE-HOOK end */

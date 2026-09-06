@@ -24,6 +24,15 @@ describe('CommitBoxStore', () => {
   });
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  it('canAmend does not require a message (an empty one triggers prefill, not disabled)', () => {
+    workbenchStore.message = '';
+    workbenchStore.stagedRepoCount = 1;
+    expect(workbenchStore.canCommit).toBe(false);
+    expect(workbenchStore.canAmend).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('clears the message and committing when every repo committed cleanly', () => {
     workbenchStore.message = 'msg';
     workbenchStore.committing = true;
