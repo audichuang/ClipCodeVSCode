@@ -160,3 +160,23 @@ describe('DeleteBranchModal — remote-delete option', () => {
     expect(onDelete.mock.calls[0][2]).toBe(true);
   });
 });
+
+/* SNIPCODE-HOOK start: R2 — destructive modal must not pre-focus its danger
+   button, and Modal's fallback-Enter handler only targets button.primary, so
+   pressing Enter right after the modal opens must never delete the branch. */
+describe('DeleteBranchModal — R2 Enter/focus guard', () => {
+  it('does not focus the danger button on mount', () => {
+    const { container } = render(DeleteBranchModal, baseProps);
+    const dangerBtn = container.querySelector<HTMLButtonElement>('button.danger-btn')!;
+    expect(document.activeElement).not.toBe(dangerBtn);
+  });
+
+  it('Enter on the dialog does not trigger onDelete', async () => {
+    const onDelete = vi.fn();
+    const { container } = render(DeleteBranchModal, { ...baseProps, onDelete });
+    const dialog = container.querySelector<HTMLDivElement>('.modal')!;
+    await fireEvent.keyDown(dialog, { key: 'Enter' });
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */

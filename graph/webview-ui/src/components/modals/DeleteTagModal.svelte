@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Modal from '../common/Modal.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { defaultsStore } from '../../lib/stores/defaults.svelte';
@@ -13,9 +12,6 @@
 
   let { tagName, hasRemote = false, onClose, onDelete }: Props = $props();
   let deleteRemote = $state(defaultsStore.current.deleteTag.deleteRemote);
-  let deleteBtn: HTMLButtonElement | undefined = $state();
-
-  onMount(() => { deleteBtn?.focus(); });
 </script>
 
 <Modal title={t('deleteTag.title')} {onClose}>
@@ -33,6 +29,8 @@
   {/if}
   <div class="form-actions">
     <button onclick={onClose}>{t('common.cancel')}</button>
-    <button class="danger-btn" bind:this={deleteBtn} onclick={() => onDelete(hasRemote && deleteRemote)}>{t('sidebar.delete')}</button>
+    <!-- SNIPCODE-HOOK start: R2 — destructive modal must not pre-focus its danger button (Enter-to-delete guard) -->
+    <button class="danger-btn" onclick={() => onDelete(hasRemote && deleteRemote)}>{t('sidebar.delete')}</button>
+    <!-- SNIPCODE-HOOK end -->
   </div>
 </Modal>

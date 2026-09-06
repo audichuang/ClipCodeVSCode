@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import { tooltip } from '../../lib/actions/tooltip';
+  import { t } from '../../lib/i18n/index.svelte';
 
   interface Props {
     title: string;
@@ -63,7 +64,9 @@
   >
     <div class="modal-header">
       <span class="modal-title">{title}</span>
-      <button class="modal-close" onclick={onClose} aria-label="Close" use:tooltip={"Close (Esc)"}><i class="codicon codicon-close"></i></button>
+      <!-- SNIPCODE-HOOK start: R2 — close button label/tooltip via i18n instead of hardcoded English -->
+      <button class="modal-close" onclick={onClose} aria-label={t('common.close')} use:tooltip={t('common.closeEsc')}><i class="codicon codicon-close"></i></button>
+      <!-- SNIPCODE-HOOK end -->
     </div>
     <div class="modal-body">
       {@render children()}
