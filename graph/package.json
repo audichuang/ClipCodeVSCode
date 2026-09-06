@@ -386,7 +386,8 @@
             "auto",
             "en",
             "ko",
-            "zh-cn"
+            "zh-cn",
+            "zh-tw"
           ],
           "default": "auto",
           "description": "UI language (auto = follow VS Code language setting)"

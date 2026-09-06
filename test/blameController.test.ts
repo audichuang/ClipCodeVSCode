@@ -53,6 +53,7 @@ const vscode = {
     },
     showInformationMessage: () => Promise.resolve(undefined),
   },
+  l10n: { t: (s: string, ...args: unknown[]) => s.replace(/\{(\d+)\}/g, (_m, i) => String(args[Number(i)])) },
 };
 
 const loader = Module as unknown as {

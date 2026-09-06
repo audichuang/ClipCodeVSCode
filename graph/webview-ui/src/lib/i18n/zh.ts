@@ -62,6 +62,17 @@ export const zh: Record<string, string> = {
   'sidebar.pushAllTags': '推送所有标签',
   'sidebar.deleteRemoteTag': '从远程仓库删除',
 
+  /* SNIPCODE-HOOK start: X1-5 Commit workbench webview i18n */
+  // Commit workbench (the small webview above the Changes tree)
+  'workbench.commitTimeout': '提交超时，未收到结果，请刷新后确认状态。',
+  'workbench.committedCount': '已提交 {count} 个仓库',
+  'workbench.messagePlaceholder': '提交信息（共用一则，应用到所有已暂存的仓库）',
+  'workbench.commit': '提交',
+  'workbench.amend': '修正',
+  'workbench.amendTitle': '修正上一次提交（仅单一仓库；信息为空时会先带入旧信息）',
+  'workbench.amendPushedWarning': '该提交已推送到远程。amend 会改写已推送的历史。',
+  /* SNIPCODE-HOOK end */
+
   // Create branch modal
   'createBranch.title': '创建分支',
   'createBranch.desc': '创建新分支',
@@ -672,6 +683,9 @@ export const zh: Record<string, string> = {
   'file.stageBlock': '暂存此变更块',
   'file.unstageBlock': '取消暂存此变更块',
   'file.lines': '行',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}：第 {range} 行',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': '复制',
   'file.copyLines': '复制行',
   'lfs.lock': 'LFS 锁定',
@@ -752,6 +766,9 @@ export const zh: Record<string, string> = {
   'image.onionSkin': '叠加对比',
   'image.before': '之前',
   'image.after': '之后',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': '无图片',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': '关闭（Esc）',
   'toolbar.historyDesc': 'Graph（Ctrl+1）',

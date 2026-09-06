@@ -94,7 +94,11 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
 
   getTreeItem(node: ChangeTreeNode): vscode.TreeItem {
     if (node.kind === 'group') {
-      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+      /* SNIPCODE-HOOK start: X1-4 group label through l10n (label is one of the
+         fixed English strings in build-change-tree.ts's GROUP_LABEL, used as the
+         l10n key so build-change-tree.ts itself can stay vscode-free) */
+      const item = new vscode.TreeItem(vscode.l10n.t(node.label), vscode.TreeItemCollapsibleState.Expanded);
+      /* SNIPCODE-HOOK end */
       item.description = `${node.count}`;
       item.contextValue = `group-${node.group}`;
       /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color; S12 error group */
@@ -111,9 +115,12 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     if (node.kind === 'repo') {
       /* SNIPCODE-HOOK start: S12 a repo whose status failed to read stays visible */
       if (node.group === 'error') {
+        /* SNIPCODE-HOOK start: X1-4 error fallback text through l10n */
+        const errText = node.error ?? vscode.l10n.t('unknown error');
         const errItem = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.None);
-        errItem.description = node.error ?? 'unknown error';
-        errItem.tooltip = `${node.repoPath}\n${node.error ?? 'unknown error'}`;
+        errItem.description = errText;
+        errItem.tooltip = `${node.repoPath}\n${errText}`;
+        /* SNIPCODE-HOOK end */
         errItem.contextValue = 'repo-error';
         errItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('errorForeground'));
         errItem.id = `error:${node.repoPath}`;

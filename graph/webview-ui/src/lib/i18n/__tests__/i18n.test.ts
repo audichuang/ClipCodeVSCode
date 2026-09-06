@@ -35,6 +35,27 @@ describe('I18n', () => {
     expect(t('toolbar.history')).toBe('Graph');
   });
 
+  /* SNIPCODE-HOOK start: X1-2 zh-TW must get the Traditional dictionary, not
+     the zh-CN (Simplified) one the old lang-only lookup silently gave it. */
+  it('zh-TW resolves to the Traditional Chinese dictionary', () => {
+    i18n.setLocale('zh-TW');
+    expect(i18n.locale).toBe('zh-tw');
+    expect(t('toolbar.stats')).toBe('統計');
+  });
+
+  it('zh-CN still resolves to the Simplified Chinese dictionary', () => {
+    i18n.setLocale('zh-CN');
+    expect(i18n.locale).toBe('zh');
+    expect(t('toolbar.stats')).toBe('统计');
+  });
+
+  it('zh-Hant-TW (script + region) also resolves to Traditional', () => {
+    i18n.setLocale('zh-Hant-TW');
+    expect(i18n.locale).toBe('zh-tw');
+    expect(t('toolbar.stats')).toBe('統計');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('substitutes named placeholders', () => {
     // Use a parameter the message bus i18n keys actually accept.
     // 'createBranch.branchExists' takes {name}.

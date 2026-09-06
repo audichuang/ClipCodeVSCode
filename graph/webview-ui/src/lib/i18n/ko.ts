@@ -62,6 +62,17 @@ export const ko: Record<string, string> = {
   'sidebar.pushAllTags': '모든 태그 Push',
   'sidebar.deleteRemoteTag': '리모트에서 삭제',
 
+  /* SNIPCODE-HOOK start: X1-5 Commit workbench webview i18n */
+  // Commit workbench (the small webview above the Changes tree)
+  'workbench.commitTimeout': '커밋 시간 초과 — 결과를 받지 못했습니다. 새로고침 후 상태를 확인하세요.',
+  'workbench.committedCount': '{count}개 저장소 커밋됨',
+  'workbench.messagePlaceholder': '커밋 메시지(공유, 스테이징된 모든 저장소에 적용)',
+  'workbench.commit': 'Commit',
+  'workbench.amend': 'Amend',
+  'workbench.amendTitle': '이전 커밋 수정 (단일 저장소만 해당; 메시지가 비어 있으면 이전 메시지를 먼저 가져옵니다)',
+  'workbench.amendPushedWarning': '이 커밋은 이미 원격에 push되었습니다. amend하면 이미 push된 히스토리가 재작성됩니다.',
+  /* SNIPCODE-HOOK end */
+
   // Create branch modal
   'createBranch.title': '브랜치 생성',
   'createBranch.desc': '새 브랜치 생성',
@@ -672,6 +683,9 @@ export const ko: Record<string, string> = {
   'file.stageBlock': '변경 블록 스테이지',
   'file.unstageBlock': '변경 블록 스테이지 해제',
   'file.lines': '줄',
+  /* SNIPCODE-HOOK start: X1-7 hunk header label through i18n (was hardcoded "Hunk N:") */
+  'file.hunkLabel': 'Hunk {n}: {range}줄',
+  /* SNIPCODE-HOOK end */
   'file.copySelection': '복사',
   'file.copyLines': '줄 복사',
   'lfs.lock': 'LFS 잠금',
@@ -752,6 +766,9 @@ export const ko: Record<string, string> = {
   'image.onionSkin': '어니언 스킨',
   'image.before': '이전',
   'image.after': '이후',
+  /* SNIPCODE-HOOK start: X1-7 ImageDiff "No image" was hardcoded */
+  'image.noImage': '이미지 없음',
+  /* SNIPCODE-HOOK end */
   // ui/main
   'common.closeEsc': '닫기 (Esc)',
   'toolbar.historyDesc': 'Graph (Ctrl+1)',

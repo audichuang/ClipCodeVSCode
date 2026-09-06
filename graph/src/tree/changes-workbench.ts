@@ -145,7 +145,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK start: S P2 activity-bar badge = staged repo count */
     if (this.view) {
       const count = this.tree.getStagedRepoCount();
-      this.view.badge = count > 0 ? { value: count, tooltip: `${count} 個 repo 待提交` } : undefined;
+      /* SNIPCODE-HOOK start: X1-4 badge tooltip through l10n */
+      this.view.badge = count > 0 ? { value: count, tooltip: vscode.l10n.t('{0} repo(s) awaiting commit', String(count)) } : undefined;
+      /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK end */
   }
@@ -161,7 +163,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     // (IntelliJ semantics) and must not silently exclude repos from sync.
     const repos = await this.discoverUnfiltered();
     if (repos.length === 0) {
-      void vscode.window.showInformationMessage('No git repositories in workspace');
+      /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+      void vscode.window.showInformationMessage(vscode.l10n.t('No git repositories in workspace'));
+      /* SNIPCODE-HOOK end */
       return;
     }
     const failures: string[] = [];
@@ -177,7 +181,9 @@ export class ChangesWorkbench implements vscode.Disposable {
           try {
             const res = await runExclusive(r.path, () => op(this.svcFor(r.path)));
             if ((res as { pushed?: boolean })?.pushed === false) {
-              skipped.push(`${name}: 無 remote，已略過`);
+              /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+              skipped.push(vscode.l10n.t('{0}: no remote, skipped', name));
+              /* SNIPCODE-HOOK end */
             }
           } catch (err) {
             failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
@@ -187,13 +193,19 @@ export class ChangesWorkbench implements vscode.Disposable {
     );
     await this.refresh();
     const ok = repos.length - failures.length - skipped.length;
+    /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
     if (failures.length > 0) {
-      void vscode.window.showErrorMessage(`${verb}：${ok}/${repos.length} 成功；${[...failures, ...skipped].join('；')}`);
+      void vscode.window.showErrorMessage(
+        vscode.l10n.t('{0}: {1}/{2} succeeded; {3}', verb, String(ok), String(repos.length), [...failures, ...skipped].join('; ')),
+      );
     } else if (skipped.length > 0) {
-      void vscode.window.showWarningMessage(`${verb}：${ok}/${repos.length} 成功；${skipped.join('；')}`);
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t('{0}: {1}/{2} succeeded; {3}', verb, String(ok), String(repos.length), skipped.join('; ')),
+      );
     } else {
       vscode.window.setStatusBarMessage(`${verb} ✓ (${repos.length} repos)`, 5000);
     }
+    /* SNIPCODE-HOOK end */
   }
 
   async fetchAll(): Promise<void> { return this.forAllRepos('Fetch', (svc) => svc.fetch(undefined, { prune: true })); }
@@ -260,13 +272,16 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  unrecoverable, so it always confirms via a modal warning first. */
   private async discard(nodes: FileNode[]): Promise<void> {
     if (nodes.length === 0) return;
-    const label = nodes.length === 1 ? nodes[0].path : `${nodes.length} 個檔案`;
+    /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+    const label = nodes.length === 1 ? nodes[0].path : vscode.l10n.t('{0} files', String(nodes.length));
+    const discardLabel = vscode.l10n.t('Discard');
     const confirmed = await vscode.window.showWarningMessage(
-      `捨棄 ${label} 的變更？此動作無法復原。`,
+      vscode.l10n.t('Discard changes to {0}? This cannot be undone.', label),
       { modal: true },
-      '捨棄',
+      discardLabel,
     );
-    if (confirmed !== '捨棄') return;
+    if (confirmed !== discardLabel) return;
+    /* SNIPCODE-HOOK end */
     await this.byRepo(nodes, (svc, changes) => svc.discardPaths(changes));
   }
 
@@ -277,12 +292,15 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK end */
     const files = node.files.filter(f => f.status !== 'N');
     if (files.length === 0) return;
+    /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+    const discardLabel = vscode.l10n.t('Discard');
     const confirmed = await vscode.window.showWarningMessage(
-      `捨棄 ${node.repoName} 中 ${files.length} 個檔案的變更？此動作無法復原。`,
+      vscode.l10n.t('Discard changes to {0} file(s) in {1}? This cannot be undone.', String(files.length), node.repoName),
       { modal: true },
-      '捨棄',
+      discardLabel,
     );
-    if (confirmed !== '捨棄') return;
+    if (confirmed !== discardLabel) return;
+    /* SNIPCODE-HOOK end */
     await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).discardPaths(files));
     await this.refresh();
   }
@@ -353,10 +371,14 @@ export class ChangesWorkbench implements vscode.Disposable {
     const blocked = candidates.filter(r => r.conflict.length > 0);
     const status = candidates.filter(r => r.conflict.length === 0);
     if (blocked.length > 0 && this.view) {
-      this.view.message = `已略過含未解決衝突的 repo：${blocked.map(r => r.repoName).join('、')}`;
+      /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+      this.view.message = vscode.l10n.t('Skipped repo(s) with unresolved conflicts: {0}', blocked.map(r => r.repoName).join(', '));
+      /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK end */
-    if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
+    /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+    if (status.length === 0) throw new Error(vscode.l10n.t('No repo checked to commit (or nothing staged)'));
+    /* SNIPCODE-HOOK end */
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
     const results: CommitResult[] = [];
     for (const r of status) {
@@ -489,7 +511,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
     const all = await RepoDiscoveryService.discoverRepos(folders).catch(() => []);
     if (all.length === 0) {
-      void vscode.window.showInformationMessage('沒有偵測到 git repo');
+      /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
+      void vscode.window.showInformationMessage(vscode.l10n.t('No git repo detected'));
+      /* SNIPCODE-HOOK end */
       return;
     }
     const items = all.map(r => ({
@@ -500,20 +524,24 @@ export class ChangesWorkbench implements vscode.Disposable {
       repoPath: r.path,
       picked: this.repoFilter ? this.repoFilter.has(r.path) : true,
     }));
+    /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
     const picked = await vscode.window.showQuickPick(items, {
       canPickMany: true,
-      title: 'Snipcode Git：顯示哪些 repo',
-      placeHolder: '勾選要顯示的 repo（全選＝顯示全部）',
+      title: vscode.l10n.t('Snipcode Git: which repos to show'),
+      placeHolder: vscode.l10n.t('Check the repos to show (all checked = show all)'),
     });
+    /* SNIPCODE-HOOK end */
     if (picked === undefined) return; // cancelled — keep current filter
     // All (or nothing) selected → no filter; otherwise restrict to the picks.
     this.repoFilter = picked.length === 0 || picked.length === all.length
       ? null
       : new Set(picked.map(p => p.repoPath));
     if (this.view) {
+      /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
       this.view.message = this.repoFilter
-        ? `已篩選 ${this.repoFilter.size} / ${all.length} 個 repo`
+        ? vscode.l10n.t('Filtered: {0} / {1} repos', String(this.repoFilter.size), String(all.length))
         : undefined;
+      /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
     void vscode.commands.executeCommand('setContext', 'snipcode.changes.filtered', this.repoFilter !== null);
@@ -545,8 +573,10 @@ export class ChangesWorkbench implements vscode.Disposable {
       // Tell the user what a mixed selection dropped — silently ignoring the
       // other repo/side's items reads as "everything was staged".
       if (kept.length < all.length) {
+        /* SNIPCODE-HOOK start: X1-4 host notifications through l10n */
         void vscode.window.showWarningMessage(
-          `已略過 ${all.length - kept.length} 個屬於其他 repo 或另一側的選取項目`);
+          vscode.l10n.t('Skipped {0} selected item(s) from another repo or side', String(all.length - kept.length)));
+        /* SNIPCODE-HOOK end */
       }
       return kept;
     };
