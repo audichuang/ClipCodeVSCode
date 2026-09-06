@@ -1115,6 +1115,12 @@
 
   .line-content {
     white-space: pre;
+    /* SNIPCODE-HOOK start: ui/diff D8 tab-size */
+    /* Browser default is 8; the editor default is 4 — a tab-indented line
+       looks twice as wide here as in the file it came from. */
+    tab-size: 4;
+    -moz-tab-size: 4;
+    /* SNIPCODE-HOOK end */
     padding-left: 4px;
     padding-right: 24px;
   }
