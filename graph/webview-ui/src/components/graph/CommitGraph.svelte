@@ -350,8 +350,12 @@
   /* SNIPCODE-HOOK start: M8 — author widened 120 -> 160 (flex basis; CSS below
      lets it shrink to 100 min instead of a hard 120px truncation cliff). This
      constant sizes the h-scroll pinned meta overlay/spacer, so it must track
-     the CSS column width or the overlay misaligns with the scrolling header. */
-  const RIGHT_COLS_WIDTH = 160 + 75 + 150;
+     the CSS column width or the overlay misaligns with the scrolling header.
+     C1 — date widened 150 -> 180: zh-TW's Intl 'medium'/'short' format (e.g.
+     "2026年8月1日 晚上11:43") overflowed 150px whenever the localized PM/evening
+     prefix ("晚上"/"中午") landed on a double-digit hour; 180px clears every
+     locale tested (zh-TW, en-US). Keep in sync with .col-date width below. */
+  const RIGHT_COLS_WIDTH = 160 + 75 + 180;
   /* SNIPCODE-HOOK end */
   const MIN_MESSAGE_WIDTH = 120;
 
@@ -2592,14 +2596,16 @@
     opacity: 0.8;
   }
 
+  /* SNIPCODE-HOOK start: C1 — 150 -> 180px; see RIGHT_COLS_WIDTH above for why. */
   .col-date {
-    width: 150px;
+    width: 180px;
     flex-shrink: 0;
     padding: 0 10px;
     color: var(--text-secondary);
     white-space: nowrap;
     text-align: left;
   }
+  /* SNIPCODE-HOOK end */
 
   .col-hash {
     width: 75px;
