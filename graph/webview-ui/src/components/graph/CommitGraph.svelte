@@ -33,6 +33,11 @@
   import { resolveDrop, dragRebaseMessage, dragMergeMessage } from '../../lib/utils/dragDrop';
   import { computeNavigationTarget, computeScrollTop, computeJumpTarget, computePagedTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
   import LinkifiedText from '../common/LinkifiedText.svelte';
+  /* SNIPCODE-HOOK start: C2 — shared date formatter (see lib/utils/format-date.ts);
+     replaces this file's own formatDate/graphDateFormatter now that both
+     branches (this graph panel + CommitDetails/CommitHoverCard) are merged. */
+  import { formatCommitDate } from '../../lib/utils/format-date';
+  /* SNIPCODE-HOOK end */
 
 
   /**
@@ -1386,22 +1391,6 @@
     contextMenu = { x: e.clientX, y: e.clientY, items };
   }
 
-  /* SNIPCODE-HOOK start: M7 — locale-aware date format, matching the format
-     CommitDetails uses for the full date, instead of a hand-written
-     AM/PM-before-time layout that matches no locale (X5). */
-  const graphDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  function formatDate(dateStr: string): string {
-    const d = new Date(dateStr);
-    // The synthetic UNCOMMITTED commit (and several test fixtures) ship an
-    // empty date string -- Intl.DateTimeFormat throws RangeError on an
-    // invalid Date, so guard and pass the raw value through unchanged
-    // (matches lib/utils/format-date.ts's formatCommitDate, which MainPanel's
-    // side will switch this over to importing once the branches merge).
-    if (isNaN(d.getTime())) return dateStr;
-    return graphDateFormatter.format(d);
-  }
-  /* SNIPCODE-HOOK end */
-
   // Keep the viewport size in sync with the actual container. Its height changes
   // when the bottom panel opens/closes or is resized, which fires no window
   // resize — without this, scroll-into-view would compute against a stale height
@@ -1574,7 +1563,7 @@
         {/if}
       </div>
       <div class="col-hash" use:tooltip={commit.hash !== 'UNCOMMITTED' ? commit.hash : ''}>{commit.hash !== 'UNCOMMITTED' ? commit.abbreviatedHash : ''}</div>
-      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? new Date(commit.author.date).toLocaleString() : ''}>{commit.hash !== 'UNCOMMITTED' ? formatDate(commit.author.date) : ''}</div>
+      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? new Date(commit.author.date).toLocaleString() : ''}>{commit.hash !== 'UNCOMMITTED' ? formatCommitDate(commit.author.date) : ''}</div>
     {/snippet}
 
     <!-- Column headers -->
