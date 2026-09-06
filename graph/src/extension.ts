@@ -207,6 +207,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider(
       CommitBoxViewProvider.viewType,
       new CommitBoxViewProvider(context.extensionUri, workbench),
+      /* SNIPCODE-HOOK start: R6 keep the commit draft alive while the view is hidden
+         Without this, switching Activity (e.g. to Explorer) or collapsing the
+         view disposes the webview and any in-progress commit message is lost. */
+      { webviewOptions: { retainContextWhenHidden: true } },
+      /* SNIPCODE-HOOK end */
     ),
   );
   workbench.registerCommands(context);

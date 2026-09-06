@@ -30,8 +30,21 @@ function clearCommitTimer(): void {
   }
 }
 
+/* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+/** Persist the draft message via the webview's own state (survives the view
+ *  being hidden/remounted — see extension.ts retainContextWhenHidden). Call on
+ *  every message change; cheap, and setState is a plain object write. */
+export function saveDraft(message: string): void {
+  vscode.setState({ message });
+}
+/* SNIPCODE-HOOK end */
+
 /** Wire the extension -> webview message handler. Call once at boot. */
 export function listenForHostMessages(): void {
+  /* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+  const saved = vscode.getState() as { message?: string } | undefined;
+  if (saved?.message) workbenchStore.message = saved.message;
+  /* SNIPCODE-HOOK end */
   window.addEventListener('message', (e) => {
     const msg = e.data;
     switch (msg?.type) {

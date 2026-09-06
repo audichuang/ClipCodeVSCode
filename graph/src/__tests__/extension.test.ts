@@ -35,7 +35,7 @@ vi.mock('vscode', () => ({
     showQuickPick: vi.fn(async () => undefined),
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     activeTextEditor: undefined,
-    registerWebviewViewProvider: () => ({ dispose() {} }),
+    registerWebviewViewProvider: vi.fn(() => ({ dispose() {} })),
   },
   commands: {
     registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => { H.registeredCommands.push(id); H.commandHandlers[id] = cb; return { dispose() {} }; },
@@ -80,6 +80,7 @@ void viewStub;
 
 import { activate, resolveConfiguredGitPath } from '../extension';
 import { existsSync } from 'fs';
+import * as vscode from 'vscode';
 
 function makeContext() {
   return { subscriptions: [] as Array<{ dispose(): void }>, extensionUri: {} } as unknown as import('vscode').ExtensionContext;
@@ -159,6 +160,20 @@ describe('activate', () => {
     const { MainPanel } = await import('../panels/MainPanel');
     expect(MainPanel.setGitServiceProvider).toHaveBeenCalledWith(expect.any(Function));
   });
+
+  /* SNIPCODE-HOOK start: R6 commit box retains context when the view is hidden */
+  it('registers the commit box webview with retainContextWhenHidden (R6)', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+
+    expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledWith(
+      'snipcode.commitBox',
+      expect.anything(),
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+  });
+  /* SNIPCODE-HOOK end */
 
   it('addWorktree defaults beside the main worktree even when active repo is linked worktree', async () => {
     H.workspaceFolders = [{ uri: { fsPath: '/repos/project.worktrees/custom.worktrees' } }];
