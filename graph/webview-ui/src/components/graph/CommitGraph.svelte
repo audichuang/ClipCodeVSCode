@@ -35,8 +35,10 @@
   import LinkifiedText from '../common/LinkifiedText.svelte';
   /* SNIPCODE-HOOK start: C2 — shared date formatter (see lib/utils/format-date.ts);
      replaces this file's own formatDate/graphDateFormatter now that both
-     branches (this graph panel + CommitDetails/CommitHoverCard) are merged. */
-  import { formatCommitDate } from '../../lib/utils/format-date';
+     branches (this graph panel + CommitDetails/CommitHoverCard) are merged.
+     C10 — formatCommitDateLong for the .col-date tooltip (below), which used
+     to fall back to a raw toLocaleString() that didn't match the cell format. */
+  import { formatCommitDate, formatCommitDateLong } from '../../lib/utils/format-date';
   /* SNIPCODE-HOOK end */
 
 
@@ -1566,7 +1568,7 @@
         {/if}
       </div>
       <div class="col-hash" use:tooltip={commit.hash !== 'UNCOMMITTED' ? commit.hash : ''}>{commit.hash !== 'UNCOMMITTED' ? commit.abbreviatedHash : ''}</div>
-      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? new Date(commit.author.date).toLocaleString() : ''}>{commit.hash !== 'UNCOMMITTED' ? formatCommitDate(commit.author.date) : ''}</div>
+      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? formatCommitDateLong(commit.author.date) : ''}>{commit.hash !== 'UNCOMMITTED' ? formatCommitDate(commit.author.date) : ''}</div>
     {/snippet}
 
     <!-- Column headers -->
