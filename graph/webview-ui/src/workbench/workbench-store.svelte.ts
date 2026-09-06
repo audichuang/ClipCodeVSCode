@@ -14,6 +14,7 @@ class CommitBoxStore {
   results = $state<WbCommitResult[]>([]);
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
   stagedRepoCount = $state(0);
+  stagedFileCount = $state(0);
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
   /** True when Amend's sole target repo's HEAD is already at/behind its
@@ -28,6 +29,7 @@ class CommitBoxStore {
     this.results = [];
     /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
     this.stagedRepoCount = 0;
+    this.stagedFileCount = 0;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
     this.amendTargetPushed = false;

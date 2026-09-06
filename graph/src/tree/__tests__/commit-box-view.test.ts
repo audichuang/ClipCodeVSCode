@@ -23,6 +23,7 @@ describe('CommitBoxViewProvider', () => {
     const workbench = {
       tree: {
         getStagedRepoCount: () => 1,
+        getStagedFileCount: () => 2,
         getAmendTargetPushed: () => false,
         onDidChangeTreeData: () => ({ dispose() {} }),
       },
@@ -47,7 +48,7 @@ describe('CommitBoxViewProvider', () => {
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'workbenchCommitState',
-      payload: { stagedRepoCount: 1, amendTargetPushed: false, locale: 'en' },
+      payload: { stagedRepoCount: 1, stagedFileCount: 2, amendTargetPushed: false, locale: 'en' },
     });
   });
 
@@ -56,6 +57,7 @@ describe('CommitBoxViewProvider', () => {
     const workbench = {
       tree: {
         getStagedRepoCount: () => 1,
+        getStagedFileCount: () => 0,
         getAmendTargetPushed: () => false,
         onDidChangeTreeData: () => ({ dispose() {} }),
       },
@@ -86,6 +88,7 @@ describe('CommitBoxViewProvider', () => {
     const workbench = {
       tree: {
         getStagedRepoCount: () => 2,
+        getStagedFileCount: () => 0,
         getAmendTargetPushed: () => false,
         onDidChangeTreeData: () => ({ dispose() {} }),
       },

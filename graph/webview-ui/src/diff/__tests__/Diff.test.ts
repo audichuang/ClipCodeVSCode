@@ -213,8 +213,9 @@ describe('Diff.svelte file header (D6/X2)', () => {
     const { container } = render(Diff);
     const badge = container.querySelector('.side-badge.staged')!;
     expect(badge.querySelector('.side-status')!.textContent).toBe('M');
-    expect(badge.querySelector('.stat-add')!.textContent).toBe('+1');
-    expect(badge.querySelector('.stat-del')!.textContent).toBe('−0');
+    const header = badge.parentElement!;
+    expect(header.querySelector('.stat-add')!.textContent).toBe('+1');
+    expect(header.querySelector('.stat-del')!.textContent).toBe('−0');
   });
 
   it('shows R for a renamed file (from DiffData.oldPath, no host wiring needed)', () => {
@@ -246,10 +247,12 @@ describe('Diff.svelte file header (D6/X2)', () => {
     const { container } = render(Diff);
     const stagedBadge = container.querySelector('.side-badge.staged')!;
     const unstagedBadge = container.querySelector('.side-badge.unstaged')!;
-    expect(stagedBadge.querySelector('.stat-add')!.textContent).toBe('+1');
-    expect(stagedBadge.querySelector('.stat-del')!.textContent).toBe('−0');
-    expect(unstagedBadge.querySelector('.stat-add')!.textContent).toBe('+0');
-    expect(unstagedBadge.querySelector('.stat-del')!.textContent).toBe('−1');
+    const stagedHeader = stagedBadge.parentElement!;
+    const unstagedHeader = unstagedBadge.parentElement!;
+    expect(stagedHeader.querySelector('.stat-add')!.textContent).toBe('+1');
+    expect(stagedHeader.querySelector('.stat-del')!.textContent).toBe('−0');
+    expect(unstagedHeader.querySelector('.stat-add')!.textContent).toBe('+0');
+    expect(unstagedHeader.querySelector('.stat-del')!.textContent).toBe('−1');
   });
 });
 /* SNIPCODE-HOOK end */

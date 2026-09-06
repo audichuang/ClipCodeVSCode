@@ -119,7 +119,7 @@ export class DiffPanel {
   private pendingOpId: string | undefined;
   /* SNIPCODE-HOOK end */
 
-  show(repoPath: string, file: string, operationId?: string): void {
+  show(repoPath: string, file: string, operationId?: string, reveal = true): void {
     const ticket = this.seq.issue();
     /* SNIPCODE-HOOK start: loading state only on navigation */
     // A same-file refresh (post-stage / post-error) keeps the current body
@@ -135,13 +135,13 @@ export class DiffPanel {
     this.current = { repoPath, file, generation: ticket };
     /* SNIPCODE-HOOK end */
     if (!this.panel) { this.createPanel(); }
-    /* SNIPCODE-HOOK start: D6/X2 tab title carries the dir too — basename-only
-       collides when two changed files share a name in different folders. */
-    const fileDir = path.dirname(file);
-    this.panel!.title = fileDir === '.' ? `Diff: ${file}` : `Diff: ${fileDir}/${path.basename(file)}`;
+    /* SNIPCODE-HOOK start: D6/X2 keep the editor tab readable; the webview
+       header and tooltip retain the full repo-relative path. */
+    this.panel!.title = `Diff: ${path.basename(file)}`;
     /* SNIPCODE-HOOK end */
-    // Reveal without stealing the editor group focus away from the tree click.
-    this.panel!.reveal(vscode.ViewColumn.Active, false);
+    // Navigation reveals the panel; background refreshes keep the user's
+    // current editor in place.
+    if (reveal) this.panel!.reveal(vscode.ViewColumn.Active, false);
     // Before the handshake lands, the webview's listener isn't installed yet and
     // this postMessage would be silently dropped; the `diffReady` handler below
     // re-pushes `this.current` once it does.
@@ -170,7 +170,7 @@ export class DiffPanel {
   /* SNIPCODE-HOOK start: Batch B stage operation correlation */
   refreshIfCurrent(repoPath: string, file: string, operationId?: string): void {
     if (this.panel && this.current?.repoPath === repoPath && this.current?.file === file) {
-      this.show(repoPath, file, operationId);
+      this.show(repoPath, file, operationId, false);
     }
   }
   /* SNIPCODE-HOOK end */

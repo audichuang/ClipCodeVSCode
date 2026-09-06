@@ -381,6 +381,31 @@ describe('ChangesWorkbench commit status guard', () => {
     expect(a.commitIndex).toHaveBeenCalledWith('fix', { amend: true });
     expect(b.commitIndex).not.toHaveBeenCalled();
   });
+
+  /* SNIPCODE-HOOK start: refresh an open Diff tab after commit */
+  it('refreshes only successfully committed files in the existing Diff tab', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [] })),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'b.ts', status: 'M' }], unstaged: [], conflict: [] })),
+      commitIndex: vi.fn(async () => { throw new Error('hook failed'); }),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const refreshIfCurrent = vi.fn();
+    const wb = new ChangesWorkbench();
+    wb.setDiffPanel({ refreshIfCurrent, invalidateIndexDocuments: vi.fn() } as never);
+
+    const results = await wb.commit('fix', false);
+
+    expect(results).toEqual([
+      { repoName: 'a', ok: true },
+      { repoName: 'b', ok: false, error: 'hook failed' },
+    ]);
+    expect(refreshIfCurrent).toHaveBeenCalledWith('/a', 'a.ts');
+    expect(refreshIfCurrent).not.toHaveBeenCalledWith('/b', 'b.ts');
+  });
+  /* SNIPCODE-HOOK end */
 });
 /* SNIPCODE-HOOK end */
 
@@ -675,11 +700,11 @@ describe('Changes tree repo badges', () => {
   }
 
   it('renders branch ↓behind ↑ahead, dropping zero/absent sides', async () => {
-    await expect(repoDescription(1, 3)).resolves.toBe('main ↓3 ↑1');
-    await expect(repoDescription(0, 3)).resolves.toBe('main ↓3');
-    await expect(repoDescription(1, 0)).resolves.toBe('main ↑1');
-    await expect(repoDescription(0, 0)).resolves.toBe('main');
-    await expect(repoDescription(undefined, undefined)).resolves.toBe('main'); // no upstream
+    await expect(repoDescription(1, 3)).resolves.toBe('1 · main ↓3 ↑1');
+    await expect(repoDescription(0, 3)).resolves.toBe('1 · main ↓3');
+    await expect(repoDescription(1, 0)).resolves.toBe('1 · main ↑1');
+    await expect(repoDescription(0, 0)).resolves.toBe('1 · main');
+    await expect(repoDescription(undefined, undefined)).resolves.toBe('1 · main'); // no upstream
   });
 
   it('keeps the newest refresh when an older status read finishes last', async () => {
@@ -716,6 +741,41 @@ describe('Changes tree repo badges', () => {
     provider.notifyCommitSelectionChanged();
     expect(counts).toEqual([2]);
   });
+
+  /* SNIPCODE-HOOK start: compact multi-repo commit scope */
+  it('tracks checked staged repo/file scope through filtering and clean state', async () => {
+    const checked = new Set(['/a', '/b']);
+    const visible = new Set(['/a', '/b']);
+    const repos: RepoStatus[] = [
+      { ...status()[0], repoName: 'a', repoPath: '/a', staged: [{ path: 'a.ts', status: 'M' }, { path: 'b.ts', status: 'M' }], unstaged: [] },
+      { ...status()[0], repoName: 'b', repoPath: '/b', staged: [{ path: 'c.ts', status: 'M' }], unstaged: [] },
+    ];
+    const provider = new ChangesTreeProvider(
+      async () => repos.filter(repo => visible.has(repo.repoPath)),
+      repoPath => checked.has(repoPath),
+    );
+
+    await provider.refresh();
+    expect(provider.getStagedRepoCount()).toBe(2);
+    expect(provider.getStagedFileCount()).toBe(3);
+
+    checked.delete('/b');
+    provider.notifyCommitSelectionChanged();
+    expect(provider.getStagedRepoCount()).toBe(1);
+    expect(provider.getStagedFileCount()).toBe(2);
+
+    visible.delete('/b');
+    await provider.refresh();
+    expect(provider.getStagedRepoCount()).toBe(1);
+    expect(provider.getStagedFileCount()).toBe(2);
+
+    visible.clear();
+    await provider.refresh();
+    expect(provider.getStagedRepoCount()).toBe(0);
+    expect(provider.getStagedFileCount()).toBe(0);
+    expect(provider.getChildren()).toHaveLength(0);
+  });
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group rendering */
   it('renders a trailing Merge Conflicts group with a warning icon, and conflict files as file-conflict', async () => {
