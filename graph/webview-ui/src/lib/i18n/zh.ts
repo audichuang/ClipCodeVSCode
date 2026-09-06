@@ -724,5 +724,10 @@ export const zh: Record<string, string> = {
   'pr.emptyError': '无法加载比较结果：{message}',
   'pr.emptySameRef': '{base} 与 {head} 是同一个 ref，没有可比较的内容。',
   'pr.emptyUpToDate': '{head} 已经完全合并到 {base} 中。',
+  'pr.statsAhead': '领先 {count} 个',
+  'pr.statsBehind': '落后 {count} 个',
+  'pr.statsFiles': '{count} 个文件',
+  'pr.statsBinary': 'bin',
+  'pr.copyMergeBase': '复制 merge-base 哈希',
   /* SNIPCODE-HOOK end */
 };
