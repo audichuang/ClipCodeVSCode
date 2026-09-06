@@ -830,16 +830,28 @@ export class GitService {
           const parts: string[] = [];
           if (staged > 0) parts.push(`${staged} staged`);
           if (unstaged > 0) parts.push(`${unstaged} unstaged`);
+          /* SNIPCODE-HOOK start: X4 — thread UNCOMMITTED onto HEAD's rail.
+             `parents: []` made the graph builder treat this synthetic row as
+             a root commit, so it dangled in lane 0 with no connecting line
+             regardless of which branch HEAD is actually on. Look up HEAD by
+             its `head` ref (NOT BranchInfo.hash, which pre-X6 was a 7-char
+             abbreviation and wouldn't resolve in the builder's hashIndex
+             anyway) among the commits already walked into this window; when
+             HEAD isn't loaded (e.g. a branch filter that excludes it) fall
+             back to the previous dangling-root behavior rather than pointing
+             at a hash the builder can never resolve. */
+          const headCommit = commits.find(c => c.refs.some(r => r.type === 'head'));
           commits.unshift({
             hash: 'UNCOMMITTED',
             abbreviatedHash: 'UNCOMMITTED',
-            parents: [],
+            parents: headCommit ? [headCommit.hash] : [],
             refs: [],
             subject: `Uncommitted changes (${entries.length})`,
             body: JSON.stringify({ staged, unstaged }),
             author: { name: '', email: '', date: '' },
             committer: { name: '', email: '', date: '' },
           });
+          /* SNIPCODE-HOOK end */
         }
       }
     }
@@ -884,9 +896,16 @@ export class GitService {
    */
   async branches(): Promise<BranchInfo[]> {
     return this.cachedRead('branches', async () => {
+      /* SNIPCODE-HOOK start: X6 — full object name, not :short. BranchInfo.hash
+         feeds git-graph-builder's buildUpstreamMap/buildRemoteOnlyData, which
+         match it against Commit.hash (%H, full) via a hash-keyed Map. A
+         truncated hash never matches those full-length keys, so the local
+         branch's ancestor BFS silently failed to seed and misjudged large
+         swaths of shared history as remote-only. */
       const raw = await this.exec([
-        'branch', '-a', '--format=%(HEAD)%(refname:short)%00%(objectname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(refname)',
+        'branch', '-a', '--format=%(HEAD)%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(refname)',
       ]);
+      /* SNIPCODE-HOOK end */
       return parseBranches(raw);
     });
   }

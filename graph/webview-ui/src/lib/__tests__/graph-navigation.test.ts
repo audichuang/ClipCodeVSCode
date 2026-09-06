@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNavigationTarget, computeScrollTop, computeJumpTarget, isRowOffscreen } from '../graph-navigation';
+import { computeNavigationTarget, computeScrollTop, computeJumpTarget, computePagedTarget, isRowOffscreen } from '../graph-navigation';
 
 // Newest-first list. Linear chain a <- b <- c with a merge:
 //   a (top/newest)  parents: [b]
@@ -252,3 +252,44 @@ describe('isRowOffscreen', () => {
     expect(isRowOffscreen(-1, 30, 0, 600)).toBe(false);
   });
 });
+
+/* SNIPCODE-HOOK start: M14 — Home/End/PageUp/PageDown */
+describe('computePagedTarget', () => {
+  const commits = [
+    { hash: 'c9' }, { hash: 'c8' }, { hash: 'c7' }, { hash: 'c6' }, { hash: 'c5' },
+    { hash: 'c4' }, { hash: 'c3' }, { hash: 'c2' }, { hash: 'c1' }, { hash: 'c0' },
+  ];
+
+  it('returns null for an empty list', () => {
+    expect(computePagedTarget([], null, 'home', 5)).toBeNull();
+  });
+
+  it('home jumps to the first (topmost) commit regardless of current selection', () => {
+    expect(computePagedTarget(commits, 'c3', 'home', 5)).toBe('c9');
+  });
+
+  it('end jumps to the last (bottommost) commit', () => {
+    expect(computePagedTarget(commits, 'c9', 'end', 5)).toBe('c0');
+  });
+
+  it('pageDown steps forward by pageSize rows', () => {
+    expect(computePagedTarget(commits, 'c9', 'pageDown', 3)).toBe('c6'); // index 0 -> 3
+  });
+
+  it('pageUp steps backward by pageSize rows', () => {
+    expect(computePagedTarget(commits, 'c6', 'pageUp', 3)).toBe('c9'); // index 3 -> 0
+  });
+
+  it('pageDown clamps at the bottom instead of overshooting', () => {
+    expect(computePagedTarget(commits, 'c1', 'pageDown', 5)).toBe('c0'); // index 8 -> clamp to 9
+  });
+
+  it('pageUp clamps at the top instead of going negative', () => {
+    expect(computePagedTarget(commits, 'c8', 'pageUp', 5)).toBe('c9'); // index 1 -> clamp to 0
+  });
+
+  it('with nothing selected, pageDown starts from the top', () => {
+    expect(computePagedTarget(commits, null, 'pageDown', 3)).toBe('c6'); // treated as index 0 -> 3
+  });
+});
+/* SNIPCODE-HOOK end */

@@ -768,4 +768,10 @@ export const ko: Record<string, string> = {
   'flow.loading': '로딩 중...',
   'details.noStagedChanges': '스테이징된 변경 사항 없음',
   'details.noUnstagedChanges': '스테이징되지 않은 변경 사항 없음',
+  /* SNIPCODE-HOOK start: ui/graph */
+  // ui/graph
+  'graph.openSourceControl': '소스 제어 열기',
+  'graph.selectForCompare': '비교할 커밋으로 선택…',
+  'graph.clickToViewChanges': '스테이지됨/스테이지 안 됨 변경 사항 보기',
+  /* SNIPCODE-HOOK end */
 };

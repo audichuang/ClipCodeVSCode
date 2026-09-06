@@ -15,6 +15,13 @@ export interface GraphPath {
   points: Array<{ x: number; y: number }>;
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 */
+  /** True when any commit on this rail is an ancestor of (or is) HEAD. */
+  highlighted: boolean;
+  /** Index of this path in FullGraphData.paths — lets the webview map a
+   *  hovered/selected dot or link back to the rail it belongs to (G7). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphLink {
@@ -23,6 +30,11 @@ export interface GraphLink {
   end: { x: number; y: number };
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 */
+  highlighted: boolean;
+  /** Index of the rail this merge link connects into (the parent's path). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphDot {
@@ -32,6 +44,17 @@ export interface GraphDot {
   type: 'default' | 'head' | 'merge';
   localOnly: boolean;
   remoteTip: boolean;
+  /* SNIPCODE-HOOK start: G2/G6/G7 */
+  /** True when this commit is an ancestor of (or is) HEAD. */
+  highlighted: boolean;
+  /** True when this commit carries a `head` ref, independent of `type` — lets
+   *  HEAD-on-a-merge-commit keep the merge dot's rendering while still
+   *  drawing the HEAD ring (type stays 'merge', isHead adds the ring). */
+  isHead: boolean;
+  /** Index into FullGraphData.paths of the rail this dot sits on, or -1 for a
+   *  disconnected root commit with no rail (G7 hover/selected rail highlight). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface FullGraphData {
@@ -55,7 +78,11 @@ class PathHelper {
 
   constructor(next: string, color: number, start: { x: number; y: number }, to?: { x: number; y: number }) {
     this.next = next;
-    this.path = { points: [], color };
+    /* SNIPCODE-HOOK start: G2/G7 — highlighted/pathIndex default; both are set
+       by the caller right after construction (highlighted once reachability
+       is known, pathIndex once the path is pushed onto result.paths). */
+    this.path = { points: [], color, highlighted: false, pathIndex: -1 };
+    /* SNIPCODE-HOOK end */
 
     if (to) {
       this.lastX = to.x;
@@ -134,6 +161,17 @@ function buildUpstreamMap(branches: BranchInfo[]): Map<string, string> {
   return map;
 }
 
+/* SNIPCODE-HOOK start: X6 — remote tip must not be misjudged when it is
+   actually an ancestor of the local branch (local ahead of / caught up with
+   remote). The candidate-collection pass below only knows "this commit
+   carries a remote-branch ref and no local ref" — it can't yet tell whether
+   that commit is genuinely remote-only or just an older commit the local
+   branch has already passed. That check needs each candidate's corresponding
+   local branch's ancestor set, which is only computed in the second pass, so
+   we defer tipSet/allSet membership to there instead of writing tipSet
+   eagerly in the first pass (the old bug: a "local ahead of remote" tip that
+   happened to also collide via truncated BranchInfo.hash could otherwise
+   never resolve to a real ancestor and get treated as remote-only forever). */
 function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashIndex: Map<string, number>): { tipSet: Set<string>; allSet: Set<string> } {
   // upstream map: "origin/main" → local branch hash
   const upstreamMap = buildUpstreamMap(branches);
@@ -148,9 +186,12 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
     }
   }
 
-  // Find remote tips with their corresponding local hash
-  const tipSet = new Set<string>();
-  const tips: Array<{ tipIdx: number; localHash: string }> = [];
+  // Candidates: commits that carry a remote-branch ref and no local ref, with
+  // a resolvable local counterpart hash. Final tipSet/allSet membership is
+  // decided below once we know each candidate isn't already an ancestor of
+  // that local branch (which would mean local is ahead of / caught up with
+  // the remote, not behind it — nothing remote-only there).
+  const candidates: Array<{ tipIdx: number; localHash: string }> = [];
   for (const c of commits) {
     const hasRemoteRef = c.refs.some(r => r.type === 'remote-branch');
     const hasLocalRef = c.refs.some(r => r.type === 'branch' || r.type === 'head' || r.type === 'tag');
@@ -161,19 +202,19 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
       const fullRemoteName = `${r.remote}/${r.name}`;
       const localHash = upstreamMap.get(fullRemoteName) ?? localBranchMap.get(r.name);
       if (localHash && localHash !== c.hash) {
-        tipSet.add(c.hash);
         const idx = hashIndex.get(c.hash);
-        if (idx !== undefined) tips.push({ tipIdx: idx, localHash });
+        if (idx !== undefined) candidates.push({ tipIdx: idx, localHash });
         break;
       }
     }
   }
 
-  // For each remote tip, BFS through parents stopping at the corresponding local branch's ancestors
+  // For each candidate, BFS through parents stopping at the corresponding local branch's ancestors
+  const tipSet = new Set<string>();
   const allSet = new Set<string>();
   const ancestorCache = new Map<string, Set<string>>();
 
-  for (const { tipIdx, localHash } of tips) {
+  for (const { tipIdx, localHash } of candidates) {
     // Get or compute ancestors of the corresponding local branch
     let localAncestors = ancestorCache.get(localHash);
     if (!localAncestors) {
@@ -195,8 +236,14 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
       ancestorCache.set(localHash, localAncestors);
     }
 
+    const tipHash = commits[tipIdx].hash;
+    // The remote tip is already part of the local branch's own history (local
+    // is ahead of or caught up with the remote) — nothing here is remote-only.
+    if (localAncestors.has(tipHash)) continue;
+
     // BFS from remote tip, stop at local branch ancestors
-    allSet.add(commits[tipIdx].hash);
+    tipSet.add(tipHash);
+    allSet.add(tipHash);
     const queue = [tipIdx];
     let qHead = 0;
     while (qHead < queue.length) {
@@ -212,6 +259,7 @@ function buildRemoteOnlyData(commits: Commit[], branches: BranchInfo[], hashInde
 
   return { tipSet, allSet };
 }
+/* SNIPCODE-HOOK end */
 
 // ── Local-only detection ──
 
@@ -245,7 +293,8 @@ function buildPushedSet(commits: Commit[], hashIndex: Map<string, number>): Set<
   return pushed;
 }
 
-function pickColor(unsolved: PathHelper[]): number {
+/* SNIPCODE-HOOK start: G1 — stable per-branch color */
+function pickColor(unsolved: PathHelper[], preferred?: number): number {
   // Track used colors in a bitmask (palette is < 32 colors) instead of allocating an
   // array + Set on every call. O(lanes), allocation-free. This runs once per new
   // branch head and per merge parent, so it adds up on graphs with many lanes.
@@ -254,11 +303,74 @@ function pickColor(unsolved: PathHelper[]): number {
     const c = unsolved[j].path.color;
     if (c >= 0 && c < 32) mask |= 1 << c;
   }
+  if (preferred !== undefined && (mask & (1 << preferred)) === 0) return preferred;
   for (let i = 0; i < COLOR_PALETTE.length; i++) {
     if ((mask & (1 << i)) === 0) return i;
   }
   return 0;
 }
+
+/** First naming ref on a commit, preferring head > branch > remote-branch —
+ *  NOT `%D` order, which is git's listing order and not stable across repos
+ *  (a commit carrying both `feature` and `origin/feature` would otherwise
+ *  hash to a different color depending on which git happened to list first). */
+function findNamingRef(c: Commit) {
+  return c.refs.find(r => r.type === 'head')
+    ?? c.refs.find(r => r.type === 'branch')
+    ?? c.refs.find(r => r.type === 'remote-branch');
+}
+
+// Small deterministic string hash (djb2-ish) — same branch name always maps
+// to the same palette slot across refreshes/reloads (G1), independent of
+// rail-creation order.
+function hashStringToIndex(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % COLOR_PALETTE.length;
+}
+
+/** Preferred palette index for a new rail's starting commit (G1). Looks at
+ *  the commit's own naming ref first; when the commit has none of its own
+ *  (the synthetic UNCOMMITTED row, or a merge-parent commit that isn't itself
+ *  a branch tip), falls through to its first parent's naming ref once — that
+ *  parent is what actually identifies the branch visually. Returns undefined
+ *  when no name is found anywhere, so pickColor just uses the lowest free slot. */
+function preferredIndexForCommit(commit: Commit, commits: Commit[], hashIndex: Map<string, number>): number | undefined {
+  let ref = findNamingRef(commit);
+  if (!ref && commit.parents.length > 0) {
+    const pIdx = hashIndex.get(commit.parents[0]);
+    if (pIdx !== undefined) ref = findNamingRef(commits[pIdx]);
+  }
+  if (!ref) return undefined;
+  const name = ref.type === 'remote-branch' ? `${ref.remote}/${ref.name}` : ref.name;
+  return hashStringToIndex(name);
+}
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G2 — HEAD-reachability, for dimming non-current-branch rails */
+function buildHeadReachableSet(commits: Commit[], hashIndex: Map<string, number>): Set<string> | null {
+  const headCommit = commits.find(c => c.refs.some(r => r.type === 'head'));
+  if (!headCommit) return null; // no HEAD loaded → caller treats everything as highlighted
+  const reachable = new Set<string>();
+  // UNCOMMITTED (when present) sits above HEAD as its synthetic child (X4) —
+  // seed it too so its dot doesn't dim despite genuinely being "on" HEAD.
+  const queue: string[] = commits[0]?.hash === 'UNCOMMITTED' ? ['UNCOMMITTED', headCommit.hash] : [headCommit.hash];
+  let qHead = 0;
+  while (qHead < queue.length) {
+    const hash = queue[qHead++];
+    if (reachable.has(hash)) continue;
+    reachable.add(hash);
+    if (hash === 'UNCOMMITTED') {
+      queue.push(headCommit.hash);
+      continue;
+    }
+    const idx = hashIndex.get(hash);
+    if (idx === undefined) continue;
+    for (const p of commits[idx].parents) if (!reachable.has(p)) queue.push(p);
+  }
+  return reachable;
+}
+/* SNIPCODE-HOOK end */
 
 // ── Main parse function (SourceGit CommitGraph.Parse port) ──
 
@@ -302,6 +414,11 @@ export function buildFullGraph(
   }
   const { tipSet: remoteTipSet, allSet: remoteOnlySet } = buildRemoteOnlyData(commits, branches, hashIndex);
   const pushedSet = buildPushedSet(commits, hashIndex);
+  /* SNIPCODE-HOOK start: G2 */
+  // null (no HEAD loaded) means "nothing to dim against" — treat everything as highlighted.
+  const headReachable = buildHeadReachableSet(commits, hashIndex);
+  const isHighlighted = (hash: string) => headReachable === null || headReachable.has(hash);
+  /* SNIPCODE-HOOK end */
 
   // Map each commit that is a (local or remote) branch tip to its pattern color.
   // First matching ref on a commit wins; the resolver enforces config-order priority.
@@ -328,6 +445,12 @@ export function buildFullGraph(
         if (major === null) {
           offsetX += UNIT_W;
           major = l;
+          /* SNIPCODE-HOOK start: G2 — OR-accumulate: a rail started above HEAD
+             (e.g. an origin/main tip 1 commit ahead) becomes highlighted the
+             moment it reaches a HEAD-reachable commit; monotonic since every
+             ancestor of a reachable commit is itself reachable. */
+          major.path.highlighted = major.path.highlighted || isHighlighted(commit.hash);
+          /* SNIPCODE-HOOK end */
           if (commit.parents.length > 0) {
             untrackNext(major);
             major.next = commit.parents[0];
@@ -363,10 +486,15 @@ export function buildFullGraph(
     if (major === null) {
       offsetX += UNIT_W;
       if (commit.parents.length > 0) {
-        major = new PathHelper(commit.parents[0], pickColor(unsolved), { x: offsetX, y: offsetY });
+        /* SNIPCODE-HOOK start: G1/G2/G7 */
+        const preferred = preferredIndexForCommit(commit, commits, hashIndex);
+        major = new PathHelper(commit.parents[0], pickColor(unsolved, preferred), { x: offsetX, y: offsetY });
+        major.path.highlighted = isHighlighted(commit.hash);
         unsolved.push(major);
         trackNext(major);
         result.paths.push(major.path);
+        major.path.pathIndex = result.paths.length - 1;
+        /* SNIPCODE-HOOK end */
       }
     }
 
@@ -379,15 +507,28 @@ export function buildFullGraph(
 
     // Dot
     const position = { x: major?.lastX ?? offsetX, y: offsetY };
-    const dotColor = major?.path.color ?? 0;
+    /* SNIPCODE-HOOK start: G1/P2 — root commit (no rail) still gets a stable
+       preferred color instead of always falling back to palette[0]. */
+    const dotColor = major?.path.color ?? (preferredIndexForCommit(commit, commits, hashIndex) ?? 0);
+    /* SNIPCODE-HOOK end */
     // For parentless (root) commits major is null and carries no path; fall back to tipColorMap.
     const dotColorOverride = major?.path.colorOverride ?? tipColorMap.get(commit.hash);
     const isRemoteOnly = remoteOnlySet.has(commit.hash);
     const isLocalOnly = !pushedSet.has(commit.hash);
+    /* SNIPCODE-HOOK start: G6 — isHead independent of type so a HEAD commit
+       that is also a merge keeps its merge dot rendering (type stays
+       'merge') while still carrying the flag the webview needs to also draw
+       the HEAD ring around it. */
+    const isHead = commit.refs.some(r => r.type === 'head');
     let dotType: GraphDot['type'] = 'default';
-    if (commit.refs.some(r => r.type === 'head')) dotType = 'head';
-    else if (commit.parents.length > 1) dotType = 'merge';
-    result.dots.push({ center: position, color: dotColor, colorOverride: dotColorOverride, type: dotType, localOnly: isLocalOnly, remoteTip: isRemoteOnly });
+    if (commit.parents.length > 1) dotType = 'merge';
+    else if (isHead) dotType = 'head';
+    result.dots.push({
+      center: position, color: dotColor, colorOverride: dotColorOverride, type: dotType,
+      localOnly: isLocalOnly, remoteTip: isRemoteOnly,
+      highlighted: isHighlighted(commit.hash), isHead, pathIndex: major?.path.pathIndex ?? -1,
+    });
+    /* SNIPCODE-HOOK end */
     dotPaths.push(major);
 
     // Merge parents - skip for remote-tip commits unless they are merge commits
@@ -404,14 +545,27 @@ export function buildFullGraph(
             control: { x: parent.lastX, y: position.y },
             color: parent.path.color,
             colorOverride: parent.path.colorOverride,
+            /* SNIPCODE-HOOK start: G2/G7 */
+            highlighted: isHighlighted(commit.hash),
+            pathIndex: parent.path.pathIndex,
+            /* SNIPCODE-HOOK end */
           });
         } else {
-          // New path for merge parent
+          // New path for merge parent. No separate GraphLink here — the
+          // connecting curve from the merge commit down to this rail's start
+          // is baked directly into the new path's own points (the `to` arg
+          // below), same as upstream.
           offsetX += UNIT_W;
-          const l = new PathHelper(parentHash, pickColor(unsolved), position, { x: offsetX, y: position.y + HALF_H });
+          /* SNIPCODE-HOOK start: G1/G2/G7 */
+          const parentIdx = hashIndex.get(parentHash);
+          const preferred = parentIdx !== undefined ? preferredIndexForCommit(commits[parentIdx], commits, hashIndex) : undefined;
+          const l = new PathHelper(parentHash, pickColor(unsolved, preferred), position, { x: offsetX, y: position.y + HALF_H });
+          l.path.highlighted = isHighlighted(commit.hash);
           unsolved.push(l);
           trackNext(l);
           result.paths.push(l.path);
+          l.path.pathIndex = result.paths.length - 1;
+          /* SNIPCODE-HOOK end */
         }
       }
     }

@@ -516,4 +516,46 @@ describe('MainPanel orchestration logic', () => {
     ]);
     expect((data.payload!.commits as Array<{ hash: string; subject: string }>)[0].subject).toBe('Uncommitted changes (2)');
   });
+
+  /* SNIPCODE-HOOK start: X4 — status refresh must thread UNCOMMITTED onto HEAD */
+  it('status refresh links UNCOMMITTED to the HEAD commit\'s full hash (X4), not a dangling root', async () => {
+    H.git.log.mockResolvedValue([
+      { ...commit('aaaaaaa1'), refs: [{ type: 'head' as const, name: 'main' }] },
+      commit('bbbbbbb2'),
+    ] as never);
+    await dispatch({ type: 'getLog', payload: { limit: 5000 } });
+    H.panel!.webview.postMessage.mockClear();
+    H.git.getUncommittedDiff.mockResolvedValue({
+      staged: [{ path: 'staged.ts', status: 'M' }],
+      unstaged: [],
+    });
+
+    await (MainPanel.currentPanel as unknown as { refreshAll(scope: 'status'): Promise<void> }).refreshAll('status');
+
+    const data = postedOfType('logData').at(-1)!;
+    const uncommitted = (data.payload!.commits as Array<{ hash: string; parents: string[] }>)[0];
+    expect(uncommitted.hash).toBe('UNCOMMITTED');
+    expect(uncommitted.parents).toEqual(['aaaaaaa1']);
+  });
+
+  it('status refresh falls back to a dangling root when HEAD is not in the cached log', async () => {
+    // Neither cached commit carries a `head` ref (e.g. HEAD fell outside a
+    // branch-filtered window) — pointing UNCOMMITTED at a hash the builder
+    // cannot resolve would be worse than the previous dangling-root shape.
+    H.git.log.mockResolvedValue([commit('aaaaaaa1'), commit('bbbbbbb2')] as never);
+    await dispatch({ type: 'getLog', payload: { limit: 5000 } });
+    H.panel!.webview.postMessage.mockClear();
+    H.git.getUncommittedDiff.mockResolvedValue({
+      staged: [{ path: 'staged.ts', status: 'M' }],
+      unstaged: [],
+    });
+
+    await (MainPanel.currentPanel as unknown as { refreshAll(scope: 'status'): Promise<void> }).refreshAll('status');
+
+    const data = postedOfType('logData').at(-1)!;
+    const uncommitted = (data.payload!.commits as Array<{ hash: string; parents: string[] }>)[0];
+    expect(uncommitted.hash).toBe('UNCOMMITTED');
+    expect(uncommitted.parents).toEqual([]);
+  });
+  /* SNIPCODE-HOOK end */
 });

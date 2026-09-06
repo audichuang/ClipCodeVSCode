@@ -685,7 +685,62 @@ describe('GitService', () => {
       const commits = await service.log();
       expect(commits[0]?.hash).not.toBe('UNCOMMITTED');
     });
+
+    /* SNIPCODE-HOOK start: X4 — UNCOMMITTED must thread onto HEAD's full hash */
+    it('links UNCOMMITTED to the full hash of the commit carrying the head ref', async () => {
+      const headHash = 'abc123full1111111111111111111111111111';
+      const headLine = '\x01\x02\x03' + [
+        headHash, 'abc123f', 'Author', 'a@a.com', '2024-01-01T00:00:00Z',
+        'Author', 'a@a.com', '2024-01-01T00:00:00Z',
+        'feat: initial',
+        '',              // %P — root commit, no parents
+        'HEAD -> main',  // %D
+        '',              // %b
+      ].join('\x00') + '\n';
+      mockExec(service, async (args) => {
+        if (args.includes('--porcelain') && !args.includes('diff')) return ' M src/foo.ts\n?? new.ts\n';
+        if (args.includes('log') && !args.includes('--no-walk')) return headLine;
+        if (args.includes('remote')) return '';
+        if (args.includes('stash')) return '';
+        return '';
+      });
+
+      const commits = await service.log();
+      expect(commits[0].hash).toBe('UNCOMMITTED');
+      expect(commits[0].parents).toEqual([headHash]);
+    });
+
+    it('falls back to a dangling root (parents: []) when HEAD is not in the loaded window', async () => {
+      // No `HEAD -> ...` decoration anywhere in the log — e.g. a branch filter
+      // that excludes the current branch. Pointing at a hash the builder can
+      // never resolve would be worse than the previous dangling-root behavior.
+      mockExec(service, async (args) => {
+        if (args.includes('--porcelain') && !args.includes('diff')) return ' M src/foo.ts\n?? new.ts\n';
+        if (args.includes('log') && !args.includes('--no-walk')) return logLine;
+        if (args.includes('remote')) return '';
+        if (args.includes('stash')) return '';
+        return '';
+      });
+
+      const commits = await service.log();
+      expect(commits[0].hash).toBe('UNCOMMITTED');
+      expect(commits[0].parents).toEqual([]);
+    });
+    /* SNIPCODE-HOOK end */
   });
+
+  /* SNIPCODE-HOOK start: X6 — branches() must request the full object name */
+  describe('branches() hash format (X6)', () => {
+    it('requests %(objectname) (full hash), not %(objectname:short)', async () => {
+      let capturedArgs: string[] = [];
+      mockExec(service, async (args) => { capturedArgs = args; return ''; });
+      await service.branches();
+      const formatArg = capturedArgs.find(a => a.startsWith('--format='));
+      expect(formatArg).toContain('%(objectname)');
+      expect(formatArg).not.toContain('%(objectname:short)');
+    });
+  });
+  /* SNIPCODE-HOOK end */
 
   describe('getUncommittedDiff', () => {
     it('returns staged and unstaged file lists', async () => {
