@@ -813,7 +813,7 @@ describe('GitService', () => {
 
   /* SNIPCODE-HOOK start: S4 discardPaths */
   describe('discardPaths', () => {
-    it('restores tracked paths from HEAD (worktree only) and cleans untracked paths separately', async () => {
+    it('restores tracked paths from the index (worktree only, not --source=HEAD) and cleans untracked paths separately', async () => {
       const calls: string[][] = [];
       mockExec(service, async (args) => { calls.push(args); return ''; });
 
@@ -822,8 +822,10 @@ describe('GitService', () => {
         { path: 'new.ts', status: 'U' },
       ]);
 
+      // No --source=HEAD: default source is the index, so an AM file's staged
+      // add survives discard instead of being deleted (HEAD has no such path).
       expect(calls).toEqual([
-        ['restore', '--worktree', '--source=HEAD', '--', 'a.ts'],
+        ['restore', '--worktree', '--', 'a.ts'],
         ['clean', '-f', '--', 'new.ts'],
       ]);
     });
@@ -834,7 +836,7 @@ describe('GitService', () => {
 
       await service.discardPaths([{ path: 'renamed.ts', status: 'R', oldPath: 'old.ts' }]);
 
-      expect(calls).toEqual([['restore', '--worktree', '--source=HEAD', '--', 'renamed.ts', 'old.ts']]);
+      expect(calls).toEqual([['restore', '--worktree', '--', 'renamed.ts', 'old.ts']]);
     });
 
     it('never touches a nested repo directory (status N)', async () => {
