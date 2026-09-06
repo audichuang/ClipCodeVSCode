@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { highlightLineWithRanges } from '../highlighter';
+import { describe, it, expect, afterEach } from 'vitest';
+import { highlightLineWithRanges, activeShikiTheme } from '../highlighter';
 import type { HighlighterCore } from 'shiki';
 
 // A stub highlighter with no loaded languages: highlightLineWithRanges must fall
@@ -59,3 +59,28 @@ describe('highlightLineWithRanges', () => {
     expect(html).not.toContain('\uD83D<'); // no lone high surrogate split into its own span
   });
 });
+
+/* SNIPCODE-HOOK start: ui/diff D14 High Contrast Light is light, not dark */
+describe('activeShikiTheme', () => {
+  afterEach(() => { document.body.className = ''; });
+
+  it('is dark-plus by default (no theme class)', () => {
+    expect(activeShikiTheme()).toBe('dark-plus');
+  });
+
+  it('is light-plus for vscode-light', () => {
+    document.body.classList.add('vscode-light');
+    expect(activeShikiTheme()).toBe('light-plus');
+  });
+
+  it('is light-plus for vscode-high-contrast-light (was falling through to dark-plus)', () => {
+    document.body.classList.add('vscode-high-contrast-light');
+    expect(activeShikiTheme()).toBe('light-plus');
+  });
+
+  it('is dark-plus for vscode-high-contrast (the DARK high-contrast theme)', () => {
+    document.body.classList.add('vscode-high-contrast');
+    expect(activeShikiTheme()).toBe('dark-plus');
+  });
+});
+/* SNIPCODE-HOOK end */

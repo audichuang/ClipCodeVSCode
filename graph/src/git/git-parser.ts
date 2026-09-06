@@ -255,8 +255,14 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
     const isBinary = fileDiff.includes('Binary files');
     const isImage = /\.(png|jpg|jpeg|gif|bmp|svg|webp|ico)$/i.test(filePath);
 
+    /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+    const meta = parseDiffHeaderMeta(lines);
+    /* SNIPCODE-HOOK end */
+
     if (isBinary) {
-      results.push({ file: filePath, hunks: [], isBinary: true, isImage });
+      /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+      results.push({ file: filePath, hunks: [], isBinary: true, isImage, ...meta });
+      /* SNIPCODE-HOOK end */
       continue;
     }
 
@@ -293,18 +299,26 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
       if (!currentHunk) { continue; }
 
       if (line.startsWith('+')) {
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.substring(1));
         currentHunk.lines.push({
           type: 'add',
-          content: line.substring(1),
+          content,
           newLineNumber: newLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         newLineNum++;
       } else if (line.startsWith('-')) {
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.substring(1));
         currentHunk.lines.push({
           type: 'delete',
-          content: line.substring(1),
+          content,
           oldLineNumber: oldLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         oldLineNum++;
       } else if (line.startsWith(' ') || (line === '' && i < lines.length - 1)) {
         // Context line. A blank context line may arrive as " " (git's normal
@@ -312,18 +326,32 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
         // empty string is always the trailing-newline artifact from split('\n'),
         // not real content — skip it (`i < lines.length - 1`) so it doesn't
         // become a phantom context line that also bumps the trailing line numbers.
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.startsWith(' ') ? line.substring(1) : line);
         currentHunk.lines.push({
           type: 'context',
-          content: line.startsWith(' ') ? line.substring(1) : line,
+          content,
           oldLineNumber: oldLineNum,
           newLineNumber: newLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         oldLineNum++;
         newLineNum++;
+      /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+      } else if (line.startsWith('\\')) {
+        // `\ No newline at end of file` always follows the +/-/context line it
+        // describes — flag that just-pushed line rather than emitting a phantom
+        // DiffLine for the marker itself.
+        const last = currentHunk.lines[currentHunk.lines.length - 1];
+        if (last) last.noNewline = true;
+      /* SNIPCODE-HOOK end */
       }
     }
 
-    results.push({ file: filePath, hunks, isBinary: false, isImage });
+    /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+    results.push({ file: filePath, hunks, isBinary: false, isImage, ...meta });
+    /* SNIPCODE-HOOK end */
   }
 
   return results;
@@ -420,6 +448,55 @@ export function parseLfsLocks(raw: string): Array<{ path: string; owner: string;
     return { path: parts[0]?.trim() ?? '', owner: parts[1]?.trim() ?? '', id: parts[2]?.trim() ?? '' };
   });
 }
+
+/* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+/** Scan a single file diff's header lines (before the first `@@`) for the
+ *  rename/mode metadata git emits there. All optional — a plain modify diff
+ *  matches none of these and returns an empty object. */
+/* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+/** A CRLF-terminated line arrives from `git diff` with the `\r` still glued to
+ *  the content (git only ever strips the `\n` split boundary). Left in place,
+ *  it renders invisibly (`white-space:pre`) so a CRLF-only change looks like
+ *  no change at all; strip it for display and flag it so the UI can mark it. */
+function stripTrailingCR(content: string): { content: string; cr: boolean } {
+  if (content.endsWith('\r')) return { content: content.slice(0, -1), cr: true };
+  return { content, cr: false };
+}
+/* SNIPCODE-HOOK end */
+
+function parseDiffHeaderMeta(lines: string[]): {
+  oldPath?: string; similarity?: number; oldMode?: string; newMode?: string;
+  newFile?: boolean; deletedFile?: boolean;
+} {
+  const meta: ReturnType<typeof parseDiffHeaderMeta> = {};
+  for (const line of lines) {
+    if (line.startsWith('@@')) break;
+    if (line.startsWith('rename from ')) {
+      meta.oldPath = unescapeRenamePath(line.slice('rename from '.length));
+    } else if (line.startsWith('similarity index ')) {
+      const m = line.match(/^similarity index (\d+)%/);
+      if (m) meta.similarity = parseInt(m[1], 10);
+    } else if (line.startsWith('old mode ')) {
+      meta.oldMode = line.slice('old mode '.length).trim();
+    } else if (line.startsWith('new mode ')) {
+      meta.newMode = line.slice('new mode '.length).trim();
+    } else if (line.startsWith('new file mode ')) {
+      meta.newFile = true;
+    } else if (line.startsWith('deleted file mode ')) {
+      meta.deletedFile = true;
+    }
+  }
+  return meta;
+}
+
+/** `rename from`/`rename to` lines carry a bare path (no a/ b/ prefix),
+ *  quoted+escaped the same way +++/--- paths are when it contains unusual
+ *  characters. */
+function unescapeRenamePath(raw: string): string {
+  const s = raw.replace(/\r$/, '').trim();
+  return s.startsWith('"') ? unescapeGitPath(s) : s;
+}
+/* SNIPCODE-HOOK end */
 
 /** Resolve a file path from the +++/--- header lines of a single file diff.
  *  Prefers the post-image (+++) path; falls back to the pre-image (---) path

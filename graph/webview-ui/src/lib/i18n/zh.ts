@@ -742,4 +742,19 @@ export const zh: Record<string, string> = {
   'pr.localBranches': '本地',
   'pr.remoteBranches': '远程',
   /* SNIPCODE-HOOK end */
+  // ui/diff
+  'diff.noNewlineAtEof': '文件末尾无换行符',
+  'diff.renamedFrom': '从 {oldPath} 重命名而来（相似度 {similarity}%）',
+  'diff.modeChanged': '权限 {oldMode} → {newMode}',
+  'diff.noTextualChanges': '没有文本变更',
+  'diff.newFile': '新文件',
+  'diff.deletedFile': '已删除的文件',
+  'diff.mixedLineEndings': '此行以 CRLF 结尾，与文件其余部分不同',
+  'diff.prevHunk': '上一个更改',
+  'diff.nextHunk': '下一个更改',
+  'image.sideBySide': '并排显示',
+  'image.swipe': '滑动对比',
+  'image.onionSkin': '叠加对比',
+  'image.before': '之前',
+  'image.after': '之后',
 };

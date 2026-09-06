@@ -453,6 +453,178 @@ new mode 100755`;
     expect(result[0].file).toBe('unknown');
   });
 
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  it('flags only the line that actually lost its trailing newline', () => {
+    // Real `git diff` output for a change that ONLY removes the final
+    // newline: git emits exactly one `\ No newline at end of file` marker,
+    // right after the `+` line (the old blob still had a trailing newline).
+    // Flagging both sides would misrepresent a still-newline-terminated old
+    // line as also missing one.
+    const raw = [
+      'diff --git a/scenario-b.ts b/scenario-b.ts',
+      'index 0c2aa38..4571ae8 100644',
+      '--- a/scenario-b.ts',
+      '+++ b/scenario-b.ts',
+      '@@ -1,3 +1,3 @@',
+      ' line one',
+      ' line two',
+      '-line three',
+      '+line three, no trailing newline',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    const del = lines.find(l => l.type === 'delete')!;
+    const add = lines.find(l => l.type === 'add')!;
+    expect(del.noNewline).toBeUndefined();
+    expect(add.noNewline).toBe(true);
+  });
+
+  it('flags both sides when neither blob ends in a newline', () => {
+    const raw = [
+      'diff --git a/f.ts b/f.ts',
+      '--- a/f.ts',
+      '+++ b/f.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '\\ No newline at end of file',
+      '+new',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    expect(lines.find(l => l.type === 'delete')!.noNewline).toBe(true);
+    expect(lines.find(l => l.type === 'add')!.noNewline).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  it('strips the trailing \\r from CRLF lines and flags them, leaving LF lines untouched', () => {
+    // Real `git diff` output for a file converted LF -> CRLF (unix2dos): the
+    // OLD side stayed LF, the NEW side is CRLF. git only splits on `\n`, so
+    // the `\r` is still glued to each new-side line's content.
+    const raw = [
+      'diff --git a/scenario-c.ts b/scenario-c.ts',
+      'index 600d48a..659c4d7 100644',
+      '--- a/scenario-c.ts',
+      '+++ b/scenario-c.ts',
+      '@@ -1,5 +1,5 @@',
+      '-alpha',
+      '-beta',
+      '+alpha\r',
+      '+beta\r',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    const deletes = lines.filter(l => l.type === 'delete');
+    const adds = lines.filter(l => l.type === 'add');
+    expect(deletes.every(l => l.cr === undefined)).toBe(true);
+    expect(deletes.map(l => l.content)).toEqual(['alpha', 'beta']);
+    expect(adds.every(l => l.cr === true)).toBe(true);
+    // The \r must be stripped from content, not just flagged — otherwise it's
+    // still invisibly present under `white-space:pre`.
+    expect(adds.map(l => l.content)).toEqual(['alpha', 'beta']);
+  });
+
+  it('does not flag cr on an ordinary LF-only diff', () => {
+    const raw = ['diff --git a/f.ts b/f.ts', '@@ -1 +1 @@', '-old', '+new'].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    expect(lines.every(l => l.cr === undefined)).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+  it('parses rename + modify: oldPath, similarity, and the (small) real hunks', () => {
+    // Real `git diff --cached -M -- d-src.ts d-dst.ts` output for a renamed
+    // file with 2 changed lines — the pathspec/similarity fix (X3) means this
+    // is a proper rename+modify diff, not a whole-file "new file" add.
+    const raw = [
+      'diff --git a/d-src.ts b/d-dst.ts',
+      'similarity index 83%',
+      'rename from d-src.ts',
+      'rename to d-dst.ts',
+      'index 4603f7c..279494b 100644',
+      '--- a/d-src.ts',
+      '+++ b/d-dst.ts',
+      '@@ -9,7 +9,7 @@ export function formatUser(user: User): string {',
+      ' }',
+      ' ',
+      ' export function validateEmail(email: string): boolean {',
+      '-  return /.+@.+\\..+/.test(email);',
+      '+  return /.+@.+\\..+/.test(email.trim());',
+      ' }',
+      ' ',
+      ' export function normalizeEmail(email: string): string {',
+    ].join('\n');
+    const result = parseDiff(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe('d-dst.ts');
+    expect(result[0].oldPath).toBe('d-src.ts');
+    expect(result[0].similarity).toBe(83);
+    expect(result[0].hunks).toHaveLength(1);
+    expect(result[0].hunks[0].lines.some(l => l.type === 'delete')).toBe(true);
+    expect(result[0].hunks[0].lines.some(l => l.type === 'add')).toBe(true);
+  });
+
+  it('parses a rename-only diff (100% similarity, no hunks) instead of leaving it empty', () => {
+    // Real `git diff --cached -M -- c.ts d.ts` output for an unmodified rename.
+    const raw = [
+      'diff --git a/c.ts b/d.ts',
+      'similarity index 100%',
+      'rename from c.ts',
+      'rename to d.ts',
+    ].join('\n');
+    const result = parseDiff(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe('d.ts');
+    expect(result[0].oldPath).toBe('c.ts');
+    expect(result[0].similarity).toBe(100);
+    expect(result[0].hunks).toHaveLength(0);
+  });
+
+  it('parses a pure mode-only diff (no rename, no hunks)', () => {
+    // Real `git diff --cached -- script.sh` output after `chmod +x`.
+    const raw = [
+      'diff --git a/script.sh b/script.sh',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n');
+    const result = parseDiff(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0].oldPath).toBeUndefined();
+    expect(result[0].oldMode).toBe('100644');
+    expect(result[0].newMode).toBe('100755');
+    expect(result[0].hunks).toHaveLength(0);
+  });
+
+  it('flags newFile/deletedFile from the diff header', () => {
+    const added = parseDiff([
+      'diff --git a/n.ts b/n.ts',
+      'new file mode 100644',
+      'index 0000000..e69de29',
+      '--- /dev/null',
+      '+++ b/n.ts',
+      '@@ -0,0 +1 @@',
+      '+x',
+    ].join('\n'));
+    expect(added[0].newFile).toBe(true);
+    expect(added[0].deletedFile).toBeUndefined();
+
+    const deleted = parseDiff([
+      'diff --git a/n.ts b/n.ts',
+      'deleted file mode 100644',
+      'index e69de29..0000000',
+      '--- a/n.ts',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+      '-x',
+    ].join('\n'));
+    expect(deleted[0].deletedFile).toBe(true);
+    expect(deleted[0].newFile).toBeUndefined();
+  });
+  /* SNIPCODE-HOOK end */
+
   it('should parse multiple file diffs', () => {
     const raw = `diff --git a/file1.ts b/file1.ts
 --- a/file1.ts

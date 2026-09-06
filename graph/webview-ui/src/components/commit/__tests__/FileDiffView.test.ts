@@ -646,8 +646,144 @@ describe('FileDiffView stage/unstage (B-2c)', () => {
     const btn = container.querySelector('.hunk-stage-lines-btn');
     expect(btn).toBeTruthy();
     expect(btn!.getAttribute('aria-label')).toBe('Stage Selected Lines');
+    /* SNIPCODE-HOOK start: ui/diff D10 label the line-stage button */
+    // Previously just a bare count ("1"); now carries the same text as the
+    // aria-label so the button is legible without a tooltip hover.
+    expect(btn!.textContent).toContain('Stage Selected Lines');
+    expect(btn!.textContent).toContain('1');
+    /* SNIPCODE-HOOK end */
     await fireEvent.click(btn!);
 
     expect(onStageLines).toHaveBeenCalledWith({ file: 'src/foo.ts', hunkIndex: 0, lineIndices: [1] });
   });
 });
+
+/* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+describe('FileDiffView no-newline-at-EOF marker', () => {
+  function noNewlineDiff(): DiffData {
+    return {
+      file: 'src/eof.ts',
+      isBinary: false,
+      isImage: false,
+      hunks: [{
+        header: '@@ -1,2 +1,2 @@',
+        oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+        lines: [
+          { type: 'context', content: 'line one', oldLineNumber: 1, newLineNumber: 1 },
+          { type: 'delete', content: 'line three', oldLineNumber: 2 },
+          { type: 'add', content: 'line three, no trailing newline', newLineNumber: 2, noNewline: true },
+        ],
+      }],
+    };
+  }
+
+  it('renders the pill only on the flagged line (inline mode)', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: noNewlineDiff(), diffMode: 'inline', hideModeToggle: true });
+    const pills = container.querySelectorAll('.no-newline-pill');
+    expect(pills.length).toBe(1);
+    expect(pills[0].textContent).toContain('No newline at end of file');
+    // The unflagged delete line must not get a pill of its own.
+    const deleteLine = container.querySelector('.diff-delete')!;
+    expect(deleteLine.querySelector('.no-newline-pill')).toBeNull();
+  });
+
+  it('renders the pill in side-by-side mode too', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: noNewlineDiff(), diffMode: 'side-by-side', hideModeToggle: true });
+    expect(container.querySelectorAll('.no-newline-pill').length).toBe(1);
+  });
+
+  it('renders no pill when nothing is flagged', () => {
+    const diff = noNewlineDiff();
+    diff.hunks[0].lines[2].noNewline = undefined;
+    const { container } = render(FileDiffView, { diff, diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelector('.no-newline-pill')).toBeNull();
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation */
+describe('FileDiffView rename/mode-only empty-hunks explanation', () => {
+  beforeEach(() => i18n.setLocale('en'));
+
+  function emptyDiff(extra: Partial<DiffData>): DiffData {
+    return { file: 'new.ts', isBinary: false, isImage: false, hunks: [], ...extra };
+  }
+
+  it('shows "Renamed from X (similarity N%)" instead of a blank body', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({ oldPath: 'old.ts', similarity: 97 }) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('Renamed from old.ts (similarity 97%)');
+  });
+
+  it('shows "Mode X → Y" for a pure mode-only change', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({ oldMode: '100644', newMode: '100755' }) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('Mode 100644 → 100755');
+  });
+
+  it('shows both a rename and a mode change when a file was renamed AND rechmodded', () => {
+    const { container } = render(FileDiffView, {
+      diff: emptyDiff({ oldPath: 'old.ts', similarity: 100, oldMode: '100644', newMode: '100755' }),
+    });
+    const text = container.querySelector('.diff-empty-meta')!.textContent!;
+    expect(text).toContain('Renamed from old.ts');
+    expect(text).toContain('Mode 100644 → 100755');
+  });
+
+  it('falls back to "No textual changes" when there is no rename/mode/new/delete metadata', () => {
+    const { container } = render(FileDiffView, { diff: emptyDiff({}) });
+    expect(container.querySelector('.diff-empty-meta')!.textContent).toContain('No textual changes');
+  });
+
+  it('still renders normal hunks (no empty-state branch) when hunks are non-empty', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.diff-empty-meta')).toBeNull();
+    expect(container.querySelectorAll('.diff-content .diff-line').length).toBeGreaterThan(0);
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+describe('FileDiffView CRLF marker', () => {
+  function mixedCrDiff(): DiffData {
+    return {
+      file: 'src/eol.ts',
+      isBinary: false,
+      isImage: false,
+      hunks: [{
+        header: '@@ -1,2 +1,2 @@',
+        oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+        lines: [
+          { type: 'delete', content: 'alpha', oldLineNumber: 1 },
+          { type: 'add', content: 'alpha', newLineNumber: 1, cr: true },
+        ],
+      }],
+    };
+  }
+
+  it('marks only the CR-flagged line when the diff has mixed line endings (inline)', () => {
+    i18n.setLocale('en');
+    const { container } = render(FileDiffView, { diff: mixedCrDiff(), diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelectorAll('.cr-marker').length).toBe(1);
+    const deleteLine = container.querySelector('.diff-delete')!;
+    expect(deleteLine.querySelector('.cr-marker')).toBeNull();
+  });
+
+  it('marks it in side-by-side mode too', () => {
+    const { container } = render(FileDiffView, { diff: mixedCrDiff(), diffMode: 'side-by-side', hideModeToggle: true });
+    expect(container.querySelectorAll('.cr-marker').length).toBe(1);
+  });
+
+  it('renders no marker when the whole file is consistently CRLF (not mixed)', () => {
+    const diff = mixedCrDiff();
+    diff.hunks[0].lines[0].cr = true; // both sides CRLF now — not mixed
+    const { container } = render(FileDiffView, { diff, diffMode: 'inline', hideModeToggle: true });
+    expect(container.querySelector('.cr-marker')).toBeNull();
+  });
+
+  it('renders no marker on an ordinary LF-only diff', () => {
+    const { container } = render(FileDiffView, { diff: sampleDiff() });
+    expect(container.querySelector('.cr-marker')).toBeNull();
+  });
+});
+/* SNIPCODE-HOOK end */

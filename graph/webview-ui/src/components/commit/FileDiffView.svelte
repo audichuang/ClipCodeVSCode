@@ -88,6 +88,25 @@
   // patch-builder rewrites the whole-file header for partial selections).
   const canReverse = $derived(!!onReverse && !!commitHash);
 
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  // Only worth flagging when the two sides actually DISAGREE on line ending —
+  // a file that's consistently CRLF throughout shouldn't get a ␍ badge on
+  // every single line (noise); a mixed file is exactly the "you can't see
+  // the EOL-only change" case D4 targets.
+  const hasMixedCr = $derived.by(() => {
+    if (!diff || diff.isBinary) return false;
+    let sawCr = false;
+    let sawNoCr = false;
+    for (const hunk of diff.hunks) {
+      for (const line of hunk.lines) {
+        if (line.cr) sawCr = true; else sawNoCr = true;
+        if (sawCr && sawNoCr) return true;
+      }
+    }
+    return false;
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start (B-2c): staging affordance gate + action. */
   const canStage = $derived(!!onStageHunk);
   /* SNIPCODE-HOOK (B-2d): gutter line-selection turns on for the reverse view
@@ -281,9 +300,13 @@
   // diff starts collapsed even if the previous one was expanded.
   $effect(() => {
     diff;
-    /* SNIPCODE-HOOK start: Batch C reset reused diff-view highlight state. */
-    highlightedLines = new Map();
-    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: D7 stop clobbering the highlight cache on every diff
+       change. The old eager reset cleared it synchronously the instant `diff`
+       changed (e.g. every stage/unstage re-push), so every unchanged line
+       flashed plain (unhighlighted) text until the async highlight pass below
+       finished. The highlighting $effect now owns `highlightedLines` fully —
+       it reuses cache entries whose content-addressed key still matches and
+       only recomputes the rest, so there's no reason to blank it here. */
     showFullDiff = false;
     lineSel = null;
   });
@@ -414,6 +437,13 @@
 
   const MAX_HIGHLIGHT_LINES = 5000;
 
+  /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+  // Theme the currently-cached HTML was rendered under. A cache entry is only
+  // reusable when the theme hasn't changed since — reusing dark-plus HTML
+  // under a light theme would render wrong-colored tokens.
+  let lastHighlightTheme: 'dark-plus' | 'light-plus' | undefined;
+  /* SNIPCODE-HOOK end */
+
   // Tracks the VS Code color theme so highlighting re-runs (with the matching
   // light/dark token colours) when the user switches themes mid-session.
   let shikiTheme = $state<'dark-plus' | 'light-plus'>(activeShikiTheme());
@@ -465,18 +495,26 @@
         const ready = await ensureLanguage(h, lang);
         if (cancelled || diff !== target) return;
         if (!ready) { highlightedLines = new Map(); return; }
+        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+        // Reuse cache entries whose content-addressed key is unchanged (same
+        // file+hunkStart+lineIndex+content — see highlightKey) so an unrelated
+        // hunk's stage/unstage doesn't force every OTHER line to re-highlight
+        // (and doesn't flash plain text for them either, since D7 also stopped
+        // eagerly clearing highlightedLines on diff change).
+        const reusable = theme === lastHighlightTheme ? highlightedLines : undefined;
         const newMap = new Map<string, string>();
         const flat: Array<{ key: string; content: string }> = [];
         for (const hunk of visibleHunks) {
           for (let i = 0; i < hunk.lines.length; i++) {
             /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
-            flat.push({
-              key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content),
-              content: hunk.lines[i].content,
-            });
+            const key = highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content);
+            const cached = reusable?.get(key);
+            if (cached !== undefined) { newMap.set(key, cached); continue; }
+            flat.push({ key, content: hunk.lines[i].content });
             /* SNIPCODE-HOOK end */
           }
         }
+        /* SNIPCODE-HOOK end */
         for (let i = 0; i < flat.length; i += CHUNK_SIZE) {
           if (cancelled || diff !== target) return;
           const end = Math.min(i + CHUNK_SIZE, flat.length);
@@ -499,6 +537,9 @@
         }
         if (cancelled || diff !== target) return;
         highlightedLines = newMap;
+        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+        lastHighlightTheme = theme;
+        /* SNIPCODE-HOOK end */
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -511,6 +552,22 @@
     return highlightedLines.get(key) ?? escapeHtml(content);
   }
 </script>
+
+<!-- SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker -->
+{#snippet noNewlinePill(line: DiffLine)}
+  {#if line.noNewline}
+    <span class="no-newline-pill" title={t('diff.noNewlineAtEof')}>⏎ {t('diff.noNewlineAtEof')}</span>
+  {/if}
+{/snippet}
+<!-- SNIPCODE-HOOK end -->
+
+<!-- SNIPCODE-HOOK start: ui/diff D4 CRLF marker -->
+{#snippet crMarker(line: DiffLine)}
+  {#if hasMixedCr && line.cr}
+    <span class="cr-marker" title={t('diff.mixedLineEndings')}>␍</span>
+  {/if}
+{/snippet}
+<!-- SNIPCODE-HOOK end -->
 
 <div class="diff-wrapper" class:stacked>
   <div class="diff-toolbar">
@@ -564,6 +621,30 @@
       {/if}
     {:else if diff.isBinary}
       <div class="diff-empty">{t('details.binaryFile')}</div>
+    <!-- SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation -->
+    {:else if renderHunks.length === 0}
+      <!-- A rename-only / mode-only / already-empty-file diff has no content
+           hunks — previously this rendered as a blank body with no text at
+           all, indistinguishable from "still loading". Say what actually
+           happened instead. -->
+      <div class="diff-empty diff-empty-meta">
+        {#if diff.oldPath}
+          <div>{t('diff.renamedFrom', { oldPath: diff.oldPath, similarity: diff.similarity ?? 100 })}</div>
+        {/if}
+        {#if diff.oldMode && diff.newMode}
+          <div>{t('diff.modeChanged', { oldMode: diff.oldMode, newMode: diff.newMode })}</div>
+        {/if}
+        {#if !diff.oldPath && !diff.oldMode}
+          {#if diff.newFile}
+            <div>{t('diff.newFile')}</div>
+          {:else if diff.deletedFile}
+            <div>{t('diff.deletedFile')}</div>
+          {:else}
+            <div>{t('diff.noTextualChanges')}</div>
+          {/if}
+        {/if}
+      </div>
+    <!-- SNIPCODE-HOOK end -->
     {:else if mode === 'inline'}
       <div class="diff-content">
         {#each renderHunks as hunk, hunkIdx}
@@ -593,7 +674,9 @@
                             aria-label={staged ? t('file.unstageLines') : t('file.stageLines')}
                             title={staged ? t('file.unstageLines') : t('file.stageLines')}>
                       <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                      <span>{selectedChangedIndices.length}</span>
+                      <!-- SNIPCODE-HOOK start: ui/diff D10 label the line-stage button (was a bare number) -->
+                      <span>{staged ? t('file.unstageLines') : t('file.stageLines')} ({selectedChangedIndices.length})</span>
+                      <!-- SNIPCODE-HOOK end -->
                     </button>
                   {/if}
                   <button class="hunk-action-btn hunk-stage-btn" onclick={() => stageHunk(hunkIdx)}
@@ -621,6 +704,8 @@
                 </span>
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <span class="line-content" onmousedown={(e) => { if (e.button === 0) lineSel = null; }}>{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                {@render crMarker(line)}
+                {@render noNewlinePill(line)}
               </div>
             {/each}
           </div>
@@ -660,6 +745,8 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
+                      {@render crMarker(line)}
+                      {@render noNewlinePill(line)}
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
                                 disabled={stageBusy}
@@ -709,6 +796,8 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
+                      {@render crMarker(line)}
+                      {@render noNewlinePill(line)}
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
@@ -883,7 +972,12 @@
   /* SNIPCODE-HOOK start (B-2c): stage/unstage buttons (green accent). */
   .hunk-stage-btn {
     color: var(--vscode-charts-green, #48bf91);
-    opacity: 0;
+    /* SNIPCODE-HOOK start: ui/diff D10 discoverable by default (was opacity:0,
+       hover-only — the SBS equivalent, .sbs-block-stage-btn, is already .55
+       by default; this matches it instead of hiding the only whole-hunk
+       stage affordance in inline mode until the user happens to hover). */
+    opacity: 0.55;
+    /* SNIPCODE-HOOK end */
   }
   .diff-hunk.reversible:hover .hunk-stage-btn,
   .hunk-stage-btn:focus {
@@ -980,7 +1074,9 @@
   .diff-line {
     display: flex;
     min-height: 20px;
-    line-height: 20px;
+    /* SNIPCODE-HOOK start: ui/diff D P2 line-height scales with editor font size */
+    line-height: 1.5;
+    /* SNIPCODE-HOOK end */
   }
 
   .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)); }
@@ -994,13 +1090,54 @@
     flex-shrink: 0;
     user-select: none;
     cursor: pointer;
+    /* SNIPCODE-HOOK start: ui/diff D9 sticky gutter */
+    /* Pinned to the left edge so line numbers/+-/ stay reachable when a long
+       line is scrolled horizontally. Needs an OPAQUE background (below) or
+       the content scrolling underneath would show through it. */
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-primary);
+    /* SNIPCODE-HOOK end */
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
+  /* The row's own (non-sticky) background can stay a translucent tint — see
+     .diff-add/.diff-delete above — because nothing scrolls underneath a
+     static element. The GUTTER is sticky, so the same translucent tint there
+     would let horizontally-scrolled content bleed through it. Layer the tint
+     as an opaque background-image over a solid background-color instead:
+     compositing a translucent gradient onto an opaque color under it always
+     yields an opaque result, so it reads identically to the plain tint. */
+  .diff-add .line-gutter {
+    background:
+      linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
+      var(--bg-primary);
+  }
+  .diff-delete .line-gutter {
+    background:
+      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
+      var(--bg-primary);
+  }
+  /* SNIPCODE-HOOK end */
 
   /* Selected lines get a clear accent that reads over the add/delete tints. */
   .diff-line.line-selected {
     background: var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25));
+  }
+  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
+  /* Both the tint (opaque, same reasoning as .diff-add/.diff-delete above)
+     and the focus accent move to the gutter: the accent is an INSET box-shadow
+     anchored at the left edge, which the opaque sticky gutter would otherwise
+     paint over and hide. Declared after .diff-add/.diff-delete's gutter rules
+     so a selected changed line shows the selection tint, not the change tint. */
+  .line-selected .line-gutter {
+    background:
+      linear-gradient(var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25)), var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25))),
+      var(--bg-primary);
     box-shadow: inset 3px 0 0 var(--vscode-focusBorder, #4a9eff);
   }
+  /* SNIPCODE-HOOK end */
 
   .line-num {
     width: 45px;
@@ -1020,23 +1157,66 @@
     user-select: none;
   }
 
-  .diff-add .line-prefix { color: #4caf50; }
-  .diff-delete .line-prefix { color: #f44336; }
-
-  :global(body.vscode-light) .diff-add .line-prefix { color: #2e7d32; }
-  :global(body.vscode-light) .diff-delete .line-prefix { color: #b71c1c; }
+  /* SNIPCODE-HOOK start: ui/diff D P2 use the theme's own decoration colors */
+  /* These already flip appropriately per light/dark/high-contrast theme on
+     their own, so the separate vscode-light override rule that used to exist
+     here is no longer needed — VS Code supplies the right value either way. */
+  .diff-add .line-prefix { color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50); }
+  .diff-delete .line-prefix { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  /* SNIPCODE-HOOK end */
 
   .line-content {
     white-space: pre;
+    /* SNIPCODE-HOOK start: ui/diff D8 tab-size */
+    /* Browser default is 8; the editor default is 4 — a tab-indented line
+       looks twice as wide here as in the file it came from. */
+    tab-size: 4;
+    -moz-tab-size: 4;
+    /* SNIPCODE-HOOK end */
     padding-left: 4px;
     padding-right: 24px;
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  .no-newline-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 0 5px;
+    font-size: 0.8em;
+    font-family: var(--vscode-font-family, sans-serif);
+    white-space: nowrap;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    opacity: 0.85;
+    user-select: none;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  .cr-marker {
+    margin-left: 2px;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    opacity: 0.75;
+    user-select: none;
+    font-weight: bold;
+  }
+  /* SNIPCODE-HOOK end */
 
   .diff-empty {
     padding: 20px;
     text-align: center;
     color: var(--text-secondary);
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode-only empty-hunks explanation */
+  .diff-empty-meta div {
+    margin: 2px 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+  }
+  /* SNIPCODE-HOOK end */
 
   .diff-truncated-banner {
     display: flex;

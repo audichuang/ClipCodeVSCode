@@ -129,6 +129,23 @@ export interface DiffData {
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   fingerprint?: string;
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+  /** Present when the diff's `diff --git` header carries `rename from`/`rename
+   *  to` — i.e. git paired this file with a prior path (requires `-M` on the
+   *  invoking command AND enough content similarity; see git-parser.ts). */
+  oldPath?: string;
+  /** `similarity index NN%` from the header, alongside `oldPath`. */
+  similarity?: number;
+  /** `old mode`/`new mode` — an in-place file-mode change (chmod), independent
+   *  of rename. Present together with oldPath for a renamed-and-rechmodded file. */
+  oldMode?: string;
+  newMode?: string;
+  /** `new file mode` / `deleted file mode` — lets the UI show "New file" /
+   *  "Deleted file" for a rename-less empty-hunk diff, and lets a status
+   *  letter be derived without a tree-supplied status (see FileDiffView). */
+  newFile?: boolean;
+  deletedFile?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface DiffHunk {
@@ -145,6 +162,16 @@ export interface DiffLine {
   content: string;
   oldLineNumber?: number;
   newLineNumber?: number;
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  /** Set when this line is immediately followed by git's `\ No newline at end
+   *  of file` marker — i.e. this line has no trailing newline in that blob. */
+  noNewline?: boolean;
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  /** Set when this line's raw diff text ended in `\r` (CRLF line ending);
+   *  `content` has that `\r` already stripped for display. */
+  cr?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface BranchData {
