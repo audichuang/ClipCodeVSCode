@@ -732,4 +732,7 @@ export const en: Record<string, string> = {
   'details.expandAll': 'Expand All',
   'details.collapseAll': 'Collapse All',
   'details.workingTree': 'Working tree',
+  'flow.loading': 'Loading...',
+  'details.noStagedChanges': 'No staged changes',
+  'details.noUnstagedChanges': 'No unstaged changes',
 };

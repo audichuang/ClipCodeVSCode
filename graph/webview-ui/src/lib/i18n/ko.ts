@@ -730,4 +730,7 @@ export const ko: Record<string, string> = {
   'details.expandAll': '모두 펼치기',
   'details.collapseAll': '모두 접기',
   'details.workingTree': '작업 트리',
+  'flow.loading': '로딩 중...',
+  'details.noStagedChanges': '스테이징된 변경 사항 없음',
+  'details.noUnstagedChanges': '스테이징되지 않은 변경 사항 없음',
 };

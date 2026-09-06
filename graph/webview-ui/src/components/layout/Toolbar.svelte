@@ -127,12 +127,15 @@
 <div class="toolbar">
   <div class="toolbar-left">
     <div class="repo-pill-wrapper">
+      <!-- SNIPCODE-HOOK start: M P2 — tooltip shows the path, not just the (already
+           visible) name, so a nested/submodule repo can be told apart at a glance -->
       <button
         class="repo-pill"
         class:clickable={uiStore.repos.length > 1}
         onclick={toggleRepoDropdown}
-        use:tooltip={activeRepoInfo?.name}
+        use:tooltip={activeRepoInfo?.path ?? activeRepoInfo?.name}
       >
+      <!-- SNIPCODE-HOOK end -->
         <i class="codicon {
           activeRepoInfo?.type === 'submodule' ? 'codicon-archive' : 
           activeRepoInfo?.type === 'nested' ? 'codicon-folder-library' : 
@@ -301,7 +304,9 @@
         <div class="flow-dropdown-backdrop" onclick={() => { showFlowDropdown = false; }}></div>
         <div class="flow-dropdown">
           {#if !flowStatus}
-            <div class="flow-dropdown-item disabled">Loading...</div>
+            <!-- SNIPCODE-HOOK start: M P2 — hardcoded English → i18n -->
+            <div class="flow-dropdown-item disabled">{t('flow.loading')}</div>
+            <!-- SNIPCODE-HOOK end -->
           {:else if !flowStatus.installed}
             <div class="flow-dropdown-item disabled">{t('flow.notInstalled')}</div>
           {:else if !flowStatus.initialized}
@@ -405,16 +410,19 @@
 {/if}
 
 <style>
+  /* SNIPCODE-HOOK start: M P2 — 44/36/22 was noticeably thicker than a VS Code
+     panel header (35px/16px icon); 36/28/16 matches it. */
   .toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 44px;
+    height: 36px;
     padding: 0 14px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
   }
+  /* SNIPCODE-HOOK end */
 
   .toolbar-left {
     display: flex;
@@ -620,6 +628,7 @@
     gap: 3px;
   }
 
+  /* SNIPCODE-HOOK start: M P2 — icon 22px → 16px, button 36px → 28px (see .toolbar above) */
   .toolbar-btn {
     position: relative;
     display: flex;
@@ -627,13 +636,14 @@
     justify-content: center;
     gap: 4px;
     padding: 0;
-    font-size: 22px;
+    font-size: 16px;
     border-radius: 5px;
     background: transparent;
     color: var(--text-secondary);
-    min-width: 36px;
-    height: 36px;
+    min-width: 28px;
+    height: 28px;
   }
+  /* SNIPCODE-HOOK end */
 
   .toolbar-btn:hover {
     background: var(--bg-hover);
@@ -669,10 +679,12 @@
     color: var(--vscode-button-foreground, #fff);
   }
 
+  /* SNIPCODE-HOOK start: M P2 — scaled down proportionally with the toolbar-btn icon shrink */
   .unpublished-icon {
     color: var(--vscode-button-background, #0e639c);
-    font-size: 18px;
+    font-size: 13px;
   }
+  /* SNIPCODE-HOOK end */
 
   .separator {
     width: 1px;
