@@ -431,7 +431,7 @@ describe('CommitDetails — file tree & diff', () => {
     const msg = globalThis.__postedMessages.find(
       (m) => (m.data as { type?: string }).type === 'getFileDiff'
     );
-    expect(msg?.data.payload).toMatchObject({ hash: 'h1', file: 'new.ts', oldPath: 'old.ts' });
+    expect((msg!.data as { payload: unknown }).payload).toMatchObject({ hash: 'h1', file: 'new.ts', oldPath: 'old.ts' });
   });
   /* SNIPCODE-HOOK end */
 
