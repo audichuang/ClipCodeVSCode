@@ -35,7 +35,9 @@ vi.mock('vscode', () => ({
     showQuickPick: vi.fn(async () => undefined),
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     activeTextEditor: undefined,
-    registerWebviewViewProvider: () => ({ dispose() {} }),
+    registerWebviewViewProvider: vi.fn(() => ({ dispose() {} })),
+    registerFileDecorationProvider: vi.fn(() => ({ dispose() {} })),
+    withProgress: vi.fn(async (_options: unknown, task: (progress: { report(): void }) => unknown) => task({ report() {} })),
   },
   commands: {
     registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => { H.registeredCommands.push(id); H.commandHandlers[id] = cb; return { dispose() {} }; },
@@ -80,6 +82,7 @@ void viewStub;
 
 import { activate, resolveConfiguredGitPath } from '../extension';
 import { existsSync } from 'fs';
+import * as vscode from 'vscode';
 
 function makeContext() {
   return { subscriptions: [] as Array<{ dispose(): void }>, extensionUri: {} } as unknown as import('vscode').ExtensionContext;
@@ -160,6 +163,30 @@ describe('activate', () => {
     expect(MainPanel.setGitServiceProvider).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  /* SNIPCODE-HOOK start: R6 commit box retains context when the view is hidden */
+  it('registers the commit box webview with retainContextWhenHidden (R6)', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+
+    expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledWith(
+      'snipcode.commitBox',
+      expect.anything(),
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+  it('registers its own FileDecorationProvider for the Changes tree (S5)', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+
+    expect(vscode.window.registerFileDecorationProvider).toHaveBeenCalledWith(expect.anything());
+  });
+  /* SNIPCODE-HOOK end */
+
   it('addWorktree defaults beside the main worktree even when active repo is linked worktree', async () => {
     H.workspaceFolders = [{ uri: { fsPath: '/repos/project.worktrees/custom.worktrees' } }];
     H.worktreeList = [
@@ -177,4 +204,39 @@ describe('activate', () => {
       defaultPath: '/repos/project.worktrees',
     });
   });
+
+  /* SNIPCODE-HOOK start: S16 branch/tag QuickPick filtering */
+  it('showBranchMenu hides Checkout/Delete for the current branch', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showBranchMenu']({ branch: { name: 'main', current: true } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).not.toContain('checkout');
+    expect(items.map((i) => i.id)).not.toContain('delete');
+    expect(items.map((i) => i.id)).toContain('rename'); // still allowed on the current branch
+  });
+
+  it('showBranchMenu keeps Checkout/Delete for a non-current branch', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showBranchMenu']({ branch: { name: 'feature/x', current: false } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).toContain('checkout');
+    expect(items.map((i) => i.id)).toContain('delete');
+  });
+
+  it('showTagMenu offers a Checkout option', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    activate(makeContext());
+
+    H.commandHandlers['gitGraphPlus.showTagMenu']({ tag: { name: 'v1.0.0' } });
+
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as unknown as Array<{ id: string }>;
+    expect(items.map((i) => i.id)).toContain('checkout');
+  });
+  /* SNIPCODE-HOOK end */
 });

@@ -737,7 +737,84 @@ describe('GitService', () => {
         { path: 'src/bar.ts', status: 'M' },
       ]);
     });
+
+    /* SNIPCODE-HOOK start: R3/S3 conflict classification */
+    it('routes every unmerged pair to a third `conflict` array, not staged/unstaged (R3/S3)', async () => {
+      mockExec(service, async () =>
+        'UU both-modified.ts\nAA both-added.ts\nDD both-deleted.ts\nAU added-by-us.ts\nUD deleted-by-them.ts\nUA added-by-them.ts\nDU deleted-by-us.ts\nM  clean-staged.ts\n');
+
+      const result = await service.getUncommittedDiff();
+      expect(result.conflict.map(e => e.path)).toEqual([
+        'both-modified.ts', 'both-added.ts', 'both-deleted.ts',
+        'added-by-us.ts', 'deleted-by-them.ts', 'added-by-them.ts', 'deleted-by-us.ts',
+      ]);
+      // A distinct status letter so it never collides with untracked 'U'.
+      expect(result.conflict.every(e => e.status === '!')).toBe(true);
+      expect(result.staged).toEqual([{ path: 'clean-staged.ts', status: 'M' }]);
+      expect(result.unstaged).toEqual([]);
+    });
+    /* SNIPCODE-HOOK end */
   });
+
+  /* SNIPCODE-HOOK start: S4 discardPaths */
+  describe('discardPaths', () => {
+    it('restores tracked paths from HEAD (worktree only) and cleans untracked paths separately', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([
+        { path: 'a.ts', status: 'M' },
+        { path: 'new.ts', status: 'U' },
+      ]);
+
+      expect(calls).toEqual([
+        ['restore', '--worktree', '--source=HEAD', '--', 'a.ts'],
+        ['clean', '-f', '--', 'new.ts'],
+      ]);
+    });
+
+    it('discards both the old and new path of a staged-then-modified rename', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([{ path: 'renamed.ts', status: 'R', oldPath: 'old.ts' }]);
+
+      expect(calls).toEqual([['restore', '--worktree', '--source=HEAD', '--', 'renamed.ts', 'old.ts']]);
+    });
+
+    it('never touches a nested repo directory (status N)', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([{ path: 'vendor-lib', status: 'N' }]);
+
+      expect(calls).toEqual([]);
+    });
+
+    it('is a no-op on an empty list', async () => {
+      const calls: string[][] = [];
+      mockExec(service, async (args) => { calls.push(args); return ''; });
+
+      await service.discardPaths([]);
+
+      expect(calls).toEqual([]);
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  describe('headCommitMessage', () => {
+    it('reads the full HEAD message via git log -1 --format=%B', async () => {
+      let calledWith: string[] = [];
+      mockExec(service, async (args) => { calledWith = args; return 'subject\n\nbody line\n'; });
+
+      const message = await service.headCommitMessage();
+
+      expect(calledWith).toEqual(['log', '-1', '--format=%B']);
+      expect(message).toBe('subject\n\nbody line\n');
+    });
+  });
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */
   describe('selective staging raw diff failures', () => {

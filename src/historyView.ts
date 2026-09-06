@@ -33,7 +33,7 @@ export function registerHistoryView(context: vscode.ExtensionContext): void {
   const useRepo = (repo: HistoryRepo | undefined) => {
     provider.setRepo(repo);
     if (repo) void context.workspaceState.update(LAST_REPO_KEY, repo.rootUri.toString());
-    treeView.title = repo ? `Snipcode History — ${basename(repo.rootUri.fsPath)}` : 'Snipcode History';
+    treeView.description = repo ? basename(repo.rootUri.fsPath) : undefined;
   };
 
   const repickIfNeeded = () => { if (!provider.repo || !currentRepoStillOpen()) useRepo(pickInitialRepo()); };

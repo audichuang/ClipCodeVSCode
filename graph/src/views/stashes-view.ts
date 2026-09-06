@@ -47,10 +47,12 @@ export class StashesViewProvider implements vscode.TreeDataProvider<StashItem> {
 
 class StashItem extends vscode.TreeItem {
   constructor(public readonly stash: StashEntry) {
-    super(`stash@{${stash.index}}`, vscode.TreeItemCollapsibleState.None);
+    /* SNIPCODE-HOOK start: S P2 the message is the primary label, stash@{n} is secondary */
+    super(stash.message || `stash@{${stash.index}}`, vscode.TreeItemCollapsibleState.None);
     this.contextValue = 'stash';
     this.iconPath = new vscode.ThemeIcon('archive');
-    this.description = stash.message || '';
+    this.description = `stash@{${stash.index}}`;
+    /* SNIPCODE-HOOK end */
     this.tooltip = `${stash.message}\n${stash.date}`;
 
     this.command = {
