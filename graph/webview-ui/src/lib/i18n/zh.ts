@@ -719,4 +719,8 @@ export const zh: Record<string, string> = {
 
   // ui/main
   'common.closeEsc': '关闭（Esc）',
+  'toolbar.historyDesc': 'Graph（Ctrl+1）',
+  'toolbar.logDesc': 'Reflog（Ctrl+2）',
+  'toolbar.statsDesc': '统计（Ctrl+3）',
+  'toolbar.prDesc': 'PR（Ctrl+4）',
 };

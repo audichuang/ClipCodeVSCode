@@ -277,6 +277,14 @@ describe('App — keyboard shortcuts', () => {
     expect(uiStore.viewMode).toBe('stats');
   });
 
+  /* SNIPCODE-HOOK start: M4 — Ctrl+4 switches to the PR tab */
+  it('Ctrl+4 switches to PR view', async () => {
+    render(App);
+    await fireEvent.keyDown(window, { key: '4', ctrlKey: true });
+    expect(uiStore.viewMode).toBe('pr');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('Ctrl+R re-requests log and branches', async () => {
     render(App);
     globalThis.__postedMessages = [];

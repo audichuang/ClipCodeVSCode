@@ -719,4 +719,8 @@ export const ko: Record<string, string> = {
 
   // ui/main
   'common.closeEsc': '닫기 (Esc)',
+  'toolbar.historyDesc': 'Graph (Ctrl+1)',
+  'toolbar.logDesc': 'Reflog (Ctrl+2)',
+  'toolbar.statsDesc': '통계 (Ctrl+3)',
+  'toolbar.prDesc': 'PR (Ctrl+4)',
 };
