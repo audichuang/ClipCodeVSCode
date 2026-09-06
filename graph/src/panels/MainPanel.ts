@@ -2320,7 +2320,17 @@ export class MainPanel {
     const conflictFiles = await this.gitService.getConflictFiles();
     const opState = await this.gitService.getOperationState();
 
-    if (conflictFiles.length > 0 && opState.type) {
+    /* SNIPCODE-HOOK start: live-QA-8 keep posting while the operation is still
+       in progress, even when NOTHING is unmerged any more. Resolving the last
+       conflicted file outside the panel (edit + `git add` in a terminal) empties
+       conflictFiles, and the old `conflictFiles.length > 0` guard then matched
+       no branch at all: the banner kept its last state, so with a single
+       conflicted file it sat at 0/1 for ever and its Continue button — disabled
+       while any file is unresolved — could never be pressed. The user had to
+       click the panel's own mark-resolved on an already-resolved file to get
+       unstuck. `allConflictFiles` is the set the banner is showing, so posting
+       whenever it is non-empty is what keeps the two in step. */
+    if (opState.type && (conflictFiles.length > 0 || this.allConflictFiles.length > 0)) {
       // New or updated conflict (merge/rebase started externally or in-progress)
       if (this.allConflictFiles.length === 0) {
         this.allConflictFiles = conflictFiles;
@@ -2333,6 +2343,7 @@ export class MainPanel {
           files: this.allConflictFiles.map(f => ({ path: f, resolved: !conflictSet.has(f) })),
         },
       });
+    /* SNIPCODE-HOOK end */
     } else if (conflictFiles.length === 0 && opState.type === 'rebase') {
       // Same worktree concern as the marker check above — rebase-merge state
       // lives in the per-worktree gitdir.

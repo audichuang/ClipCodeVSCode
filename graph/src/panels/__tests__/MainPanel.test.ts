@@ -28,6 +28,10 @@ const H = vi.hoisted(() => {
     pull: vi.fn(async () => {}),
     clean: vi.fn(async () => {}),
     reset: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK start: live-QA-8 onRepoChanged (the watcher path) drops the
+       read cache before probing, so the mock needs this to be callable. */
+    clearReadCache: vi.fn(),
+    /* SNIPCODE-HOOK end */
     setWarningHandler: vi.fn(),
     setAuthRetryHandler: vi.fn(),
     setExtraEnv: vi.fn(),
@@ -254,6 +258,46 @@ describe('MainPanel error handling', () => {
     expect(data.payload!.operation).toBe('merge');
     expect((data.payload!.files as unknown[]).length).toBe(1);
   });
+
+  /* SNIPCODE-HOOK start: live-QA-8 resolving the LAST conflicted file outside the
+     panel (edit + `git add` in a terminal) used to leave the banner frozen at
+     its previous count, and its Continue button is disabled while any file
+     reads unresolved — so the merge could not be finished from the panel. */
+  it('marks a file resolved when it is resolved outside the panel, while the merge is still in progress', async () => {
+    H.git.merge.mockRejectedValue(new GitError('CONFLICT', 1, ['merge']));
+    H.git.getConflictFiles.mockResolvedValue(['README.md']);
+    H.git.getOperationState.mockResolvedValue({ type: 'merge' });
+    await dispatch({ type: 'merge', payload: { branch: 'x' } });
+    expect(postedOfType('conflictData').at(-1)!.payload!.files)
+      .toEqual([{ path: 'README.md', resolved: false }]);
+
+    // Terminal: fix the markers, `git add`. Nothing is unmerged any more, but
+    // MERGE_HEAD is still there — the merge is not committed yet.
+    H.git.getConflictFiles.mockResolvedValue([]);
+    const panel = MainPanel.currentPanel as unknown as { onRepoChanged(what: string): Promise<void> };
+    await panel.onRepoChanged('status');
+
+    expect(postedOfType('conflictData').at(-1)!.payload!.files)
+      .toEqual([{ path: 'README.md', resolved: true }]);
+    // Still a conflict banner, not a "merge finished" dismissal.
+    expect(postedOfType('operationComplete').at(-1)?.payload?.operation).not.toBe('merge');
+  });
+
+  it('dismisses the banner once the operation itself is gone', async () => {
+    H.git.merge.mockRejectedValue(new GitError('CONFLICT', 1, ['merge']));
+    H.git.getConflictFiles.mockResolvedValue(['README.md']);
+    H.git.getOperationState.mockResolvedValue({ type: 'merge' });
+    await dispatch({ type: 'merge', payload: { branch: 'x' } });
+
+    // Terminal: `git commit` finished the merge — no MERGE_HEAD left.
+    H.git.getConflictFiles.mockResolvedValue([]);
+    H.git.getOperationState.mockResolvedValue({ type: null });
+    const panel = MainPanel.currentPanel as unknown as { onRepoChanged(what: string): Promise<void> };
+    await panel.onRepoChanged('status');
+
+    expect(postedOfType('operationComplete').at(-1)!.payload!.operation).toBe('merge');
+  });
+  /* SNIPCODE-HOOK end */
 
   it('posts an error when the post-operation refresh fails', async () => {
     H.git.log.mockRejectedValue(new GitError('fatal: refresh blew up', 1, ['log']));
