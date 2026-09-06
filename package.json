@@ -238,6 +238,19 @@
         "icon": "$(clippy)"
       },
       {
+        "command": "snipcode.git.copyBranchSeries",
+        "title": "Snipcode Git: Copy Branch Commits",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "snipcode.git.copyBranchSeriesFull",
+        "title": "Snipcode Git: Copy Branch Commits (Entire History)"
+      },
+      {
+        "command": "snipcode.git.pasteBranchSeries",
+        "title": "Snipcode Git: Paste Branch Commits"
+      },
+      {
         "command": "snipcode.git.stageAll",
         "title": "Snipcode Git: Stage All",
         "icon": "$(add)"
@@ -554,6 +567,11 @@
           "command": "gitGraphPlus.renameBranch",
           "when": "view == gitGraphPlus.branches && viewItem == branch",
           "group": "1_branch@3"
+        },
+        {
+          "command": "snipcode.git.copyBranchSeries",
+          "when": "view == gitGraphPlus.branches && viewItem =~ /^branch(-current)?$/",
+          "group": "1_branch@4"
         },
         {
           "command": "gitGraphPlus.deleteBranch",

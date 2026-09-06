@@ -627,12 +627,152 @@ export function activate(context: vscode.ExtensionContext) {
         });
       }
     }),
+    /* SNIPCODE-HOOK start: whole-branch copy/restore via git format-patch / am */
+    ...(() => {
+      /** Copy a branch as an mbox. There is deliberately no "last N commits"
+       *  option: `branch~N` walks first parents only, so on a history with
+       *  merges the count is wildly misleading — on this very repo `main~5..main`
+       *  spans 119 commits, not 5. The only bases a user can reason about are
+       *  the fork point and the root, so those are the only two on offer, and
+       *  the fork point needs no asking. */
+      const copySeries = async (branchItem: unknown, fullHistory: boolean) => {
+        const item = branchItem as { branch?: { name?: string } } | undefined;
+        const branch = item?.branch?.name ?? branchesProvider.getCurrentItem()?.branch.name;
+        if (!branch) return;
+        try {
+          let base: string | null = null;
+          if (!fullHistory) {
+            const locals = (await activeGitService.branches())
+              .filter(b => !b.remote && !b.detached).map(b => b.name).filter(n => n !== branch);
+            const onto = ['main', 'master', 'develop', 'dev', 'trunk'].find(p => locals.includes(p))
+              ?? (await vscode.window.showQuickPick(locals, { placeHolder: `Copy ${branch}: commits since which branch?` }));
+            if (!onto) return;
+            base = await activeGitService.mergeBase(onto, branch);
+            if (!base) {
+              vscode.window.showErrorMessage(`${branch} and ${onto} share no history — use "Copy Branch Commits (Entire History)".`);
+              return;
+            }
+          }
+
+          const { mbox, count } = await activeGitService.exportBranchSeries(branch, base);
+          if (count === 0) {
+            // Almost always means the branch is already merged. Offer the one
+            // thing that still has something to copy rather than a dead end.
+            const go = await vscode.window.showInformationMessage(
+              `${branch} has no commits of its own — it is already merged into the main branch.`,
+              'Copy Entire History'
+            );
+            if (go === 'Copy Entire History') await copySeries(branchItem, true);
+            return;
+          }
+
+          // The clipboard is the transport here, and a multi-year history can
+          // run to tens of MB — warn before pushing something the OS may choke
+          // on. (This repo's 214 commits come to ~16 MB.)
+          const megabytes = Buffer.byteLength(mbox, 'utf8') / (1024 * 1024);
+          if (megabytes > 8) {
+            const go = await vscode.window.showWarningMessage(
+              `This is ${megabytes.toFixed(1)} MB of patch text (${count} commits). Clipboards this large are slow and some editors truncate them.`,
+              { modal: true, detail: 'For a history this size, sharing the repo itself (a remote, or git bundle) is usually the better move.' },
+              'Copy Anyway'
+            );
+            if (go !== 'Copy Anyway') return;
+          }
+
+          await vscode.env.clipboard.writeText(mbox);
+          vscode.window.showInformationMessage(
+            base
+              ? `Copied ${count} commit${count === 1 ? '' : 's'} from ${branch}. Restoring needs commit ${base.slice(0, 8)} on the other side.`
+              : `Copied ${count} commit${count === 1 ? '' : 's'} from ${branch} — self-contained, restores into any repo.`
+          );
+        } catch (err) {
+          vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+        }
+      };
+      return [
+        vscode.commands.registerCommand('snipcode.git.copyBranchSeries', (i) => copySeries(i, false)),
+        vscode.commands.registerCommand('snipcode.git.copyBranchSeriesFull', (i) => copySeries(i, true)),
+      ];
+    })(),
+    vscode.commands.registerCommand('snipcode.git.pasteBranchSeries', async () => {
+      try {
+        const mbox = await vscode.env.clipboard.readText();
+        if (!/^From [0-9a-f]{7,64} /m.test(mbox)) {
+          vscode.window.showErrorMessage('The clipboard does not hold a branch copied by Snipcode.');
+          return;
+        }
+        if (!await activeGitService.isWorkingTreeClean()) {
+          vscode.window.showErrorMessage('Commit or stash your local changes first — restoring a branch needs a clean working tree.');
+          return;
+        }
+
+        const name = await vscode.window.showInputBox({
+          prompt: 'Name for the restored branch',
+          placeHolder: 'e.g. restored/feature-x',
+          validateInput: v => !v.trim() ? 'Branch name is required'
+            : /[\s~^:?*[\\]|^-|\.\.|@\{/.test(v) ? 'Not a valid branch name' : undefined,
+        });
+        if (!name) return;
+
+        // format-patch wrote the start point into the payload. Its presence is
+        // also what tells the two kinds of copy apart: a trailer means a partial
+        // series that needs that commit locally, no trailer means the history
+        // runs back to the root and stands on its own.
+        const base = mbox.match(/^base-commit: ([0-9a-f]{7,64})$/m)?.[1];
+        const branchName = name.trim();
+
+        if (!base) {
+          const go = await vscode.window.showWarningMessage(
+            'This copy carries a full history, so it restores onto an empty branch. Tracked files will be cleared from the working tree — they stay on the branch you are leaving.',
+            { modal: true }, 'Restore'
+          );
+          if (go !== 'Restore') return;
+          await activeGitService.createOrphanBranch(branchName);
+        } else if (await activeGitService.hasCommit(base)) {
+          await activeGitService.createAndCheckoutBranch(branchName, base);
+        } else {
+          // Without the base commit, git cannot rebuild the ancestor blobs, so
+          // every commit that edits a pre-existing file fails. Say so up front
+          // rather than letting it die on "could not build fake ancestor".
+          const go = await vscode.window.showWarningMessage(
+            `This copy starts from commit ${base.slice(0, 8)}, which is not in this repository.`,
+            {
+              modal: true,
+              detail: 'Commits that edit files already present will fail to apply. Fetch that commit first, or re-copy on the source side with "Entire history" to get a self-contained payload.',
+            },
+            'Try on Current HEAD'
+          );
+          if (go !== 'Try on Current HEAD') return;
+          await activeGitService.createAndCheckoutBranch(branchName);
+        }
+        try {
+          await activeGitService.applyBranchSeries(mbox);
+        } catch (err) {
+          const pick = await vscode.window.showErrorMessage(
+            `Restore stopped on a conflict: ${err instanceof Error ? err.message : String(err)}`,
+            'Abort Restore', 'Keep and Resolve'
+          );
+          if (pick === 'Abort Restore') { await activeGitService.abortBranchSeries(); }
+          return;
+        } finally {
+          refreshAll();
+          MainPanel.currentPanel?.postRefresh();
+        }
+        vscode.window.showInformationMessage(`Restored the branch as ${name.trim()}.`);
+      } catch (err) {
+        vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    }),
+    /* SNIPCODE-HOOK end */
     vscode.commands.registerCommand('gitGraphPlus.showBranchMenu', (branchItem) => {
       const branch = branchItem?.branch;
       if (branch) {
         vscode.window.showQuickPick([
           { label: `Checkout ${branch.name}`, id: 'checkout' },
           { label: `Merge into current branch...`, id: 'merge' },
+          /* SNIPCODE-HOOK start: whole-branch copy */
+          { label: `Copy all commits on ${branch.name}`, id: 'copySeries' },
+          /* SNIPCODE-HOOK end */
           { label: `Rename ${branch.name}...`, id: 'rename' },
           { label: `Delete ${branch.name}...`, id: 'delete' },
         ]).then(selected => {
@@ -640,6 +780,9 @@ export function activate(context: vscode.ExtensionContext) {
           switch (selected.id) {
             case 'checkout': vscode.commands.executeCommand('gitGraphPlus.checkoutBranch', branchItem); break;
             case 'merge': vscode.commands.executeCommand('gitGraphPlus.mergeBranch', branchItem); break;
+            /* SNIPCODE-HOOK start: whole-branch copy */
+            case 'copySeries': vscode.commands.executeCommand('snipcode.git.copyBranchSeries', branchItem); break;
+            /* SNIPCODE-HOOK end */
             case 'rename': vscode.commands.executeCommand('gitGraphPlus.renameBranch', branchItem); break;
             case 'delete': vscode.commands.executeCommand('gitGraphPlus.deleteBranch', branchItem); break;
           }

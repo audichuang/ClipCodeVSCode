@@ -1128,6 +1128,90 @@ export class GitService {
     await this.exec(['branch', '-m', oldName, newName]);
   }
 
+  /* SNIPCODE-HOOK start: whole-branch copy/restore via git format-patch / am */
+  /** Serialize commits on `branch` as an mbox stream — git's own transport
+   *  format, so nothing custom has to be parsed on the way back: `git am`
+   *  replays the series with the original message, author and author-date
+   *  intact, only the hashes are new.
+   *
+   *  `base` is the trade-off dial. With a base the payload holds only the
+   *  commits after it and carries a `base-commit:` trailer, so it is small but
+   *  restorable ONLY where that commit exists — without it `am --3way` dies on
+   *  "could not build fake ancestor" for any commit that edits a pre-existing
+   *  file. Pass null to export from the root commit instead: self-contained
+   *  and restorable into a repo that shares no history, at full-history size. */
+  async exportBranchSeries(branch: string, base: string | null): Promise<{ mbox: string; base: string | null; count: number }> {
+    this.assertSafeRef(branch, 'format-patch');
+    if (base) this.assertSafeRef(base, 'format-patch');
+    const range = base ? `${base}..${branch}` : branch;
+    const count = Number((await this.exec(['rev-list', '--count', range])).trim());
+    if (count === 0) return { mbox: '', base, count: 0 };
+    const args = base
+      ? ['format-patch', '--stdout', `--base=${base}`, range]
+      : ['format-patch', '--stdout', '--root', branch];
+    const mbox = await this.exec(args);
+    return { mbox, base, count };
+  }
+
+  /** Best common ancestor of two refs, or null when the histories are unrelated. */
+  async mergeBase(a: string, b: string): Promise<string | null> {
+    this.assertSafeRef(a, 'merge-base');
+    this.assertSafeRef(b, 'merge-base');
+    try {
+      return (await this.exec(['merge-base', a, b], { silent: true })).trim() || null;
+    } catch {
+      return null; // unrelated histories exit non-zero
+    }
+  }
+
+  /** Start an empty branch with no parent and nothing checked out — the landing
+   *  pad for a self-contained series in a repo that shares no history with the
+   *  source. Callers must confirm the working tree is clean first: this drops
+   *  every tracked file from the index and the working tree (they stay
+   *  reachable on the branch that was checked out). */
+  async createOrphanBranch(name: string): Promise<void> {
+    this.assertSafeRef(name, 'checkout --orphan');
+    await this.exec(['checkout', '--orphan', name]);
+    try {
+      await this.exec(['rm', '-rf', '--quiet', '.']);
+    } catch {
+      // Nothing tracked yet (fresh repo with no commits) — already empty.
+    }
+  }
+
+  /** Replay an mbox produced by exportBranchSeries onto the current HEAD.
+   *  On conflict git leaves an in-progress am session behind — the caller is
+   *  responsible for surfacing abortBranchSeries(). */
+  async applyBranchSeries(mbox: string): Promise<void> {
+    await this.exec(['am', '--3way'], { stdin: mbox });
+  }
+
+  /** Discard a half-applied series left behind by applyBranchSeries. */
+  async abortBranchSeries(): Promise<void> {
+    await this.exec(['am', '--abort']);
+  }
+
+  /** True when `ref` resolves to a commit that exists in this repo. */
+  async hasCommit(ref: string): Promise<boolean> {
+    this.assertSafeRef(ref, 'rev-parse');
+    try {
+      const out = await this.exec(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { silent: true });
+      return out.trim() !== '';
+    } catch {
+      // --quiet exits non-zero with no output when the ref is unknown
+      return false;
+    }
+  }
+
+  /** True when nothing is staged or modified. `git am` refuses to start
+   *  otherwise, so the paste side checks up front to give a clearer message
+   *  than git's own "cannot rewind to a clean state". Untracked files are fine. */
+  async isWorkingTreeClean(): Promise<boolean> {
+    const out = await this.exec(['status', '--porcelain', '--untracked-files=no'], { silent: true });
+    return out.trim() === '';
+  }
+  /* SNIPCODE-HOOK end */
+
   /** Tagged result so callers can distinguish "old git doesn't accept
    *  --merge-base" (one-time capability probe, permanent fallback) from
    *  "this particular call failed with a bad ref / missing object"
