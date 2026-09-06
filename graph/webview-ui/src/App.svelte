@@ -87,7 +87,16 @@ import RewordModal from './components/modals/RewordModal.svelte';
   });
 
   onMount(() => {
-    uiStore.bottomPanelHeight = Math.round(window.innerHeight * BOTTOM_PANEL_DEFAULT_RATIO);
+    /* SNIPCODE-HOOK start: M11 — read back the persisted bottom-panel ratio (set on
+       drag end below); BOTTOM_PANEL_DEFAULT_RATIO only applies when nothing was
+       saved yet (first run, or a host that doesn't persist state). */
+    const savedState = vscode.getState() as { bottomPanelRatio?: number } | undefined;
+    const savedRatio = typeof savedState?.bottomPanelRatio === 'number' ? savedState.bottomPanelRatio : null;
+    const initialRatio = savedRatio !== null
+      ? Math.max(BOTTOM_PANEL_MIN_RATIO, Math.min(BOTTOM_PANEL_MAX_RATIO, savedRatio))
+      : BOTTOM_PANEL_DEFAULT_RATIO;
+    uiStore.bottomPanelHeight = Math.round(window.innerHeight * initialRatio);
+    /* SNIPCODE-HOOK end */
 
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
@@ -394,6 +403,13 @@ import RewordModal from './components/modals/RewordModal.svelte';
       resizeCleanup = null;
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      /* SNIPCODE-HOOK start: M11 — persist the ratio (not the raw px, which
+         wouldn't survive a resized window) so the next session reopens at the
+         same relative height. Merge into existing state rather than replacing it. */
+      const ratio = uiStore.bottomPanelHeight / window.innerHeight;
+      const prevState = (vscode.getState() as Record<string, unknown> | undefined) ?? {};
+      vscode.setState({ ...prevState, bottomPanelRatio: ratio });
+      /* SNIPCODE-HOOK end */
     }
 
     resizeCleanup = onMouseUp;
