@@ -2463,6 +2463,14 @@ export class GitService {
     return (await this.exec(['rev-parse', 'HEAD'])).trim();
   }
 
+  /* SNIPCODE-HOOK start: S13 Amend prefill — read HEAD's full message */
+  /** HEAD's full commit message (subject + body), for prefilling the Amend
+   *  textarea when the user hasn't typed one. `%B` keeps embedded newlines. */
+  async headCommitMessage(): Promise<string> {
+    return this.exec(['log', '-1', '--format=%B']);
+  }
+  /* SNIPCODE-HOOK end */
+
   async getConflictFiles(): Promise<string[]> {
     try {
       const raw = await this.exec(['diff', '--name-only', '-z', '--diff-filter=U']);

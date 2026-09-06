@@ -72,6 +72,19 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
+  /** True when Amend has exactly one target repo AND that repo's HEAD is not
+   *  ahead of its upstream (`ahead === 0` — undefined means no upstream at
+   *  all, which is not "pushed"). Amending it would rewrite already-pushed
+   *  history. */
+  getAmendTargetPushed(): boolean {
+    const staged = (this.groups.find(group => group.group === 'staged')?.repos ?? [])
+      .filter(repo => this.isCheckedForCommit(repo.repoPath));
+    if (staged.length !== 1) return false;
+    return staged[0].ahead === 0;
+  }
+  /* SNIPCODE-HOOK end */
+
   getChildren(node?: ChangeTreeNode): ChangeTreeNode[] {
     if (!node) return this.groups;
     if (node.kind === 'group') return node.repos;

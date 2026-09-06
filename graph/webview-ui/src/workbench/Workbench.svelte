@@ -1,6 +1,6 @@
 <script lang="ts">
   import { workbenchStore } from './workbench-store.svelte';
-  import { postCommit, saveDraft } from './messaging';
+  import { postCommit, saveDraft, requestAmendPrefill } from './messaging';
 
   const store = workbenchStore;
 
@@ -12,6 +12,17 @@
   $effect(() => {
     saveDraft(store.message);
   });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S13 Amend prefill — empty message fetches HEAD's
+     message instead of committing; a non-empty one amends as before. */
+  function onAmendClick(): void {
+    if (!store.message.trim()) {
+      requestAmendPrefill();
+    } else {
+      postCommit(true);
+    }
+  }
   /* SNIPCODE-HOOK end */
 </script>
 
@@ -38,12 +49,18 @@
     <button
       class="btn secondary"
       disabled={!store.canAmend}
-      onclick={() => postCommit(true)}
-      title="Amend 上一個 commit（僅單一 repo）"
+      onclick={onAmendClick}
+      title="Amend 上一個 commit（僅單一 repo；訊息空白時會先帶入舊訊息）"
     >
       Amend
     </button>
   </div>
+
+  <!-- SNIPCODE-HOOK start: S13 "already pushed" warning for Amend -->
+  {#if store.amendTargetPushed}
+    <p class="banner warning"><span class="codicon codicon-warning"></span>此 commit 已推送到遠端，Amend 會改寫已推送的歷史。</p>
+  {/if}
+  <!-- SNIPCODE-HOOK end -->
 </div>
 
 <style>
@@ -63,6 +80,7 @@
   .banner .codicon { font-size: 13px; flex: none; }
   .banner.error { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); }
   .banner.ok { background: var(--vscode-inputValidation-infoBackground, #063b49); }
+  .banner.warning { background: var(--vscode-inputValidation-warningBackground, #352a05); }
   textarea {
     width: 100%; box-sizing: border-box; padding: 6px 8px; min-height: 52px;
     font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px);

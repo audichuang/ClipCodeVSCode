@@ -19,6 +19,7 @@ describe('CommitBoxViewProvider', () => {
     const workbench = {
       tree: {
         getStagedRepoCount: () => 1,
+        getAmendTargetPushed: () => false,
         onDidChangeTreeData: () => ({ dispose() {} }),
       },
       commit: vi.fn(),
@@ -42,7 +43,68 @@ describe('CommitBoxViewProvider', () => {
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'workbenchCommitState',
-      payload: { stagedRepoCount: 1 },
+      payload: { stagedRepoCount: 1, amendTargetPushed: false },
     });
   });
+
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  it('replies to a prefill request with the workbench-resolved HEAD message', async () => {
+    const workbench = {
+      tree: {
+        getStagedRepoCount: () => 1,
+        getAmendTargetPushed: () => false,
+        onDidChangeTreeData: () => ({ dispose() {} }),
+      },
+      commit: vi.fn(),
+      amendPrefillMessage: vi.fn(async () => '之前的訊息'),
+    };
+    const postMessage = vi.fn();
+    const view = {
+      webview: {
+        options: {}, html: '', cspSource: 'vscode-webview:',
+        asWebviewUri: (uri: unknown) => uri,
+        postMessage,
+        onDidReceiveMessage: (handler: (message: unknown) => unknown) => { H.messageHandler = handler; },
+      },
+      onDidDispose: () => ({ dispose() {} }),
+    };
+    const provider = new CommitBoxViewProvider({} as never, workbench as never);
+    provider.resolveWebviewView(view as never);
+    postMessage.mockClear();
+
+    await H.messageHandler!({ type: 'workbenchRequestAmendPrefill' });
+
+    expect(workbench.amendPrefillMessage).toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'amendPrefill', payload: { message: '之前的訊息' } });
+  });
+
+  it('replies with a null message when amend does not have exactly one target', async () => {
+    const workbench = {
+      tree: {
+        getStagedRepoCount: () => 2,
+        getAmendTargetPushed: () => false,
+        onDidChangeTreeData: () => ({ dispose() {} }),
+      },
+      commit: vi.fn(),
+      amendPrefillMessage: vi.fn(async () => null),
+    };
+    const postMessage = vi.fn();
+    const view = {
+      webview: {
+        options: {}, html: '', cspSource: 'vscode-webview:',
+        asWebviewUri: (uri: unknown) => uri,
+        postMessage,
+        onDidReceiveMessage: (handler: (message: unknown) => unknown) => { H.messageHandler = handler; },
+      },
+      onDidDispose: () => ({ dispose() {} }),
+    };
+    const provider = new CommitBoxViewProvider({} as never, workbench as never);
+    provider.resolveWebviewView(view as never);
+    postMessage.mockClear();
+
+    await H.messageHandler!({ type: 'workbenchRequestAmendPrefill' });
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'amendPrefill', payload: { message: null } });
+  });
+  /* SNIPCODE-HOOK end */
 });

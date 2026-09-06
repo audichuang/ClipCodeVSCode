@@ -365,6 +365,19 @@ export class ChangesWorkbench implements vscode.Disposable {
     return results;
   }
 
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  /** HEAD's commit message for the single checked+staged repo, so the commit
+   *  box can prefill an empty Amend textarea (webview asks for this on demand
+   *  rather than the tree pushing it on every refresh). Returns null when
+   *  amend wouldn't have exactly one target (same rule as commit()). */
+  async amendPrefillMessage(): Promise<string | null> {
+    const candidates = (await this.loadStatus())
+      .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath) && r.conflict.length === 0);
+    if (candidates.length !== 1) return null;
+    return this.svcFor(candidates[0].repoPath).headCommitMessage();
+  }
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
   /** The inline go-to-file icon: open the file itself, not VS Code's own diff
    *  view (that was a silent second diff UI alongside the Snipcode Diff tab —

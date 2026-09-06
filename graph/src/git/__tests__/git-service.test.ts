@@ -802,6 +802,20 @@ describe('GitService', () => {
   });
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  describe('headCommitMessage', () => {
+    it('reads the full HEAD message via git log -1 --format=%B', async () => {
+      let calledWith: string[] = [];
+      mockExec(service, async (args) => { calledWith = args; return 'subject\n\nbody line\n'; });
+
+      const message = await service.headCommitMessage();
+
+      expect(calledWith).toEqual(['log', '-1', '--format=%B']);
+      expect(message).toBe('subject\n\nbody line\n');
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */
   describe('selective staging raw diff failures', () => {
     it('surfaces the git failure instead of reporting no unstaged changes', async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workbenchStore } from '../workbench-store.svelte';
-import { postCommit, listenForHostMessages } from '../messaging';
+import { postCommit, listenForHostMessages, requestAmendPrefill } from '../messaging';
 
 listenForHostMessages();
 
@@ -106,6 +106,46 @@ describe('draft persistence (R6)', () => {
     freshSaveDraft('草稿內容');
 
     expect(setState).toHaveBeenCalledWith({ message: '草稿內容' });
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S13 Amend prefill */
+describe('Amend prefill (S13)', () => {
+  it('requestAmendPrefill posts a request to the host', () => {
+    globalThis.__postedMessages = [];
+
+    requestAmendPrefill();
+
+    expect(globalThis.__postedMessages).toContainEqual({ data: { type: 'workbenchRequestAmendPrefill' } });
+  });
+
+  it('fills an empty message from the host reply', () => {
+    workbenchStore.message = '';
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'amendPrefill', payload: { message: '之前的 commit 訊息' } },
+    }));
+
+    expect(workbenchStore.message).toBe('之前的 commit 訊息');
+  });
+
+  it('ignores a null/empty reply (e.g. no single amend target)', () => {
+    workbenchStore.message = '';
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'amendPrefill', payload: { message: null } },
+    }));
+
+    expect(workbenchStore.message).toBe('');
+  });
+
+  it('tracks amendTargetPushed from workbenchCommitState', () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'workbenchCommitState', payload: { stagedRepoCount: 1, amendTargetPushed: true } },
+    }));
+
+    expect(workbenchStore.amendTargetPushed).toBe(true);
   });
 });
 /* SNIPCODE-HOOK end */
