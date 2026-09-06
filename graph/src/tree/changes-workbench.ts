@@ -110,7 +110,7 @@ export class ChangesWorkbench implements vscode.Disposable {
           if (strict && !uncheckedSnapshot.has(r.path)) {
             throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
-          return { staged: [], unstaged: [] };
+          return { staged: [], unstaged: [], conflict: [] };
         }),
         svc.branches().catch(() => []),
         svc.aheadBehind(), // never throws; null when no upstream
@@ -121,6 +121,9 @@ export class ChangesWorkbench implements vscode.Disposable {
         repoName: r.name, repoPath: r.path, branch,
         ahead: aheadBehind?.ahead, behind: aheadBehind?.behind,
         staged: diff.staged, unstaged: diff.unstaged,
+        /* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+        conflict: diff.conflict ?? [],
+        /* SNIPCODE-HOOK end */
       });
     }
     return out;
@@ -279,8 +282,16 @@ export class ChangesWorkbench implements vscode.Disposable {
     // strict veto and the filter below must see the same selection even if the
     // user toggles checkboxes while status reads are in flight.
     const unchecked = new Set(this.uncheckedForCommit);
-    const status = (await this.loadStatus(true, unchecked))
+    const candidates = (await this.loadStatus(true, unchecked))
       .filter(r => r.staged.length > 0 && !unchecked.has(r.repoPath));
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: R3/S3 skip repos with unresolved conflicts instead of
+       letting `git commit` fail opaquely with "unmerged files" */
+    const blocked = candidates.filter(r => r.conflict.length > 0);
+    const status = candidates.filter(r => r.conflict.length === 0);
+    if (blocked.length > 0 && this.view) {
+      this.view.message = `已略過含未解決衝突的 repo：${blocked.map(r => r.repoName).join('、')}`;
+    }
     /* SNIPCODE-HOOK end */
     if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
@@ -426,6 +437,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     };
     reg('snipcode.git.stage', (n, ns) => this.stage(sameGroup(n, ns)));
     reg('snipcode.git.unstage', (n, ns) => this.unstage(sameGroup(n, ns)));
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: R3/S3 mark a conflicted file resolved (= git add) */
+    reg('snipcode.git.markResolved', (n, ns) => this.stage(sameGroup(n, ns)));
     /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));

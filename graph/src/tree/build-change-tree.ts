@@ -5,7 +5,9 @@
 // No `vscode` import so it stays unit-testable. The provider wraps these nodes
 // into vscode.TreeItem (resourceUri → native file icon + git decoration color).
 
-export type ChangeGroup = 'staged' | 'unstaged';
+/* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+export type ChangeGroup = 'staged' | 'unstaged' | 'conflict';
+/* SNIPCODE-HOOK end */
 
 export interface RepoStatus {
   repoName: string;
@@ -18,6 +20,9 @@ export interface RepoStatus {
   /* SNIPCODE-HOOK start: Batch B rename staging paths */
   staged: Array<{ path: string; status: string; oldPath?: string }>;
   unstaged: Array<{ path: string; status: string; oldPath?: string }>;
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: R3/S3 unmerged files, kept out of staged/unstaged */
+  conflict: Array<{ path: string; status: string; oldPath?: string }>;
   /* SNIPCODE-HOOK end */
 }
 
@@ -53,11 +58,17 @@ export interface GroupNode {
   repos: RepoNode[];
 }
 
+/* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+const GROUP_LABEL: Record<ChangeGroup, string> = { staged: 'Staged', unstaged: 'Unstaged', conflict: 'Merge Conflicts' };
+/* SNIPCODE-HOOK end */
+
 function groupNode(repos: RepoStatus[], group: ChangeGroup): GroupNode {
   const repoNodes: RepoNode[] = [];
   let count = 0;
   for (const repo of repos) {
-    const entries = group === 'staged' ? repo.staged : repo.unstaged;
+    /* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+    const entries = group === 'staged' ? repo.staged : group === 'unstaged' ? repo.unstaged : repo.conflict;
+    /* SNIPCODE-HOOK end */
     if (entries.length === 0) continue;
     count += entries.length;
     repoNodes.push({
@@ -80,13 +91,21 @@ function groupNode(repos: RepoStatus[], group: ChangeGroup): GroupNode {
       })),
     });
   }
-  return { kind: 'group', group, label: group === 'staged' ? 'Staged' : 'Unstaged', count, repos: repoNodes };
+  return { kind: 'group', group, label: GROUP_LABEL[group], count, repos: repoNodes };
 }
 
-/** Build the two top-level group nodes ([Staged, Unstaged]) from per-repo status.
- *  A repo appears under a group only when it has files in that group; a file that
- *  is both staged and unstaged (e.g. `MM`) appears under BOTH groups (git's real
- *  index vs working-tree split). Groups are always returned, even when empty. */
+/** Build the top-level group nodes from per-repo status: always [Staged, Unstaged],
+ *  plus a trailing Merge Conflicts group when any repo has unmerged files. A repo
+ *  appears under a group only when it has files in that group; a file that is both
+ *  staged and unstaged (e.g. `MM`) appears under BOTH groups (git's real index vs
+ *  working-tree split). Staged/Unstaged are always returned, even when empty —
+ *  Merge Conflicts is omitted entirely when there is nothing unresolved (R3/S3),
+ *  so the tree doesn't show a permanent "Merge Conflicts 0" row. */
 export function buildChangeTree(repos: RepoStatus[]): GroupNode[] {
-  return [groupNode(repos, 'staged'), groupNode(repos, 'unstaged')];
+  const groups = [groupNode(repos, 'staged'), groupNode(repos, 'unstaged')];
+  /* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+  const conflict = groupNode(repos, 'conflict');
+  if (conflict.count > 0) groups.push(conflict);
+  /* SNIPCODE-HOOK end */
+  return groups;
 }

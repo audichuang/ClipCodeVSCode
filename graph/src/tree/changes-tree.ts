@@ -67,7 +67,11 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
       item.description = `${node.count}`;
       item.contextValue = `group-${node.group}`;
-      item.iconPath = new vscode.ThemeIcon(node.group === 'staged' ? 'check' : 'diff-modified');
+      /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color */
+      item.iconPath = node.group === 'conflict'
+        ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('gitDecoration.conflictingResourceForeground'))
+        : new vscode.ThemeIcon(node.group === 'staged' ? 'check' : 'diff-modified');
+      /* SNIPCODE-HOOK end */
       return item;
     }
     if (node.kind === 'repo') {

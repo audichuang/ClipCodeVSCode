@@ -21,9 +21,12 @@ vi.mock('vscode', () => {
     description?: string;
     constructor(public label: unknown, public collapsibleState?: unknown) {}
   }
-  class ThemeIcon { constructor(public id: string) {} }
+  class ThemeIcon { constructor(public id: string, public color?: unknown) {} }
+  /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color */
+  class ThemeColor { constructor(public id: string) {} }
+  /* SNIPCODE-HOOK end */
   return {
-    EventEmitter, TreeItem, ThemeIcon,
+    EventEmitter, TreeItem, ThemeIcon, ThemeColor,
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
     ProgressLocation: { Notification: 15 },
@@ -64,7 +67,7 @@ import type { FileNode, RepoStatus } from '../build-change-tree';
 
 function mkSvc(over: Record<string, unknown> = {}) {
   return {
-    getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [] })),
+    getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [], conflict: [] })),
     branches: vi.fn(async () => [{ name: 'main', current: true }]),
     aheadBehind: vi.fn(async () => null),
     fetch: vi.fn(async () => ''),
@@ -263,6 +266,45 @@ describe('ChangesWorkbench commit status guard', () => {
 });
 /* SNIPCODE-HOOK end */
 
+/* SNIPCODE-HOOK start: R3/S3 commit skips repos with unresolved conflicts */
+describe('ChangesWorkbench commit skips repos with conflicts (R3/S3)', () => {
+  it('skips a repo with unmerged files, warns via view.message, and still commits the rest', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }],
+      })),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'b.ts', status: 'M' }], unstaged: [], conflict: [] })),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    const view = { message: undefined as string | undefined };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    const results = await wb.commit('fix', false);
+
+    expect(results).toEqual([{ repoName: 'b', ok: true }]);
+    expect(a.commitIndex).not.toHaveBeenCalled();
+    expect(b.commitIndex).toHaveBeenCalled();
+    expect(view.message).toContain('a');
+  });
+
+  it('throws when every checked repo has unresolved conflicts', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }],
+      })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+
+    await expect(wb.commit('fix', false)).rejects.toThrow(/沒有勾選要提交/);
+    expect(a.commitIndex).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */
+
 /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
 describe('ChangesWorkbench index document invalidation', () => {
   it('invalidates open index documents on a status refresh', async () => {
@@ -362,7 +404,7 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
 describe('Changes tree repo badges', () => {
   const status = (ahead?: number, behind?: number): RepoStatus[] => [{
     repoName: 'r', repoPath: '/r', branch: 'main', ahead, behind,
-    staged: [], unstaged: [{ path: 'f.ts', status: 'M' }],
+    staged: [], unstaged: [{ path: 'f.ts', status: 'M' }], conflict: [],
   }];
 
   async function repoDescription(ahead?: number, behind?: number): Promise<string | undefined> {
@@ -415,4 +457,31 @@ describe('Changes tree repo badges', () => {
     provider.notifyCommitSelectionChanged();
     expect(counts).toEqual([2]);
   });
+
+  /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group rendering */
+  it('renders a trailing Merge Conflicts group with a warning icon, and conflict files as file-conflict', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }] },
+    ]);
+    await provider.refresh();
+
+    const groups = provider.getChildren();
+    expect(groups).toHaveLength(3);
+    const conflictGroup = groups[2];
+    expect(provider.getTreeItem(conflictGroup).contextValue).toBe('group-conflict');
+    const icon = provider.getTreeItem(conflictGroup).iconPath as { id: string; color?: { id: string } };
+    expect(icon.id).toBe('warning');
+    expect(icon.color?.id).toBe('gitDecoration.conflictingResourceForeground');
+
+    const conflictRepo = provider.getChildren(conflictGroup)[0];
+    const conflictFile = provider.getChildren(conflictRepo)[0];
+    expect(provider.getTreeItem(conflictFile).contextValue).toBe('file-conflict');
+  });
+
+  it('omits the Merge Conflicts group when nothing is unmerged', async () => {
+    const provider = new ChangesTreeProvider(async () => status());
+    await provider.refresh();
+    expect(provider.getChildren()).toHaveLength(2);
+  });
+  /* SNIPCODE-HOOK end */
 });

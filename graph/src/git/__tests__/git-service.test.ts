@@ -737,6 +737,23 @@ describe('GitService', () => {
         { path: 'src/bar.ts', status: 'M' },
       ]);
     });
+
+    /* SNIPCODE-HOOK start: R3/S3 conflict classification */
+    it('routes every unmerged pair to a third `conflict` array, not staged/unstaged (R3/S3)', async () => {
+      mockExec(service, async () =>
+        'UU both-modified.ts\nAA both-added.ts\nDD both-deleted.ts\nAU added-by-us.ts\nUD deleted-by-them.ts\nUA added-by-them.ts\nDU deleted-by-us.ts\nM  clean-staged.ts\n');
+
+      const result = await service.getUncommittedDiff();
+      expect(result.conflict.map(e => e.path)).toEqual([
+        'both-modified.ts', 'both-added.ts', 'both-deleted.ts',
+        'added-by-us.ts', 'deleted-by-them.ts', 'added-by-them.ts', 'deleted-by-us.ts',
+      ]);
+      // A distinct status letter so it never collides with untracked 'U'.
+      expect(result.conflict.every(e => e.status === '!')).toBe(true);
+      expect(result.staged).toEqual([{ path: 'clean-staged.ts', status: 'M' }]);
+      expect(result.unstaged).toEqual([]);
+    });
+    /* SNIPCODE-HOOK end */
   });
 
   /* SNIPCODE-HOOK start: Batch B raw diff error surfacing regression */

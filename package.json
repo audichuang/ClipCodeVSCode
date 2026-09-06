@@ -293,6 +293,11 @@
         "command": "snipcode.git.openChange",
         "title": "Snipcode Git: Open in Editor",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "snipcode.git.markResolved",
+        "title": "Snipcode Git: Mark Resolved",
+        "icon": "$(check)"
       }
     ],
     "viewsContainers": {
@@ -526,6 +531,11 @@
         {
           "command": "snipcode.git.unstage",
           "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.markResolved",
+          "when": "view == snipcode.changes && viewItem == file-conflict",
           "group": "inline"
         },
         {
