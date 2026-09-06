@@ -31,7 +31,7 @@
   import DirtyActionModal from '../modals/DirtyActionModal.svelte';
   import type { DirtyPayload } from '../../lib/utils/dirty-payload';
   import { resolveDrop, dragRebaseMessage, dragMergeMessage } from '../../lib/utils/dragDrop';
-  import { computeNavigationTarget, computeScrollTop, computeJumpTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
+  import { computeNavigationTarget, computeScrollTop, computeJumpTarget, computePagedTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
   import LinkifiedText from '../common/LinkifiedText.svelte';
 
 
@@ -1466,7 +1466,10 @@
   /* SNIPCODE-HOOK end */
 
   function handleGraphNavKey(e: KeyboardEvent) {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    /* SNIPCODE-HOOK start: M14 — Home/End/PageUp/PageDown were entirely missing */
+    const isPageKey = e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown';
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && !isPageKey) return;
+    /* SNIPCODE-HOOK end */
     // Ignore while a modal is open, a multi-select range is armed, or the user
     // is typing in an input (e.g. the search box).
     if (modalStore.anyOpen || uiStore.multiSelectArmed) return;
@@ -1476,6 +1479,21 @@
 
     const navCommits = displayCommits.filter(c => c.hash !== 'UNCOMMITTED');
 
+    /* SNIPCODE-HOOK start: M14 */
+    if (isPageKey) {
+      e.preventDefault();
+      navPath = [];
+      const dir = e.key === 'Home' ? 'home' : e.key === 'End' ? 'end' : e.key === 'PageUp' ? 'pageUp' : 'pageDown';
+      const pageSize = Math.max(1, Math.floor(viewportHeight / ROW_HEIGHT));
+      const target = computePagedTarget(navCommits, uiStore.selectedCommitHash, dir, pageSize);
+      if (target) {
+        uiStore.selectSingle(target);
+        scrollHashIntoView(target, dir === 'home' || dir === 'end' ? 'center' : 'edge');
+        focusSelectedRow();
+      }
+      return;
+    }
+    /* SNIPCODE-HOOK end */
 
     const dir = e.key === 'ArrowDown' ? 'down' : 'up';
     e.preventDefault();
@@ -1510,12 +1528,19 @@
     // 1st Esc closes the open bottom panel; 2nd Esc clears the selection.
     else if (uiStore.multiSelectArmed && uiStore.showBottomPanel) { uiStore.showBottomPanel = false; }
     else if (uiStore.multiSelectArmed) { uiStore.exitMultiSelect(); }
+    /* SNIPCODE-HOOK start: M14 — none of the graph's own Esc cases applied
+       (e.g. the search box was just cleared and blurred, per SearchBar.svelte
+       — its own change, out of scope here), so focus has nowhere to go.
+       Hand it back to the graph container so arrow-key nav keeps working
+       instead of dying until the next click. */
+    else { container?.focus(); }
+    /* SNIPCODE-HOOK end */
   } else {
     handleGraphNavKey(e);
   }
 }} />
 
-<div class="commit-graph" class:h-scroll={horizontalScroll} bind:this={container} onscroll={handleScroll}>
+<div class="commit-graph" class:h-scroll={horizontalScroll} bind:this={container} onscroll={handleScroll} tabindex="-1">
   {#if uiStore.operating}
     <!-- Non-blocking busy indicator: a git op is in flight. Sticky so it stays
          pinned to the top of the scroll viewport; the graph underneath keeps its
@@ -1655,6 +1680,7 @@
             : uiStore.selectedCommitHash === commit.hash}
           <div
             class="commit-row"
+            data-commit-hash={commit.hash}
             class:hovered={hoveredHash === commit.hash}
             class:selected={isSelected}
             class:highlighted={contextMenuHash === commit.hash}
@@ -2161,6 +2187,12 @@
     position: relative;
   }
 
+  /* SNIPCODE-HOOK start: M14 — the container itself becomes a focus target
+     (Home/End/PageUp/PageDown and the post-search Esc fallback focus it), but
+     real feedback belongs to the roving-tabindex row inside it, not the
+     container's own outline. */
+  .commit-graph:focus { outline: none; }
+  /* SNIPCODE-HOOK end */
 
   /* Indeterminate top bar shown while a git op is in flight. Sticky pins it to
      the top of the scroll viewport; a moving sheen conveys "working" without
