@@ -723,4 +723,6 @@ export const ko: Record<string, string> = {
   'toolbar.logDesc': 'Reflog (Ctrl+2)',
   'toolbar.statsDesc': '통계 (Ctrl+3)',
   'toolbar.prDesc': 'PR (Ctrl+4)',
+  'search.noResultsLoaded': '불러온 {count}개 커밋 중 결과 없음',
+  'search.hashNotLoaded': '찾음 — 아직 불러오지 않은 범위',
 };

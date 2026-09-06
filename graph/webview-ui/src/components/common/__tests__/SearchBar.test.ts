@@ -32,6 +32,8 @@ const baseProps = {
 beforeEach(() => {
   i18n.setLocale('en');
   setCommits([]);
+  commitStore.hasMore = false;
+  commitStore.loadingMore = false;
   vi.useFakeTimers();
 });
 
@@ -381,3 +383,133 @@ describe('SearchBar — jump to HEAD button', () => {
     expect(btn.classList.contains('active')).toBe(true);
   });
 });
+
+/* SNIPCODE-HOOK start: M9 — hash-shaped no-result fallback, "No results in {n}
+   loaded commits" + Load more, and Esc handing focus back to the graph. */
+describe('SearchBar — M9 no-results copy and hash fallback', () => {
+  it('no-match search shows "No results in {n} loaded commits"', async () => {
+    setCommits([commit({ hash: 'h1', subject: 'fix' })]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'nope' } });
+    vi.advanceTimersByTime(150);
+    expect(container.querySelector('.search-count')?.textContent).toContain('1');
+    expect(container.querySelector('.search-count')?.textContent?.toLowerCase()).toContain('loaded');
+  });
+
+  it('a non-hex, non-loaded query does not post searchByHash', async () => {
+    setCommits([commit({ hash: 'h1', subject: 'fix' })]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'totally not hex' } });
+    vi.advanceTimersByTime(150);
+    expect(globalThis.__postedMessages.some(
+      (m) => (m.data as { type?: string }).type === 'searchByHash'
+    )).toBe(false);
+  });
+
+  it('a hash-shaped query with no local match posts searchByHash', async () => {
+    setCommits([commit({ hash: 'h1', subject: 'fix' })]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'abc1234' } }); // 7 hex chars, not loaded
+    vi.advanceTimersByTime(150);
+    const req = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'searchByHash'
+    );
+    expect(req).toBeDefined();
+    expect((req!.data as { payload: { hash: string } }).payload.hash).toBe('abc1234');
+  });
+
+  it('searchByHash finding a commit shows "Found — not in the loaded range" instead of a fake 1/1', async () => {
+    setCommits([]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'abc1234deadbeef' } });
+    vi.advanceTimersByTime(150);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'searchResults', payload: { commits: [{ hash: 'abc1234deadbeef00000' }], graph: [] } },
+    }));
+    await tick();
+    expect(container.querySelector('.search-count')?.textContent?.toLowerCase()).toContain('not in the loaded range');
+    // Still no fake match — prev/next stay disabled, nothing navigable.
+    const navBtns = container.querySelectorAll<HTMLButtonElement>('.nav-btn');
+    expect(navBtns[0].disabled).toBe(true);
+  });
+
+  it('searchByHash finding nothing keeps the plain "No results" copy', async () => {
+    setCommits([]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'abc1234deadbeef' } });
+    vi.advanceTimersByTime(150);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'searchResults', payload: { commits: [], graph: [] } },
+    }));
+    await tick();
+    expect(container.querySelector('.search-count')?.textContent?.toLowerCase()).toContain('loaded');
+    expect(container.querySelector('.search-count')?.textContent?.toLowerCase()).not.toContain('not in the loaded range');
+  });
+
+  it('a stale searchResults reply is ignored once the box no longer shows the hash it was requested for', async () => {
+    setCommits([]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'abc1234' } });
+    vi.advanceTimersByTime(150);
+    // Query changes to something non-hash-shaped (no new lookup fires, so
+    // lastHashLookupQuery still remembers 'abc1234') before the reply lands —
+    // e.g. CommitDetails' own searchByHash for an unrelated parent-hash click
+    // could also produce a searchResults reply while the user keeps typing.
+    await fireEvent.input(input, { target: { value: 'not hex at all' } });
+    vi.advanceTimersByTime(150);
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'searchResults', payload: { commits: [{ hash: 'abc1234000000' }], graph: [] } },
+    }));
+    await tick();
+    expect(container.querySelector('.search-count')?.textContent?.toLowerCase()).not.toContain('not in the loaded range');
+  });
+
+  it('Load more appears when there are no results and hasMore, and posts getLog with the extended limit', async () => {
+    commitStore.hasMore = true;
+    commitStore.currentLimit = 200;
+    setCommits([commit({ hash: 'h1', subject: 'fix' })]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'nope' } });
+    vi.advanceTimersByTime(150);
+    const loadMoreBtn = container.querySelector<HTMLButtonElement>('.load-more-btn');
+    expect(loadMoreBtn).not.toBeNull();
+    await fireEvent.click(loadMoreBtn!);
+    const req = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'getLog'
+    );
+    expect(req).toBeDefined();
+    expect((req!.data as { payload: { limit: number } }).payload.limit).toBeGreaterThan(200);
+    commitStore.hasMore = false;
+  });
+
+  it('Load more is absent when hasMore is false', async () => {
+    commitStore.hasMore = false;
+    setCommits([commit({ hash: 'h1', subject: 'fix' })]);
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'nope' } });
+    vi.advanceTimersByTime(150);
+    expect(container.querySelector('.load-more-btn')).toBeNull();
+  });
+
+  it('Escape hands focus back to the graph container', async () => {
+    setCommits([commit({ hash: 'h1', subject: 'x' })]);
+    document.body.innerHTML = '<div class="commit-graph" tabindex="0"></div>';
+    const graphEl = document.querySelector<HTMLElement>('.commit-graph')!;
+    const focusSpy = vi.spyOn(graphEl, 'focus');
+    const { container } = render(SearchBar, baseProps);
+    const input = container.querySelector<HTMLInputElement>('.search-input')!;
+    await fireEvent.input(input, { target: { value: 'x' } });
+    vi.advanceTimersByTime(150);
+    await fireEvent.keyDown(container.querySelector('.search-bar')!, { key: 'Escape' });
+    expect(focusSpy).toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */

@@ -723,4 +723,6 @@ export const zh: Record<string, string> = {
   'toolbar.logDesc': 'Reflog（Ctrl+2）',
   'toolbar.statsDesc': '统计（Ctrl+3）',
   'toolbar.prDesc': 'PR（Ctrl+4）',
+  'search.noResultsLoaded': '已加载的 {count} 个提交中无结果',
+  'search.hashNotLoaded': '已找到 — 尚未加载的范围内',
 };
