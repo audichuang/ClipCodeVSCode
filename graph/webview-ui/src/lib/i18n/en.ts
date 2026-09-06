@@ -718,4 +718,7 @@ export const en: Record<string, string> = {
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
   'pr.into': 'into',
   /* SNIPCODE-HOOK end */
+
+  // ui/main
+  'common.closeEsc': 'Close (Esc)',
 };

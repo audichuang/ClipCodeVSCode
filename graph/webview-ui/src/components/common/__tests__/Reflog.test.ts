@@ -397,9 +397,10 @@ describe('Reflog — modal action callbacks', () => {
     deliverReflog([entry({ hash: 'targetHash9' })]);
     await waitFor(() => container.querySelector('.reflog-row'));
     await openContextMenuAndClick(container, /reset/i);
-    await waitFor(() => document.querySelector('.modal button.primary'));
+    // R2: Reset is destructive — ResetModal's confirm button is .danger-btn, not .primary.
+    await waitFor(() => document.querySelector('.modal button.danger-btn'));
     globalThis.__postedMessages = [];
-    await fireEvent.click(document.querySelector<HTMLButtonElement>('.modal button.primary')!);
+    await fireEvent.click(document.querySelector<HTMLButtonElement>('.modal button.danger-btn')!);
     const req = globalThis.__postedMessages.find(
       (m) => (m.data as { type?: string }).type === 'reset'
     );
