@@ -727,4 +727,8 @@ export const en: Record<string, string> = {
   'toolbar.prDesc': 'PR (Ctrl+4)',
   'search.noResultsLoaded': 'No results in {count} loaded commits',
   'search.hashNotLoaded': 'Found — not in the loaded range',
+  'details.treeView': 'Tree',
+  'details.flatView': 'Flat',
+  'details.expandAll': 'Expand All',
+  'details.collapseAll': 'Collapse All',
 };

@@ -188,6 +188,9 @@
   // passed to FileDiffView and the tree's "Reverse File" action.
   const canReverseInThisView = $derived(!!commit && stashIndex === null);
 
+  /* SNIPCODE-HOOK start: M12 — Changes tree small toolbar (Tree/Flat + Expand/Collapse all) */
+  let filesViewMode = $state<'tree' | 'flat'>('tree');
+  /* SNIPCODE-HOOK end */
   let filesPanelWidth = $state(240);
   let isResizing = $state(false);
   let resizeStartX = 0;
@@ -482,6 +485,44 @@
     return sortTree(root.children);
   }
 
+  /* SNIPCODE-HOOK start: M12 — flat view: no directory grouping, just the files
+     sorted by path. Reuses the exact same FileTreeNode shape (isFile:true, no
+     children) so the existing renderTree/renderUncommittedTree snippets — and
+     every selection/context-menu handler they carry — need no duplication. */
+  function buildFlatList(commitFiles: CommitFile[]): FileTreeNode[] {
+    return [...commitFiles]
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .map(({ path, status }) => ({ name: path, path, children: [], isFile: true, status }));
+  }
+
+  // Every directory path in a tree, for Expand all / Collapse all.
+  function allDirPaths(nodes: FileTreeNode[]): string[] {
+    const out: string[] = [];
+    for (const n of nodes) {
+      if (!n.isFile) {
+        out.push(n.path);
+        out.push(...allDirPaths(n.children));
+      }
+    }
+    return out;
+  }
+
+  function expandAllDirs() {
+    if (activeHash === 'UNCOMMITTED') {
+      const dirs = new Set<string>();
+      for (const d of allDirPaths(stagedTree)) dirs.add(`staged:${d}`);
+      for (const d of allDirPaths(unstagedTree)) dirs.add(`unstaged:${d}`);
+      expandedDirs = dirs;
+    } else {
+      expandedDirs = new Set(allDirPaths(fileTree));
+    }
+  }
+
+  function collapseAllDirs() {
+    expandedDirs = new Set();
+  }
+  /* SNIPCODE-HOOK end */
+
   // All changed-file paths under a tree node (the node itself if it's a file).
   function collectFilePaths(node: FileTreeNode): string[] {
     return node.isFile ? [node.path] : node.children.flatMap(collectFilePaths);
@@ -604,13 +645,19 @@
     return keysUnder.length > 0 && keysUnder.every(k => selectedUncommittedFiles.has(k));
   }
 
-  let fileTree = $derived(buildFileTree(files));
+  /* SNIPCODE-HOOK start: M12 — flat view swaps buildFileTree for buildFlatList */
+  let fileTree = $derived(filesViewMode === 'flat' ? buildFlatList(files) : buildFileTree(files));
   // Memoize the uncommitted trees too. They were rebuilt inline in the
   // template ({@render renderUncommittedTree(buildFileTree(...))}), so any
   // reactive change (selection, expand/collapse) re-ran buildFileTree over
   // both lists on every render.
-  let stagedTree = $derived(uncommittedFiles ? buildFileTree(uncommittedFiles.staged) : []);
-  let unstagedTree = $derived(uncommittedFiles ? buildFileTree(uncommittedFiles.unstaged) : []);
+  let stagedTree = $derived(uncommittedFiles
+    ? (filesViewMode === 'flat' ? buildFlatList(uncommittedFiles.staged) : buildFileTree(uncommittedFiles.staged))
+    : []);
+  let unstagedTree = $derived(uncommittedFiles
+    ? (filesViewMode === 'flat' ? buildFlatList(uncommittedFiles.unstaged) : buildFileTree(uncommittedFiles.unstaged))
+    : []);
+  /* SNIPCODE-HOOK end */
 
   // Mirror the local file selection into the store so the global Esc handler can
   // tell whether a file is selected. Cleared on unmount so a closed panel never
@@ -915,6 +962,39 @@
   {:else if activeTab === 'changes'}
     <div class="changes-tab-content">
       <div class="files-panel" style="width: {filesPanelWidth}px">
+        <!-- SNIPCODE-HOOK start: M12 — Changes tree small toolbar: Tree/Flat toggle
+             + Expand all/Collapse all (disabled in flat view — no directories). -->
+        <div class="files-toolbar">
+          <div class="files-view-toggle" role="group">
+            <button
+              class="files-view-btn"
+              class:active={filesViewMode === 'tree'}
+              onclick={() => { filesViewMode = 'tree'; }}
+            >{t('details.treeView')}</button>
+            <button
+              class="files-view-btn"
+              class:active={filesViewMode === 'flat'}
+              onclick={() => { filesViewMode = 'flat'; }}
+            >{t('details.flatView')}</button>
+          </div>
+          <div class="files-toolbar-actions">
+            <button
+              class="files-toolbar-btn"
+              disabled={filesViewMode === 'flat'}
+              onclick={expandAllDirs}
+              aria-label={t('details.expandAll')}
+              use:tooltip={t('details.expandAll')}
+            ><i class="codicon codicon-expand-all"></i></button>
+            <button
+              class="files-toolbar-btn"
+              disabled={filesViewMode === 'flat'}
+              onclick={collapseAllDirs}
+              aria-label={t('details.collapseAll')}
+              use:tooltip={t('details.collapseAll')}
+            ><i class="codicon codicon-collapse-all"></i></button>
+          </div>
+        </div>
+        <!-- SNIPCODE-HOOK end -->
         <div class="files-list">
           {#if activeHash === 'UNCOMMITTED' && uncommittedFiles}
             {#snippet renderUncommittedTree(nodes: FileTreeNode[], depth: number, staged: boolean)}
@@ -1826,6 +1906,69 @@
     flex-direction: column;
     overflow: hidden;
   }
+
+  /* SNIPCODE-HOOK start: M12 — Changes tree small toolbar */
+  .files-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .files-view-toggle {
+    display: flex;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .files-view-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    border: 1px solid var(--vscode-panel-border);
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    border-radius: 3px;
+  }
+
+  .files-view-btn.active {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
+    color: var(--vscode-foreground);
+  }
+
+  .files-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .files-toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 13px;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 3px;
+  }
+
+  .files-toolbar-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .files-toolbar-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* SNIPCODE-HOOK end */
 
   .resize-handle {
     width: 4px;
