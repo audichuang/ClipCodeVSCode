@@ -195,8 +195,16 @@
   let isResizing = $state(false);
   let resizeStartX = 0;
   let resizeStartWidth = 0;
+  /* SNIPCODE-HOOK start: M2 — initializing to 'commit' for an UNCOMMITTED commit
+     rendered the Commit-tab content (author/committer/date, avatar) for one frame
+     before the hash-tracking $effect below flips this to 'changes': the synthetic
+     UNCOMMITTED commit has empty author/committer info, so that frame is at best
+     a blank flash. Special-case it here instead. */
   // svelte-ignore state_referenced_locally
-  let activeTab = $state<'commit' | 'changes'>(commit ? 'commit' : 'changes');
+  let activeTab = $state<'commit' | 'changes'>(
+    commit?.hash === 'UNCOMMITTED' ? 'changes' : (commit ? 'commit' : 'changes'),
+  );
+  /* SNIPCODE-HOOK end */
   let uncommittedTab = $state<'staged' | 'unstaged'>('staged');
 
   let activeHash = $state('');
