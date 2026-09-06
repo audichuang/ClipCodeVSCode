@@ -323,20 +323,20 @@ describe('CommitGraph signature icon', () => {
     uiStore.exitMultiSelect();
   });
 
-  it('resolves candidate branches when BranchInfo.hash is abbreviated (not the full commit hash)', async () => {
-    // Regression: branch tips come from git as %(objectname:short), but commitMap
-    // is keyed by the full hash. The menu item must still appear.
+  it('resolves candidate branches from BranchInfo.hash when it is already the full commit hash (X6)', async () => {
+    // BranchInfo.hash is `%(objectname)` (full), same as commitMap's keys
+    // (C3: the abbreviated->full lookup this test used to guard is dead code
+    // once X6 fixed git-service.ts to stop requesting `:short`). The menu item
+    // must still appear when branch tips are matched directly.
     const head = makeCommit('mainfull1234', 'main tip');
     head.refs = [{ type: 'head', name: 'main' }];
     const f1 = makeCommit('feat1full5678', 'feature 1', ['mainfull1234']);
     const f2 = makeCommit('feat2full9012', 'feature 2', ['feat1full5678']);
     f2.refs = [{ type: 'branch', name: 'feature' }];
     commitStore.setData(makeGraphData([f2, f1, head]));
-    // abbreviated tips (commit.abbreviatedHash === hash.slice(0,7)), which differ
-    // from the full commit hashes the commitMap is keyed by.
     branchStore.branches = [
-      { name: 'main', current: true, ahead: 0, behind: 0, hash: 'mainful' },
-      { name: 'feature', current: false, ahead: 0, behind: 0, hash: 'feat2fu' },
+      { name: 'main', current: true, ahead: 0, behind: 0, hash: 'mainfull1234' },
+      { name: 'feature', current: false, ahead: 0, behind: 0, hash: 'feat2full9012' },
     ];
     uiStore.multiSelectArmed = true;
     uiStore.selectedCommitHashes = ['feat1full5678', 'feat2full9012'];
