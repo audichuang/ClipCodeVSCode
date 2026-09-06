@@ -727,4 +727,9 @@ export const ko: Record<string, string> = {
   'diff.mixedLineEndings': '이 줄은 파일의 나머지 부분과 달리 CRLF로 끝납니다',
   'diff.prevHunk': '이전 변경 사항',
   'diff.nextHunk': '다음 변경 사항',
+  'image.sideBySide': '나란히 보기',
+  'image.swipe': '스와이프',
+  'image.onionSkin': '어니언 스킨',
+  'image.before': '이전',
+  'image.after': '이후',
 };
