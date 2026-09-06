@@ -1303,3 +1303,66 @@ describe('PrView — stats row and per-file +/- (P4/X2)', () => {
   });
 });
 // SNIPCODE-HOOK end
+
+// SNIPCODE-HOOK start: PR tab (P6) file-list dir/base path split + rename
+describe('PrView — file list dir/base + rename display (P6)', () => {
+  function setup() {
+    branchStore.branches = [
+      branch({ name: 'feat', current: true, upstream: 'origin/main' }),
+      branch({ name: 'origin/main', remote: 'origin' }),
+    ];
+    return render(PrView);
+  }
+
+  it('splits a nested path into a dimmed dir prefix and a bold base name (no space between them)', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/components/graph/CommitGraph.svelte', status: 'M' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('CommitGraph.svelte'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-dir')?.textContent).toBe('src/components/graph/');
+    expect(row.querySelector('.pr-base')?.textContent).toBe('CommitGraph.svelte');
+    // No space introduced between the two spans.
+    expect(row.querySelector('.pr-file-path')?.textContent).toContain('src/components/graph/CommitGraph.svelte');
+  });
+
+  it('a top-level file (no "/") renders with no .pr-dir span', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'README.md', status: 'M' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('README.md'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-dir')).toBeNull();
+    expect(row.querySelector('.pr-base')?.textContent).toBe('README.md');
+  });
+
+  it('shows "old → new" for a rename, with the old path struck through', async () => {
+    const { container } = setup();
+    deliver('commitsBetween', {
+      base: 'origin/main', requestId: currentRequestId(), commits: [], mergeBase: 'mb', ahead: 1, behind: 0,
+      files: [{ path: 'src/new/a.ts', status: 'R', oldPath: 'src/old/a.ts' }],
+    });
+    const row = await waitFor(() => {
+      const r = Array.from(container.querySelectorAll<HTMLButtonElement>('.pr-file-row'))
+        .find((b) => b.textContent?.includes('a.ts'));
+      expect(r).toBeDefined();
+      return r!;
+    });
+    expect(row.querySelector('.pr-rename-old')?.textContent).toBe('src/old/a.ts');
+    expect(row.querySelector('.pr-base')?.textContent).toBe('a.ts');
+    expect(row.textContent).toContain('src/old/a.ts → src/new/a.ts');
+  });
+});
+// SNIPCODE-HOOK end
