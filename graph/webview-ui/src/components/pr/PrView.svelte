@@ -628,6 +628,17 @@
     return diffStats(diffs.find((x) => x.file === file.path));
   }
 
+  /* SNIPCODE-HOOK start: C4 — a pure rename (no content change) has empty
+     hunks, so fileStats() returns null same as an actual binary file; the
+     stat badge showed "bin" for both, which reads wrong for a rename. This
+     mirrors FileDiffView.svelte's own rename detection (diff.oldPath, gated
+     on !isBinary so a renamed *binary* file still falls through to "bin"). */
+  function isPureRename(file: PrFile): boolean {
+    const d = diffs.find((x) => x.file === file.path);
+    return !!file.oldPath && !!d && !d.isBinary && d.hunks.length === 0;
+  }
+  /* SNIPCODE-HOOK end */
+
   let totalStats = $derived.by(() => {
     let add = 0;
     let del = 0;
@@ -935,7 +946,7 @@
                 <!-- SNIPCODE-HOOK end -->
                 <!-- SNIPCODE-HOOK: PR tab (P4/X2) per-file +/- stats -->
                 <span class="pr-file-stats">
-                  {#if s}<span class="pr-stat-add">+{s.add}</span><span class="pr-stat-del">−{s.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                  {#if s}<span class="pr-stat-add">+{s.add}</span><span class="pr-stat-del">−{s.del}</span>{:else if isPureRename(file)}<span class="pr-stat-bin">{t('pr.statsRenamed')}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
                 </span>
               </button>
             {/each}
@@ -984,7 +995,7 @@
                     <span class="pr-file-path" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>{#if file.oldPath}<span class="pr-rename-old">{file.oldPath}</span>{' → '}{/if}{#if fileDir(file.path)}<span class="pr-dir">{fileDir(file.path)}</span>{/if}<span class="pr-base">{fileBaseName(file.path)}</span></span>
                   </button>
                   <span class="pr-file-stats">
-                    {#if fs}<span class="pr-stat-add">+{fs.add}</span><span class="pr-stat-del">−{fs.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
+                    {#if fs}<span class="pr-stat-add">+{fs.add}</span><span class="pr-stat-del">−{fs.del}</span>{:else if isPureRename(file)}<span class="pr-stat-bin">{t('pr.statsRenamed')}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
                   </span>
                   <button class="pr-open-native-btn" onclick={() => openFile(file)}>
                     <i class="codicon codicon-diff"></i> {t('pr.openNativeDiff')}
