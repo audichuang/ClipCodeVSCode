@@ -148,6 +148,11 @@
   const fileDir = $derived(dirOf(store.file));
   const fileBase = $derived(baseOf(store.file));
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify */
+  // Either side's diff can carry oldPath (a file staged-then-modified after a
+  // rename still has it on both) — the first one found is enough for display.
+  const renameOldPath = $derived(sections.find((s) => s.diff?.oldPath)?.diff?.oldPath ?? null);
+  /* SNIPCODE-HOOK end */
 </script>
 
 <div class="diff-app-root">
@@ -174,6 +179,12 @@
            ONLY place the full path is visible; per-side status/± live on
            each section's badge instead (see .side-badge). -->
       <span class="mode-bar-file" title={store.file}>
+        <!-- SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify -->
+        {#if renameOldPath}
+          <span class="file-old-path">{renameOldPath}</span>
+          <span class="file-rename-arrow">→</span>
+        {/if}
+        <!-- SNIPCODE-HOOK end -->
         {#if fileDir}<span class="file-dir">{fileDir}</span>{/if}
         <span class="file-base">{fileBase}</span>
       </span>
@@ -292,6 +303,10 @@
   }
   .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; }
   .file-base { flex-shrink: 0; font-weight: 600; }
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify */
+  .file-old-path { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; text-decoration: line-through; }
+  .file-rename-arrow { flex-shrink: 0; opacity: 0.55; padding: 0 4px; }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
   .hunk-nav { display: flex; gap: 2px; flex-shrink: 0; }

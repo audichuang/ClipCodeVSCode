@@ -608,6 +608,14 @@
         <button onclick={() => { showFullDiff = true; }}>{t('details.showFullDiff')}</button>
       </div>
     {/if}
+    <!-- SNIPCODE-HOOK start: F4 renamed-from note also shown above hunks (not
+         just the empty-hunks state below) — a rename+modify has real hunks so
+         the old path was previously invisible. renderHunks is empty for binary
+         diffs, so this never doubles up with the empty-hunks message. -->
+    {#if renderHunks.length > 0 && diff.oldPath}
+      <div class="diff-rename-note">{t('diff.renamedFrom', { oldPath: diff.oldPath, similarity: diff.similarity ?? 100 })}</div>
+    {/if}
+    <!-- SNIPCODE-HOOK end -->
     {#if diff.isBinary && diff.isImage}
       {#if commitHash && commitHash !== 'UNCOMMITTED'}
         <!-- SNIPCODE-HOOK start: Batch B image request identity -->
@@ -1245,6 +1253,16 @@
   .diff-truncated-banner button:hover {
     background: var(--vscode-button-hoverBackground, #1177bb);
   }
+
+  /* SNIPCODE-HOOK start: F4 renamed-from note also shown above hunks */
+  .diff-rename-note {
+    padding: 4px 12px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.2));
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK (B-2c): hunk-level positioning context (block arrows now anchor
      on their own line via .has-block-arrow). */
