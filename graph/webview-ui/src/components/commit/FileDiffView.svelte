@@ -88,6 +88,25 @@
   // patch-builder rewrites the whole-file header for partial selections).
   const canReverse = $derived(!!onReverse && !!commitHash);
 
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  // Only worth flagging when the two sides actually DISAGREE on line ending —
+  // a file that's consistently CRLF throughout shouldn't get a ␍ badge on
+  // every single line (noise); a mixed file is exactly the "you can't see
+  // the EOL-only change" case D4 targets.
+  const hasMixedCr = $derived.by(() => {
+    if (!diff || diff.isBinary) return false;
+    let sawCr = false;
+    let sawNoCr = false;
+    for (const hunk of diff.hunks) {
+      for (const line of hunk.lines) {
+        if (line.cr) sawCr = true; else sawNoCr = true;
+        if (sawCr && sawNoCr) return true;
+      }
+    }
+    return false;
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start (B-2c): staging affordance gate + action. */
   const canStage = $derived(!!onStageHunk);
   /* SNIPCODE-HOOK (B-2d): gutter line-selection turns on for the reverse view
@@ -520,6 +539,14 @@
 {/snippet}
 <!-- SNIPCODE-HOOK end -->
 
+<!-- SNIPCODE-HOOK start: ui/diff D4 CRLF marker -->
+{#snippet crMarker(line: DiffLine)}
+  {#if hasMixedCr && line.cr}
+    <span class="cr-marker" title={t('diff.mixedLineEndings')}>␍</span>
+  {/if}
+{/snippet}
+<!-- SNIPCODE-HOOK end -->
+
 <div class="diff-wrapper" class:stacked>
   <div class="diff-toolbar">
     {#if heading}<div class="diff-commit-label" title={heading}>{heading}</div>{/if}
@@ -653,6 +680,7 @@
                 </span>
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <span class="line-content" onmousedown={(e) => { if (e.button === 0) lineSel = null; }}>{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                {@render crMarker(line)}
                 {@render noNewlinePill(line)}
               </div>
             {/each}
@@ -693,6 +721,7 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
+                      {@render crMarker(line)}
                       {@render noNewlinePill(line)}
                       {#if blockLines}
                         <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
@@ -743,6 +772,7 @@
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
+                      {@render crMarker(line)}
                       {@render noNewlinePill(line)}
                     </div>
                   {:else}
@@ -1081,6 +1111,16 @@
     border-radius: 3px;
     opacity: 0.85;
     user-select: none;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  .cr-marker {
+    margin-left: 2px;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    opacity: 0.75;
+    user-select: none;
+    font-weight: bold;
   }
   /* SNIPCODE-HOOK end */
 

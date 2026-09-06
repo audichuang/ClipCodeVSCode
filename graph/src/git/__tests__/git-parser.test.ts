@@ -498,6 +498,42 @@ new mode 100755`;
   });
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  it('strips the trailing \\r from CRLF lines and flags them, leaving LF lines untouched', () => {
+    // Real `git diff` output for a file converted LF -> CRLF (unix2dos): the
+    // OLD side stayed LF, the NEW side is CRLF. git only splits on `\n`, so
+    // the `\r` is still glued to each new-side line's content.
+    const raw = [
+      'diff --git a/scenario-c.ts b/scenario-c.ts',
+      'index 600d48a..659c4d7 100644',
+      '--- a/scenario-c.ts',
+      '+++ b/scenario-c.ts',
+      '@@ -1,5 +1,5 @@',
+      '-alpha',
+      '-beta',
+      '+alpha\r',
+      '+beta\r',
+    ].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    const deletes = lines.filter(l => l.type === 'delete');
+    const adds = lines.filter(l => l.type === 'add');
+    expect(deletes.every(l => l.cr === undefined)).toBe(true);
+    expect(deletes.map(l => l.content)).toEqual(['alpha', 'beta']);
+    expect(adds.every(l => l.cr === true)).toBe(true);
+    // The \r must be stripped from content, not just flagged — otherwise it's
+    // still invisibly present under `white-space:pre`.
+    expect(adds.map(l => l.content)).toEqual(['alpha', 'beta']);
+  });
+
+  it('does not flag cr on an ordinary LF-only diff', () => {
+    const raw = ['diff --git a/f.ts b/f.ts', '@@ -1 +1 @@', '-old', '+new'].join('\n');
+    const result = parseDiff(raw);
+    const lines = result[0].hunks[0].lines;
+    expect(lines.every(l => l.cr === undefined)).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
   it('parses rename + modify: oldPath, similarity, and the (small) real hunks', () => {
     // Real `git diff --cached -M -- d-src.ts d-dst.ts` output for a renamed

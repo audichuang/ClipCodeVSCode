@@ -299,18 +299,26 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
       if (!currentHunk) { continue; }
 
       if (line.startsWith('+')) {
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.substring(1));
         currentHunk.lines.push({
           type: 'add',
-          content: line.substring(1),
+          content,
           newLineNumber: newLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         newLineNum++;
       } else if (line.startsWith('-')) {
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.substring(1));
         currentHunk.lines.push({
           type: 'delete',
-          content: line.substring(1),
+          content,
           oldLineNumber: oldLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         oldLineNum++;
       } else if (line.startsWith(' ') || (line === '' && i < lines.length - 1)) {
         // Context line. A blank context line may arrive as " " (git's normal
@@ -318,12 +326,16 @@ export function parseDiff(raw: string, file?: string): DiffData[] {
         // empty string is always the trailing-newline artifact from split('\n'),
         // not real content — skip it (`i < lines.length - 1`) so it doesn't
         // become a phantom context line that also bumps the trailing line numbers.
+        /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+        const { content, cr } = stripTrailingCR(line.startsWith(' ') ? line.substring(1) : line);
         currentHunk.lines.push({
           type: 'context',
-          content: line.startsWith(' ') ? line.substring(1) : line,
+          content,
           oldLineNumber: oldLineNum,
           newLineNumber: newLineNum,
+          ...(cr ? { cr: true } : {}),
         });
+        /* SNIPCODE-HOOK end */
         oldLineNum++;
         newLineNum++;
       /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
@@ -441,6 +453,17 @@ export function parseLfsLocks(raw: string): Array<{ path: string; owner: string;
 /** Scan a single file diff's header lines (before the first `@@`) for the
  *  rename/mode metadata git emits there. All optional — a plain modify diff
  *  matches none of these and returns an empty object. */
+/* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+/** A CRLF-terminated line arrives from `git diff` with the `\r` still glued to
+ *  the content (git only ever strips the `\n` split boundary). Left in place,
+ *  it renders invisibly (`white-space:pre`) so a CRLF-only change looks like
+ *  no change at all; strip it for display and flag it so the UI can mark it. */
+function stripTrailingCR(content: string): { content: string; cr: boolean } {
+  if (content.endsWith('\r')) return { content: content.slice(0, -1), cr: true };
+  return { content, cr: false };
+}
+/* SNIPCODE-HOOK end */
+
 function parseDiffHeaderMeta(lines: string[]): {
   oldPath?: string; similarity?: number; oldMode?: string; newMode?: string;
   newFile?: boolean; deletedFile?: boolean;
