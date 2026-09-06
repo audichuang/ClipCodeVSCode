@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.42
+
+Copy a whole branch, and a copy notification whose numbers describe what is
+actually on the clipboard.
+
+- **Copy every commit on a branch, restore it as a new branch elsewhere.**
+  `Snipcode Git: Copy Branch Commits` on a branch in the Branches view puts the
+  series on the clipboard as an mbox — git's own transport format — and
+  `Snipcode Git: Paste Branch Commits` replays it onto a new branch with each
+  commit's message, author and author-date intact. There is deliberately no
+  "last N commits" option: `branch~N` follows first parents only, so on a history
+  with merges the count is wildly misleading. The two starting points a person
+  can actually reason about are on offer instead — the fork point (small, and
+  restorable wherever that commit exists) and the root (`Copy Branch Commits
+  (Entire History)`: self-contained, restores into a repo that shares no history
+  at all). The paste side checks for a clean working tree, warns before the
+  branch that clears tracked files, tells you up front when the base commit is
+  missing here rather than letting git die on "could not build fake ancestor",
+  and offers an abort when a patch conflicts.
+- **The copy notification now reports characters, lines and words alongside the
+  token estimate — and all four describe the whole clipboard payload.** The
+  IntelliJ sibling has shown these numbers for a long time; this side showed only
+  `~N tokens`, so the count people actually check to judge "is this copy too big"
+  was missing here. Worse, the two tools were not measuring the same thing:
+  IntelliJ summed the numbers per file, which silently dropped every `// file:`
+  header, the blank line between files, the pre/post text and the `clipcode-root`
+  line — everything that gets pasted but was never counted (about 2.8% on a
+  five-file copy, ~1,500 characters at the 30-file limit). Both sides now derive
+  all four from one shared scan of the payload string, through the single
+  notification entry point, so every copy path — files, folders, open editors,
+  Git and history — reports the same four numbers, and the two tools agree
+  exactly. Verified by the shared golden fixture plus a 300,000-case differential
+  run against the Kotlin implementation.
+
 ## 0.3.41
 
 Performance: copying no longer scales its memory with the payload.
