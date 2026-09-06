@@ -526,7 +526,15 @@
   function statusColor(s?: string): string {
     // SNIPCODE-HOOK: PR tab (P-P2) — 'N' (nested repo) case, matching
     // CommitDetails.svelte's statusColor so the two don't drift.
-    if (document.body.classList.contains('vscode-light')) {
+    /* SNIPCODE-HOOK start: live-QA-1 HC Light counts as light here too — VS Code
+       marks it `vscode-high-contrast-light`, never `vscode-light`, so this test
+       alone dropped the PR file-status letters onto the dark palette against a
+       white background. CommitDetails.statusColor, which this mirrors, already
+       had both. */
+    const light = document.body.classList.contains('vscode-light')
+      || document.body.classList.contains('vscode-high-contrast-light');
+    if (light) {
+    /* SNIPCODE-HOOK end */
       switch (s) {
         case 'A': return '#2e7d32';
         case 'M': return '#8a6d3b';

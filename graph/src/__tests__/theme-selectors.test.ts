@@ -19,11 +19,11 @@ import { join } from 'path';
 
 const WEBVIEW_SRC = join(__dirname, '..', '..', 'webview-ui', 'src');
 
-function svelteFiles(dir: string): string[] {
+function sourceFiles(dir: string, exts: string[]): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => {
     const p = join(dir, e.name);
-    if (e.isDirectory()) { return e.name === '__tests__' ? [] : svelteFiles(p); }
-    return e.name.endsWith('.svelte') ? [p] : [];
+    if (e.isDirectory()) { return e.name === '__tests__' ? [] : sourceFiles(p, exts); }
+    return exts.some(x => e.name.endsWith(x)) ? [p] : [];
   });
 }
 
@@ -47,7 +47,10 @@ function selectors(source: string): string[] {
     .filter(Boolean);
 }
 
-const FILES = svelteFiles(WEBVIEW_SRC);
+const FILES = sourceFiles(WEBVIEW_SRC, ['.svelte']);
+// The theme is read from script as well as from CSS, and plain .ts modules do
+// it too (lib/utils/highlighter.ts picks the shiki theme this way).
+const SCRIPT_FILES = sourceFiles(WEBVIEW_SRC, ['.svelte', '.ts']);
 
 describe('theme selector invariants (webview stylesheets)', () => {
   it('finds the component stylesheets it is meant to guard', () => {
@@ -62,6 +65,22 @@ describe('theme selector invariants (webview stylesheets)', () => {
         if (!sel.includes('body.vscode-light')) { continue; }
         const twin = sel.replace('body.vscode-light', 'body.vscode-high-contrast-light');
         if (!all.has(twin)) { offenders.push(`${file.slice(WEBVIEW_SRC.length + 1)}: ${sel}`); }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('no script tests for `vscode-light` without also accepting HC Light', () => {
+    // Same defect in JS form: `classList.contains('vscode-light')` is false in
+    // HC Light, so a light palette chosen this way silently stays dark.
+    const offenders: string[] = [];
+    for (const file of SCRIPT_FILES) {
+      const src = readFileSync(file, 'utf8');
+      for (const m of src.matchAll(/contains\((['"])vscode-light\1\)/g)) {
+        const window = src.slice(Math.max(0, m.index - 200), m.index + 200);
+        if (!window.includes('vscode-high-contrast-light')) {
+          offenders.push(`${file.slice(WEBVIEW_SRC.length + 1)}: ${m[0]}`);
+        }
       }
     }
     expect(offenders).toEqual([]);
