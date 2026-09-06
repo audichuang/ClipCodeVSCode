@@ -1368,17 +1368,21 @@
     contextMenu = { x: e.clientX, y: e.clientY, items };
   }
 
+  /* SNIPCODE-HOOK start: M7 — locale-aware date format, matching the format
+     CommitDetails uses for the full date, instead of a hand-written
+     AM/PM-before-time layout that matches no locale (X5). */
+  const graphDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function formatDate(dateStr: string): string {
     const d = new Date(dateStr);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const hours = d.getHours();
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    const ampm = hours < 12 ? 'AM' : 'PM';
-    const h12 = hours % 12 || 12;
-    return `${year}-${month}-${day} ${ampm} ${h12}:${mins}`;
+    // The synthetic UNCOMMITTED commit (and several test fixtures) ship an
+    // empty date string -- Intl.DateTimeFormat throws RangeError on an
+    // invalid Date, so guard and pass the raw value through unchanged
+    // (matches lib/utils/format-date.ts's formatCommitDate, which MainPanel's
+    // side will switch this over to importing once the branches merge).
+    if (isNaN(d.getTime())) return dateStr;
+    return graphDateFormatter.format(d);
   }
+  /* SNIPCODE-HOOK end */
 
   // Keep the viewport size in sync with the actual container. Its height changes
   // when the bottom panel opens/closes or is resized, which fires no window
