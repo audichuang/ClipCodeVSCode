@@ -95,7 +95,19 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     // file
     const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
     const item = new vscode.TreeItem(uri, vscode.TreeItemCollapsibleState.None);
-    item.description = path.dirname(node.path) === '.' ? '' : path.dirname(node.path);
+    const dir = path.dirname(node.path) === '.' ? '' : path.dirname(node.path);
+    /* SNIPCODE-HOOK start: R4/S7 nested repo dirs get their own look; untracked files are labeled */
+    if (node.status === 'N') {
+      // An unregistered nested git repo (embedded gitlink risk if `git add`ed) —
+      // show it like a repo, not a plain file, so Stage All doesn't look safe.
+      item.iconPath = new vscode.ThemeIcon('repo');
+      item.description = '(nested repo)';
+    } else if (node.status === 'U') {
+      item.description = dir ? `${dir} · untracked` : 'untracked';
+    } else {
+      item.description = dir;
+    }
+    /* SNIPCODE-HOOK end */
     item.contextValue = `file-${node.group}`;
     item.resourceUri = uri; // native file icon + git decoration colour
     item.id = `${node.group}:${node.repoPath}:${node.path}`;
