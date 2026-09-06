@@ -175,6 +175,7 @@
     currentHunk = -1; // new compare, new hunk list
     lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — clear any previous error for this new attempt
     collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — new compare, fresh collapse state
+    selectedFile = null; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — new compare, nothing selected yet
     /* SNIPCODE-HOOK end */
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
@@ -291,6 +292,7 @@
       loadingFiles = false;
       lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — an old repo's error must not leak into the new repo's empty state
       collapsedFiles = new Set(); // SNIPCODE-HOOK: PR tab (P7/P8) per-file collapse — repo switch, fresh collapse state
+      selectedFile = null; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — repo switch, nothing selected yet
     }
   });
 
@@ -405,6 +407,34 @@
     else next.add(path);
     collapsedFiles = next;
   }
+
+  function fileHasDiff(file: PrFile): boolean {
+    const d = diffs.find((x) => x.file === file.path);
+    return !!d && !d.isBinary && d.hunks.length > 0;
+  }
+
+  /* SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all — bulk
+     controls over the same collapsedFiles Set the per-file chevron (P7)
+     already toggles. Only files with an actual inline diff to hide are ever
+     added — collapsing a placeholder-eligible file (no chevron, nothing
+     rendered below its header anyway) would be a no-op forever stuck in the
+     Set. */
+  function collapseAll() {
+    collapsedFiles = new Set(files.filter(fileHasDiff).map((f) => f.path));
+  }
+
+  function expandAll() {
+    collapsedFiles = new Set();
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: PR tab (P8) left-column current-file highlight — the
+     minimal fallback the plan calls out (over an IntersectionObserver, which
+     happy-dom/vitest can't exercise and adds scroll-driven state that's
+     harder to reason about): a click on a file's left-list row highlights it
+     in both columns until a different file is clicked or the compare
+     changes. */
+  let selectedFile = $state<string | null>(null);
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file-list click
@@ -415,6 +445,7 @@
      rather than a CSS.escape'd attribute selector, since file paths can
      contain characters `querySelector` would otherwise choke on. */
   function scrollToFile(file: PrFile) {
+    selectedFile = file.path; // SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight
     const target = prContentEl
       ? [...prContentEl.querySelectorAll<HTMLElement>('[data-pr-file]')].find((el) => el.dataset.prFile === file.path)
       : undefined;
@@ -799,6 +830,14 @@
         <i class="codicon codicon-arrow-down"></i>
       </button>
       <!-- SNIPCODE-HOOK end -->
+      <!-- SNIPCODE-HOOK start: PR tab (P8) Collapse all / Expand all -->
+      <button class="pr-jump-btn" aria-label={t('pr.collapseAll')} onclick={collapseAll} use:tooltip={t('pr.collapseAll')}>
+        <i class="codicon codicon-collapse-all"></i>
+      </button>
+      <button class="pr-jump-btn" aria-label={t('pr.expandAll')} onclick={expandAll} use:tooltip={t('pr.expandAll')}>
+        <i class="codicon codicon-expand-all"></i>
+      </button>
+      <!-- SNIPCODE-HOOK end -->
       <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={'Copy Full Source'}>
         <i class="codicon codicon-copy"></i>
         Copy Full Source
@@ -839,7 +878,7 @@
           <div class="pr-file-list" style="width: {fileListWidth}px; flex-shrink: 0;">
             {#each files as file (file.path)}
               {@const s = fileStats(file)}
-              <button class="pr-file-row" onclick={() => scrollToFile(file)}>
+              <button class="pr-file-row" class:selected={selectedFile === file.path} onclick={() => scrollToFile(file)}>
                 <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
                 <!-- SNIPCODE-HOOK start: PR tab (P6) dir/base path split + rename
                      old -> new. No whitespace between the dir/base spans (all on
@@ -885,7 +924,7 @@
                    introduced this same change — collapsedFiles/toggleCollapse
                    above; a file with nothing to show (hasDiff false) gets no
                    chevron since there's nothing to expand/collapse. -->
-              <div class="pr-diff-file" data-pr-file={file.path}>
+              <div class="pr-diff-file" class:selected={selectedFile === file.path} data-pr-file={file.path}>
                 <div class="pr-diff-section-header">
                   <button
                     class="pr-diff-toggle"
@@ -1323,6 +1362,13 @@
     z-index: 2;
   }
 
+  /* SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight — right
+     side; the left .pr-file-row.selected rule lives with the rest of
+     .pr-file-row below. */
+  .pr-diff-file.selected .pr-diff-section-header {
+    background: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
+  }
+
   .pr-diff-toggle {
     display: flex;
     align-items: center;
@@ -1400,6 +1446,11 @@
 
   .pr-file-row:hover {
     background: var(--bg-hover);
+  }
+
+  /* SNIPCODE-HOOK: PR tab (P8) left-column current-file highlight */
+  .pr-file-row.selected {
+    background: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
   }
 
   .file-status {

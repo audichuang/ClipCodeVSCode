@@ -730,5 +730,7 @@ export const zh: Record<string, string> = {
   'pr.statsBinary': 'bin',
   'pr.copyMergeBase': '复制 merge-base 哈希',
   'pr.openNativeDiff': '打开原生 diff',
+  'pr.collapseAll': '全部折叠',
+  'pr.expandAll': '全部展开',
   /* SNIPCODE-HOOK end */
 };
