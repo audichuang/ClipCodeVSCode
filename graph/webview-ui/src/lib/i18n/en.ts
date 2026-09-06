@@ -725,4 +725,6 @@ export const en: Record<string, string> = {
   'toolbar.logDesc': 'Reflog (Ctrl+2)',
   'toolbar.statsDesc': 'Stats (Ctrl+3)',
   'toolbar.prDesc': 'PR (Ctrl+4)',
+  'search.noResultsLoaded': 'No results in {count} loaded commits',
+  'search.hashNotLoaded': 'Found — not in the loaded range',
 };
