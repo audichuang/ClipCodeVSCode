@@ -1081,13 +1081,54 @@
     flex-shrink: 0;
     user-select: none;
     cursor: pointer;
+    /* SNIPCODE-HOOK start: ui/diff D9 sticky gutter */
+    /* Pinned to the left edge so line numbers/+-/ stay reachable when a long
+       line is scrolled horizontally. Needs an OPAQUE background (below) or
+       the content scrolling underneath would show through it. */
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-primary);
+    /* SNIPCODE-HOOK end */
   }
+
+  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
+  /* The row's own (non-sticky) background can stay a translucent tint — see
+     .diff-add/.diff-delete above — because nothing scrolls underneath a
+     static element. The GUTTER is sticky, so the same translucent tint there
+     would let horizontally-scrolled content bleed through it. Layer the tint
+     as an opaque background-image over a solid background-color instead:
+     compositing a translucent gradient onto an opaque color under it always
+     yields an opaque result, so it reads identically to the plain tint. */
+  .diff-add .line-gutter {
+    background:
+      linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
+      var(--bg-primary);
+  }
+  .diff-delete .line-gutter {
+    background:
+      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
+      var(--bg-primary);
+  }
+  /* SNIPCODE-HOOK end */
 
   /* Selected lines get a clear accent that reads over the add/delete tints. */
   .diff-line.line-selected {
     background: var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25));
+  }
+  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
+  /* Both the tint (opaque, same reasoning as .diff-add/.diff-delete above)
+     and the focus accent move to the gutter: the accent is an INSET box-shadow
+     anchored at the left edge, which the opaque sticky gutter would otherwise
+     paint over and hide. Declared after .diff-add/.diff-delete's gutter rules
+     so a selected changed line shows the selection tint, not the change tint. */
+  .line-selected .line-gutter {
+    background:
+      linear-gradient(var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25)), var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25))),
+      var(--bg-primary);
     box-shadow: inset 3px 0 0 var(--vscode-focusBorder, #4a9eff);
   }
+  /* SNIPCODE-HOOK end */
 
   .line-num {
     width: 45px;
