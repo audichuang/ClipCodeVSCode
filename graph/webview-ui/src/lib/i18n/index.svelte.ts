@@ -1,8 +1,24 @@
 import { en } from './en';
 import { ko } from './ko';
 import { zh } from './zh';
+/* SNIPCODE-HOOK start: X1-2 zh-tw dictionary (was silently falling back to zh-cn) */
+import { zhTw } from './zh-tw';
+/* SNIPCODE-HOOK end */
 
-const dictionaries: Record<string, Record<string, string>> = { en, ko, zh };
+/* SNIPCODE-HOOK start: X1-2 zh-tw dictionary (was silently falling back to zh-cn) */
+const dictionaries: Record<string, Record<string, string>> = { en, ko, zh, 'zh-tw': zhTw };
+
+/** Fold Chinese script/region variants VS Code can hand us (`vscode.env.language`,
+ *  or a manually-picked `gitGraphPlus.locale`) onto the canonical dictionary key
+ *  `zh-tw` — `zh-Hant*` (Traditional script, any region) and `zh-HK` (Hong Kong,
+ *  which uses Traditional characters) both mean "give them zh-tw", not the plain
+ *  `zh` (simplified) fallback further down. Plain `zh-CN` stays unmapped so it
+ *  falls through to the `zh` simplified dictionary below. */
+function normalizeFullLocale(full: string): string {
+  if (/^zh-hant(-|$)/.test(full) || full === 'zh-hk' || full.startsWith('zh-hk-')) return 'zh-tw';
+  return full;
+}
+/* SNIPCODE-HOOK end */
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;')
@@ -17,10 +33,15 @@ class I18n {
   private dict = $state<Record<string, string>>(en);
 
   setLocale(loc: string) {
-    // Extract language code from locale string (e.g., 'ko-KR' -> 'ko')
-    const lang = loc.split('-')[0].split('_')[0].toLowerCase();
-    this.locale = lang;
-    this.dict = dictionaries[lang] ?? en;
+    /* SNIPCODE-HOOK start: X1-2 try the full locale (zh-tw vs zh-cn) before
+       falling back to the bare language code — a zh-TW user was silently
+       getting the zh-cn (simplified) dictionary via the old lang-only lookup. */
+    const full = normalizeFullLocale(loc.toLowerCase().replace(/_/g, '-'));
+    const lang = full.split('-')[0];
+    const matchedKey = full in dictionaries ? full : lang;
+    this.locale = matchedKey;
+    this.dict = dictionaries[full] ?? dictionaries[lang] ?? en;
+    /* SNIPCODE-HOOK end */
   }
 
   t(key: string, params?: Record<string, string | number>): string {
