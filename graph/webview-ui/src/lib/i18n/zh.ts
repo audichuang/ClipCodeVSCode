@@ -321,11 +321,6 @@ export const zh: Record<string, string> = {
   'search.filterBranches': '搜索',
 
   // Activity log
-  'activityLog.title': '活动日志',
-  'activityLog.auto': '自动',
-  'activityLog.showAll': '全部',
-  'activityLog.refresh': '刷新',
-  'activityLog.empty': '尚未执行任何命令',
 
   // Reflog
   'reflog.title': 'Reflog',

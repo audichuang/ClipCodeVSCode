@@ -321,11 +321,6 @@ export const ko: Record<string, string> = {
   'search.filterBranches': '검색',
 
   // Activity log
-  'activityLog.title': '활동 로그',
-  'activityLog.auto': '자동',
-  'activityLog.showAll': '전체',
-  'activityLog.refresh': '새로고침',
-  'activityLog.empty': '실행된 명령이 없습니다',
 
   // Reflog
   'reflog.title': 'Reflog',

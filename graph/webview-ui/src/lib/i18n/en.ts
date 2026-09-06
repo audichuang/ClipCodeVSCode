@@ -321,11 +321,6 @@ export const en: Record<string, string> = {
   'search.filterBranches': 'Search',
 
   // Activity log
-  'activityLog.title': 'Activity Log',
-  'activityLog.auto': 'Auto',
-  'activityLog.showAll': 'All',
-  'activityLog.refresh': 'Refresh',
-  'activityLog.empty': 'No commands executed yet',
 
   // Reflog
   'reflog.title': 'Reflog',
