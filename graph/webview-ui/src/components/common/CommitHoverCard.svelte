@@ -1,18 +1,23 @@
 <script lang="ts">
   import type { Commit } from '../../lib/types';
   import { avatarStore } from '../../lib/stores/avatars.svelte';
-  import { onMount } from 'svelte';
   import { formatCommitDate } from '../../lib/utils/format-date';
 
+  /* SNIPCODE-HOOK start: X7 — onNavigate was a prop the card never actually called
+     (no click handler in its template ever invoked it — see CommitDetails.svelte's
+     parent-link onmouseleave, which destroys the card before the pointer can even
+     reach it). Removed rather than wired up or grace-timed: the card is read-only
+     (no interactive content), so there is nothing for a fixed "enter the card"
+     timer to protect. */
   interface Props {
     commit: Commit;
     x: number;
     y: number;
     onClose: () => void;
-    onNavigate: () => void;
   }
 
-  let { commit, x, y, onClose, onNavigate }: Props = $props();
+  let { commit, x, y, onClose }: Props = $props();
+  /* SNIPCODE-HOOK end */
   let cardEl: HTMLDivElement | undefined = $state();
 
   /* SNIPCODE-HOOK start: M7 — same shared date format as CommitDetails/CommitGraph */

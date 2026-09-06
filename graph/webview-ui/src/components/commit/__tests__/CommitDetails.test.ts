@@ -821,7 +821,10 @@ describe('CommitDetails — hover preview cache & navigate', () => {
     });
   });
 
-  it('clicking the hover card navigates and clears the preview', async () => {
+  /* SNIPCODE-HOOK start: X7 — CommitHoverCard's onNavigate prop was dead code
+     (nothing in its template ever called it) and has been removed; this test
+     now just exercises the card's own onmouseleave → onClose wiring. */
+  it('mouseleave on the hover card clears the preview', async () => {
     vi.useFakeTimers();
     commitStore.commits = [commit({ hash: 'parent1', subject: 'parent commit' })];
     const { container } = render(CommitDetails, { commit: commit({ parents: ['parent1'] }) });
@@ -831,15 +834,12 @@ describe('CommitDetails — hover preview cache & navigate', () => {
     vi.advanceTimersByTime(400);
     vi.useRealTimers();
     await waitFor(() => container.querySelector('.commit-hover-card'));
-    // CommitHoverCard exposes an onNavigate handler that the parent uses to
-    // jump to the previewed commit; clicking the card surface triggers it.
-    // Simulate the navigate path via clicking the card body — this exercises
-    // App's parent-link onclick contract via mouseleave path instead.
     await fireEvent.mouseLeave(container.querySelector('.commit-hover-card')!);
     await waitFor(() => {
       expect(container.querySelector('.commit-hover-card')).toBeNull();
     });
   });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — multi-commit sections (3+ mode)', () => {
