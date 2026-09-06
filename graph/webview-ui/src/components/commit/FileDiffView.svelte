@@ -1074,7 +1074,9 @@
   .diff-line {
     display: flex;
     min-height: 20px;
-    line-height: 20px;
+    /* SNIPCODE-HOOK start: ui/diff D P2 line-height scales with editor font size */
+    line-height: 1.5;
+    /* SNIPCODE-HOOK end */
   }
 
   .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)); }
@@ -1155,11 +1157,13 @@
     user-select: none;
   }
 
-  .diff-add .line-prefix { color: #4caf50; }
-  .diff-delete .line-prefix { color: #f44336; }
-
-  :global(body.vscode-light) .diff-add .line-prefix { color: #2e7d32; }
-  :global(body.vscode-light) .diff-delete .line-prefix { color: #b71c1c; }
+  /* SNIPCODE-HOOK start: ui/diff D P2 use the theme's own decoration colors */
+  /* These already flip appropriately per light/dark/high-contrast theme on
+     their own, so the separate vscode-light override rule that used to exist
+     here is no longer needed — VS Code supplies the right value either way. */
+  .diff-add .line-prefix { color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50); }
+  .diff-delete .line-prefix { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  /* SNIPCODE-HOOK end */
 
   .line-content {
     white-space: pre;
