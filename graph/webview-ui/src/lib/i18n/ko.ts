@@ -774,4 +774,8 @@ export const ko: Record<string, string> = {
   'graph.selectForCompare': '비교할 커밋으로 선택…',
   'graph.clickToViewChanges': '스테이지됨/스테이지 안 됨 변경 사항 보기',
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/cleanup */
+  // ui/cleanup
+  'pr.statsRenamed': '이름 변경됨',
+  /* SNIPCODE-HOOK end */
 };

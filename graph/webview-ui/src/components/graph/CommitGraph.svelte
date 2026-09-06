@@ -33,6 +33,13 @@
   import { resolveDrop, dragRebaseMessage, dragMergeMessage } from '../../lib/utils/dragDrop';
   import { computeNavigationTarget, computeScrollTop, computeJumpTarget, computePagedTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
   import LinkifiedText from '../common/LinkifiedText.svelte';
+  /* SNIPCODE-HOOK start: C2 — shared date formatter (see lib/utils/format-date.ts);
+     replaces this file's own formatDate/graphDateFormatter now that both
+     branches (this graph panel + CommitDetails/CommitHoverCard) are merged.
+     C10 — formatCommitDateLong for the .col-date tooltip (below), which used
+     to fall back to a raw toLocaleString() that didn't match the cell format. */
+  import { formatCommitDate, formatCommitDateLong } from '../../lib/utils/format-date';
+  /* SNIPCODE-HOOK end */
 
 
   /**
@@ -345,8 +352,12 @@
   /* SNIPCODE-HOOK start: M8 — author widened 120 -> 160 (flex basis; CSS below
      lets it shrink to 100 min instead of a hard 120px truncation cliff). This
      constant sizes the h-scroll pinned meta overlay/spacer, so it must track
-     the CSS column width or the overlay misaligns with the scrolling header. */
-  const RIGHT_COLS_WIDTH = 160 + 75 + 150;
+     the CSS column width or the overlay misaligns with the scrolling header.
+     C1 — date widened 150 -> 180: zh-TW's Intl 'medium'/'short' format (e.g.
+     "2026年8月1日 晚上11:43") overflowed 150px whenever the localized PM/evening
+     prefix ("晚上"/"中午") landed on a double-digit hour; 180px clears every
+     locale tested (zh-TW, en-US). Keep in sync with .col-date width below. */
+  const RIGHT_COLS_WIDTH = 160 + 75 + 180;
   /* SNIPCODE-HOOK end */
   const MIN_MESSAGE_WIDTH = 120;
 
@@ -690,14 +701,19 @@
   /** Combined G2 (non-current-branch dim) + G7 (hover/select rail spotlight)
    *  visual for one path/link. When nothing is hovered/selected, G2 alone
    *  decides (highlighted ? full : dim). Once something IS active, the active
-   *  rail(s) go fully opaque and everything else drops to whichever is MORE
-   *  dimmed of the two rules ("與 G2 疊加時取較低"), so the spotlight reads
-   *  clearly regardless of which branch the other rails belong to. */
+   *  rail(s) go fully opaque+thick and every other rail drops further still
+   *  so the spotlight reads clearly — but C8: `Math.min(g2Opacity, 0.3)`
+   *  collapsed both G2 buckets (1 and 0.35) to the same 0.3, erasing the
+   *  highlighted/non-highlighted distinction the instant anything is active.
+   *  Scale each bucket down by the same factor instead, so a highlighted
+   *  (current-branch) rail still reads as more present than a dimmed one
+   *  even while neither is the spotlighted rail. */
   function railVisual(highlighted: boolean, pathIndex: number): { opacity: number; strokeWidth: number } {
     if (activePathIndices.has(pathIndex)) return { opacity: 1, strokeWidth: 3 };
     const g2Opacity = highlighted ? 1 : 0.35;
-    return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
+    return { opacity: activePathIndices.size > 0 ? (highlighted ? 0.3 : 0.15) : g2Opacity, strokeWidth: 2 };
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: R1 — double-click on a row no longer checks out a
      branch with zero confirmation (R1). This function had no other caller
@@ -885,14 +901,12 @@
           action: () => { squashChain = chain; },
         });
         const head = chain[chain.length - 1].hash;
-        // BranchInfo.hash is the abbreviated object name; commitMap is keyed by
-        // the full hash. Resolve each local branch tip to its full hash so the
-        // first-parent walk can start, falling back to the abbreviated value
-        // (no match) when the tip is outside the loaded commit range.
-        const fullByAbbrev = new Map(commitStore.commits.map(c => [c.abbreviatedHash, c.hash]));
+        // BranchInfo.hash is the full object name (X6: git-service.ts requests
+        // `%(objectname)`, not `:short`), same as commitMap's keys, so branch
+        // tips need no abbreviated->full resolution before the first-parent walk.
         const localBranchTips = branchStore.localBranches.map(b => ({
           name: b.name,
-          hash: fullByAbbrev.get(b.hash) ?? b.hash,
+          hash: b.hash,
         }));
         const candidates = chainBranches(
           head,
@@ -1386,22 +1400,6 @@
     contextMenu = { x: e.clientX, y: e.clientY, items };
   }
 
-  /* SNIPCODE-HOOK start: M7 — locale-aware date format, matching the format
-     CommitDetails uses for the full date, instead of a hand-written
-     AM/PM-before-time layout that matches no locale (X5). */
-  const graphDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  function formatDate(dateStr: string): string {
-    const d = new Date(dateStr);
-    // The synthetic UNCOMMITTED commit (and several test fixtures) ship an
-    // empty date string -- Intl.DateTimeFormat throws RangeError on an
-    // invalid Date, so guard and pass the raw value through unchanged
-    // (matches lib/utils/format-date.ts's formatCommitDate, which MainPanel's
-    // side will switch this over to importing once the branches merge).
-    if (isNaN(d.getTime())) return dateStr;
-    return graphDateFormatter.format(d);
-  }
-  /* SNIPCODE-HOOK end */
-
   // Keep the viewport size in sync with the actual container. Its height changes
   // when the bottom panel opens/closes or is resized, which fires no window
   // resize — without this, scroll-into-view would compute against a stale height
@@ -1574,7 +1572,7 @@
         {/if}
       </div>
       <div class="col-hash" use:tooltip={commit.hash !== 'UNCOMMITTED' ? commit.hash : ''}>{commit.hash !== 'UNCOMMITTED' ? commit.abbreviatedHash : ''}</div>
-      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? new Date(commit.author.date).toLocaleString() : ''}>{commit.hash !== 'UNCOMMITTED' ? formatDate(commit.author.date) : ''}</div>
+      <div class="col-date" use:tooltip={commit.hash !== 'UNCOMMITTED' ? formatCommitDateLong(commit.author.date) : ''}>{commit.hash !== 'UNCOMMITTED' ? formatCommitDate(commit.author.date) : ''}</div>
     {/snippet}
 
     <!-- Column headers -->
@@ -2307,18 +2305,28 @@
   /* Light theme: the raw palette averages ~1.5–2.3:1 contrast against white
      (measured), well under WCAG's 3:1 graphical-object floor. Darken toward
      black in oklab (perceptually even mixing) rather than adding a whole
-     second palette to maintain. */
-  :global(body.vscode-light) .graph-lines .rail {
+     second palette to maintain.
+     C7 — VS Code puts `vscode-high-contrast-light` on body for HC Light,
+     NOT `vscode-light` (see lib/utils/highlighter.ts's identical note), so
+     this rule needs both selectors or HC Light silently falls back to the
+     raw (low-contrast) dark-theme palette on its light background. */
+  :global(body.vscode-light) .graph-lines .rail,
+  :global(body.vscode-high-contrast-light) .graph-lines .rail {
     stroke: color-mix(in oklab, var(--c) 72%, #000);
   }
-  :global(body.vscode-light) .graph-lines .dot-fill {
+  :global(body.vscode-light) .graph-lines .dot-fill,
+  :global(body.vscode-high-contrast-light) .graph-lines .dot-fill {
     fill: color-mix(in oklab, var(--c) 72%, #000);
   }
-  :global(body.vscode-light) .graph-lines .dot-ring {
+  :global(body.vscode-light) .graph-lines .dot-ring,
+  :global(body.vscode-high-contrast-light) .graph-lines .dot-ring {
     stroke: color-mix(in oklab, var(--c) 72%, #000);
   }
 
-  :global(body.vscode-high-contrast) .graph-lines .rail {
+  /* C7 — high-contrast bolder rail applies to both HC variants (dark and
+     light), not just `vscode-high-contrast` (HC dark). */
+  :global(body.vscode-high-contrast) .graph-lines .rail,
+  :global(body.vscode-high-contrast-light) .graph-lines .rail {
     stroke-width: 2.5;
   }
   /* SNIPCODE-HOOK end */
@@ -2605,14 +2613,16 @@
     opacity: 0.8;
   }
 
+  /* SNIPCODE-HOOK start: C1 — 150 -> 180px; see RIGHT_COLS_WIDTH above for why. */
   .col-date {
-    width: 150px;
+    width: 180px;
     flex-shrink: 0;
     padding: 0 10px;
     color: var(--text-secondary);
     white-space: nowrap;
     text-align: left;
   }
+  /* SNIPCODE-HOOK end */
 
   .col-hash {
     width: 75px;
@@ -2749,21 +2759,29 @@
     content: none;
   }
 
-  /* Light theme overrides */
-  :global(body.vscode-light) .ref-badge {
+  /* Light theme overrides. */
+  /* SNIPCODE-HOOK start: C7 — also match HC Light (`vscode-high-contrast-light`,
+     a light background, same as plain light) instead of just `vscode-light`;
+     the HC-dark override below (white text on transparent) would be invisible
+     here, so HC Light needs these dark-on-light rules, not that one. */
+  :global(body.vscode-light) .ref-badge,
+  :global(body.vscode-high-contrast-light) .ref-badge {
     background: rgba(0, 0, 0, 0.04);
     color: #000;
     border: 1px solid rgba(0, 0, 0, 0.15);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-fixed {
+  :global(body.vscode-light) .ref-badge.badge-fixed,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-fixed {
     background: color-mix(in srgb, var(--badge-color) var(--fixed-tint, 20%), #fff);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-head {
+  :global(body.vscode-light) .ref-badge.badge-head,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-head {
     background: color-mix(in srgb, var(--badge-color) 70%, #fff);
     color: #000;
   }
+  /* SNIPCODE-HOOK end */
 
   /* High contrast overrides */
   :global(body.vscode-high-contrast) .ref-badge {
