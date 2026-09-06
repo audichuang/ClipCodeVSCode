@@ -882,9 +882,16 @@ export class GitService {
    */
   async branches(): Promise<BranchInfo[]> {
     return this.cachedRead('branches', async () => {
+      /* SNIPCODE-HOOK start: X6 — full object name, not :short. BranchInfo.hash
+         feeds git-graph-builder's buildUpstreamMap/buildRemoteOnlyData, which
+         match it against Commit.hash (%H, full) via a hash-keyed Map. A
+         truncated hash never matches those full-length keys, so the local
+         branch's ancestor BFS silently failed to seed and misjudged large
+         swaths of shared history as remote-only. */
       const raw = await this.exec([
-        'branch', '-a', '--format=%(HEAD)%(refname:short)%00%(objectname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(refname)',
+        'branch', '-a', '--format=%(HEAD)%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(refname)',
       ]);
+      /* SNIPCODE-HOOK end */
       return parseBranches(raw);
     });
   }

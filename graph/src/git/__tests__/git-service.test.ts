@@ -687,6 +687,19 @@ describe('GitService', () => {
     });
   });
 
+  /* SNIPCODE-HOOK start: X6 — branches() must request the full object name */
+  describe('branches() hash format (X6)', () => {
+    it('requests %(objectname) (full hash), not %(objectname:short)', async () => {
+      let capturedArgs: string[] = [];
+      mockExec(service, async (args) => { capturedArgs = args; return ''; });
+      await service.branches();
+      const formatArg = capturedArgs.find(a => a.startsWith('--format='));
+      expect(formatArg).toContain('%(objectname)');
+      expect(formatArg).not.toContain('%(objectname:short)');
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   describe('getUncommittedDiff', () => {
     it('returns staged and unstaged file lists', async () => {
       // porcelain format: XY PATH (X=staged, Y=unstaged)
