@@ -15,6 +15,13 @@ export interface GraphPath {
   points: Array<{ x: number; y: number }>;
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 */
+  /** True when any commit on this rail is an ancestor of (or is) HEAD. */
+  highlighted: boolean;
+  /** Index of this path in FullGraphData.paths — lets the webview map a
+   *  hovered/selected dot or link back to the rail it belongs to (G7). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphLink {
@@ -23,6 +30,11 @@ export interface GraphLink {
   end: { x: number; y: number };
   color: number;
   colorOverride?: string;
+  /* SNIPCODE-HOOK start: G2/G7 */
+  highlighted: boolean;
+  /** Index of the rail this merge link connects into (the parent's path). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface GraphDot {
@@ -32,6 +44,17 @@ export interface GraphDot {
   type: 'default' | 'head' | 'merge';
   localOnly: boolean;
   remoteTip: boolean;
+  /* SNIPCODE-HOOK start: G2/G6/G7 */
+  /** True when this commit is an ancestor of (or is) HEAD. */
+  highlighted: boolean;
+  /** True when this commit carries a `head` ref, independent of `type` — lets
+   *  HEAD-on-a-merge-commit keep the merge dot's rendering while still
+   *  drawing the HEAD ring (type stays 'merge', isHead adds the ring). */
+  isHead: boolean;
+  /** Index into FullGraphData.paths of the rail this dot sits on, or -1 for a
+   *  disconnected root commit with no rail (G7 hover/selected rail highlight). */
+  pathIndex: number;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface FullGraphData {
@@ -55,7 +78,11 @@ class PathHelper {
 
   constructor(next: string, color: number, start: { x: number; y: number }, to?: { x: number; y: number }) {
     this.next = next;
-    this.path = { points: [], color };
+    /* SNIPCODE-HOOK start: G2/G7 — highlighted/pathIndex default; both are set
+       by the caller right after construction (highlighted once reachability
+       is known, pathIndex once the path is pushed onto result.paths). */
+    this.path = { points: [], color, highlighted: false, pathIndex: -1 };
+    /* SNIPCODE-HOOK end */
 
     if (to) {
       this.lastX = to.x;
@@ -319,6 +346,32 @@ function preferredIndexForCommit(commit: Commit, commits: Commit[], hashIndex: M
   return hashStringToIndex(name);
 }
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G2 — HEAD-reachability, for dimming non-current-branch rails */
+function buildHeadReachableSet(commits: Commit[], hashIndex: Map<string, number>): Set<string> | null {
+  const headCommit = commits.find(c => c.refs.some(r => r.type === 'head'));
+  if (!headCommit) return null; // no HEAD loaded → caller treats everything as highlighted
+  const reachable = new Set<string>();
+  // UNCOMMITTED (when present) sits above HEAD as its synthetic child (X4) —
+  // seed it too so its dot doesn't dim despite genuinely being "on" HEAD.
+  const queue: string[] = commits[0]?.hash === 'UNCOMMITTED' ? ['UNCOMMITTED', headCommit.hash] : [headCommit.hash];
+  let qHead = 0;
+  while (qHead < queue.length) {
+    const hash = queue[qHead++];
+    if (reachable.has(hash)) continue;
+    reachable.add(hash);
+    if (hash === 'UNCOMMITTED') {
+      queue.push(headCommit.hash);
+      continue;
+    }
+    const idx = hashIndex.get(hash);
+    if (idx === undefined) continue;
+    for (const p of commits[idx].parents) if (!reachable.has(p)) queue.push(p);
+  }
+  return reachable;
+}
+/* SNIPCODE-HOOK end */
+
 // ── Main parse function (SourceGit CommitGraph.Parse port) ──
 
 export function buildFullGraph(
@@ -361,6 +414,11 @@ export function buildFullGraph(
   }
   const { tipSet: remoteTipSet, allSet: remoteOnlySet } = buildRemoteOnlyData(commits, branches, hashIndex);
   const pushedSet = buildPushedSet(commits, hashIndex);
+  /* SNIPCODE-HOOK start: G2 */
+  // null (no HEAD loaded) means "nothing to dim against" — treat everything as highlighted.
+  const headReachable = buildHeadReachableSet(commits, hashIndex);
+  const isHighlighted = (hash: string) => headReachable === null || headReachable.has(hash);
+  /* SNIPCODE-HOOK end */
 
   // Map each commit that is a (local or remote) branch tip to its pattern color.
   // First matching ref on a commit wins; the resolver enforces config-order priority.
@@ -387,6 +445,12 @@ export function buildFullGraph(
         if (major === null) {
           offsetX += UNIT_W;
           major = l;
+          /* SNIPCODE-HOOK start: G2 — OR-accumulate: a rail started above HEAD
+             (e.g. an origin/main tip 1 commit ahead) becomes highlighted the
+             moment it reaches a HEAD-reachable commit; monotonic since every
+             ancestor of a reachable commit is itself reachable. */
+          major.path.highlighted = major.path.highlighted || isHighlighted(commit.hash);
+          /* SNIPCODE-HOOK end */
           if (commit.parents.length > 0) {
             untrackNext(major);
             major.next = commit.parents[0];
@@ -471,6 +535,10 @@ export function buildFullGraph(
             control: { x: parent.lastX, y: position.y },
             color: parent.path.color,
             colorOverride: parent.path.colorOverride,
+            /* SNIPCODE-HOOK start: G2/G7 */
+            highlighted: isHighlighted(commit.hash),
+            pathIndex: parent.path.pathIndex,
+            /* SNIPCODE-HOOK end */
           });
         } else {
           // New path for merge parent. No separate GraphLink here — the

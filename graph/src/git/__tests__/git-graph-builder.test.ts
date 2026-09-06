@@ -501,3 +501,52 @@ describe('buildFullGraph stable per-branch color (G1)', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G2 — HEAD-reachability highlighting */
+describe('buildFullGraph HEAD-reachability highlighting (G2)', () => {
+  it('dims a rail that is not an ancestor of HEAD', () => {
+    const commits = [
+      makeCommit('f2', ['f1'], [{ type: 'branch', name: 'feature' }]),
+      makeCommit('f1', ['base']),
+      makeCommit('h1', ['base'], [{ type: 'head', name: 'main' }]),
+      makeCommit('base', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].highlighted).toBe(false); // f2
+    expect(graph.dots[1].highlighted).toBe(false); // f1
+    expect(graph.dots[2].highlighted).toBe(true);  // h1 (HEAD)
+    expect(graph.dots[3].highlighted).toBe(true);  // base (shared ancestor)
+  });
+
+  it('a rail starting above HEAD (e.g. an unfetched remote tip 1 commit ahead) becomes highlighted once it reaches HEAD', () => {
+    const commits = [
+      makeCommit('r2', ['h1'], [{ type: 'remote-branch', name: 'main', remote: 'origin' }]),
+      makeCommit('h1', ['base'], [{ type: 'head', name: 'main' }]),
+      makeCommit('base', []),
+    ];
+    const graph = buildFullGraph(commits);
+    const railIndex = graph.dots[1].pathIndex; // h1's rail
+    expect(railIndex).toBeGreaterThanOrEqual(0);
+    expect(graph.paths[railIndex].highlighted).toBe(true);
+  });
+
+  it('UNCOMMITTED (seeded as HEAD\'s synthetic child) is highlighted too', () => {
+    const commits = [
+      makeCommit('UNCOMMITTED', ['h1']),
+      makeCommit('h1', ['base'], [{ type: 'head', name: 'main' }]),
+      makeCommit('base', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].highlighted).toBe(true);
+  });
+
+  it('treats everything as highlighted when no HEAD is loaded (nothing to dim against)', () => {
+    const commits = [
+      makeCommit('f2', ['f1'], [{ type: 'branch', name: 'feature' }]),
+      makeCommit('f1', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots.every(d => d.highlighted)).toBe(true);
+  });
+});
+/* SNIPCODE-HOOK end */

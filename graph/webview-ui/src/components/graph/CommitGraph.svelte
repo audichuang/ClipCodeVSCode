@@ -503,13 +503,17 @@
   let pathDs = $derived(displayPaths.map(p => buildPathD(p.points)));
 
   let visiblePaths = $derived.by(() => {
-    const out: Array<{ color: number; colorOverride?: string; d: string }> = [];
+    /* SNIPCODE-HOOK start: G2/G7 — carry highlighted + this path's own index
+       (== FullGraphData.paths index, since we iterate displayPaths in order)
+       through to the template, which the remap below used to drop. */
+    const out: Array<{ color: number; colorOverride?: string; d: string; highlighted: boolean; pathIndex: number }> = [];
     for (let i = 0; i < displayPaths.length; i++) {
       const b = pathBounds[i];
       if (b.maxY >= startIndex && b.minY <= endIndex) {
-        out.push({ color: displayPaths[i].color, colorOverride: displayPaths[i].colorOverride, d: pathDs[i] });
+        out.push({ color: displayPaths[i].color, colorOverride: displayPaths[i].colorOverride, d: pathDs[i], highlighted: displayPaths[i].highlighted, pathIndex: i });
       }
     }
+    /* SNIPCODE-HOOK end */
     return out;
   });
   let visibleLinks = $derived(displayLinks.filter(link => {
@@ -1459,13 +1463,19 @@
         style="position: absolute; top: 0; height: {totalHeight}px; overflow: hidden;"
       >
         <!-- Paths: continuous branch lines -->
+        <!-- SNIPCODE-HOOK start: G4/G2/G7/G11 — single line (glow layer removed,
+             it was ~1.05:1 contrast and invisible in every screenshot while
+             doubling <path> count); color via --c custom prop (G11 lets the
+             light/high-contrast CSS below recolor without touching this
+             template); opacity/width from railVisual (G2 dim + G7 spotlight). -->
         {#each visiblePaths as path}
           {@const pathColor = resolveGraphColor(graphColorsStore.palette, path.color, path.colorOverride)}
+          {@const v = railVisual(path.highlighted, path.pathIndex)}
           {#if path.d}
-            <path d={path.d} fill="none" stroke={pathColor} stroke-width="5" opacity="0.07" stroke-linecap="round" />
-            <path d={path.d} fill="none" stroke={pathColor} stroke-width="2" opacity="0.85" stroke-linecap="round" />
+            <path class="rail" d={path.d} style="--c: {pathColor}" stroke-width={v.strokeWidth} opacity={v.opacity} stroke-linecap="round" />
           {/if}
         {/each}
+        <!-- SNIPCODE-HOOK end -->
 
         <!-- Links: merge connection curves -->
         {#each visibleLinks as link}
@@ -1487,22 +1497,36 @@
         {/each}
 
         <!-- Dots: commit nodes -->
+        <!-- SNIPCODE-HOOK start: G6/G2/G11/P2 — isHead now independent of type,
+             so a HEAD commit that is also a merge keeps the merge rendering
+             (ring+center dot) and additionally draws the HEAD ring (r6.5) on
+             top instead of losing the merge marker (old `head` took priority
+             over `merge` in dotType). Ring circles use the .dot-ring class
+             (fill: transparent, not --bg-primary — P2, was a dark disc on a
+             selected/hovered row). Color via --c (G11). Opacity follows G2
+             (highlighted) same as rows/text, unaffected by G7 (rail hover
+             only restyles paths/links, not dots, per spec). -->
         {#each visibleDots as dot, i}
           {@const dotColor = resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride)}
           {@const dx = laneX(dot.center.x)}
           {@const dy = dot.center.y * ROW_HEIGHT}
           {@const dotCommit = displayCommits[startIndex + i]}
+          {@const dotOpacity = dot.highlighted ? 1 : 0.5}
           {#if dotCommit?.hash === 'UNCOMMITTED'}
-            <circle cx={dx} cy={dy} r={5} fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3 2" />
-          {:else if dot.type === 'head'}
-            <circle cx={dx} cy={dy} r={5} fill="var(--bg-primary, #1e1e1e)" stroke={dotColor} stroke-width="2" />
-          {:else if dot.type === 'merge'}
-            <circle cx={dx} cy={dy} r={4} fill="var(--bg-primary, #1e1e1e)" stroke={dotColor} stroke-width="1.5" />
-            <circle cx={dx} cy={dy} r={2} fill={dotColor} />
+            <circle class="dot-ring" cx={dx} cy={dy} r={5} style="--c: #888888" stroke-width="1.5" stroke-dasharray="3 2" opacity={dotOpacity} />
           {:else}
-            <circle cx={dx} cy={dy} r={4} fill={dotColor} />
+            {#if dot.type === 'merge'}
+              <circle class="dot-ring" cx={dx} cy={dy} r={4} style="--c: {dotColor}" stroke-width="1.5" opacity={dotOpacity} />
+              <circle class="dot-fill" cx={dx} cy={dy} r={2} style="--c: {dotColor}" opacity={dotOpacity} />
+            {:else}
+              <circle class="dot-fill" cx={dx} cy={dy} r={4} style="--c: {dotColor}" opacity={dotOpacity} />
+            {/if}
+            {#if dot.isHead}
+              <circle class="dot-ring" cx={dx} cy={dy} r={6.5} style="--c: {dotColor}" stroke-width="1.5" opacity={dotOpacity} />
+            {/if}
           {/if}
         {/each}
+        <!-- SNIPCODE-HOOK end -->
       </svg>
 
       <!-- Commit rows -->
