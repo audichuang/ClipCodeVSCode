@@ -2611,9 +2611,18 @@ export class GitService {
    * the fingerprint rejects a selection if that rendered raw diff changed.
    */
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
-  async stageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  // oldPath must be the SAME value the caller used to render the diff it's
+  // now selecting hunks/lines from — workingFileDiffRaw/stagedFileDiffRaw
+  // otherwise fetch different raw bytes than what's on screen, and the
+  // fingerprint check below would (correctly, but confusingly) reject every
+  // click on a renamed file as stale. When it IS the same rendered diff and
+  // that diff is a rename, assertHunkStageable's existing rename-header check
+  // rejects it with a clear per-hunk-not-supported error instead.
+  async stageHunks(file: string, hunkIndices: number[], fingerprint: string, oldPath?: string): Promise<void> {
     this.assertSafePath(file, 'apply');
-    const raw = await this.workingFileDiffRaw(file);
+    const raw = await this.workingFileDiffRaw(file, oldPath);
+    /* SNIPCODE-HOOK end */
     // An empty raw diff under a rendered fingerprint means the shown diff is
     // obsolete (e.g. fully staged elsewhere) — recoverable, so the panel
     // re-renders instead of leaving a dead clickable body.
@@ -2633,9 +2642,11 @@ export class GitService {
    * index (`git apply --cached --reverse`) — the `git reset -p` direction.
    * `hunkIndices` index into getUncommittedFileDiff(file, true)'s hunk list.
    */
-  async unstageHunks(file: string, hunkIndices: number[], fingerprint: string): Promise<void> {
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async unstageHunks(file: string, hunkIndices: number[], fingerprint: string, oldPath?: string): Promise<void> {
     this.assertSafePath(file, 'apply');
-    const raw = await this.stagedFileDiffRaw(file);
+    const raw = await this.stagedFileDiffRaw(file, oldPath);
+    /* SNIPCODE-HOOK end */
     if (raw.length === 0) { throw new StaleDiffError(`no staged changes to unstage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
@@ -2650,9 +2661,11 @@ export class GitService {
    * webview rendered (workingFileDiffRaw) and `git apply --cached`s it.
    * `hunkIndex`/`lineIndices` index that diff's parsed hunk/DiffLine list.
    */
-  async stageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async stageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, oldPath?: string): Promise<void> {
     this.assertSafePath(file, 'apply');
-    const raw = await this.workingFileDiffRaw(file);
+    const raw = await this.workingFileDiffRaw(file, oldPath);
+    /* SNIPCODE-HOOK end */
     if (raw.length === 0) { throw new StaleDiffError(`no unstaged changes to stage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);
@@ -2667,9 +2680,11 @@ export class GitService {
    * unstageHunks. Builds a narrowed forward patch from the STAGED diff and
    * reverse-applies it to the index (`git apply --cached --reverse`).
    */
-  async unstageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string): Promise<void> {
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async unstageLines(file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, oldPath?: string): Promise<void> {
     this.assertSafePath(file, 'apply');
-    const raw = await this.stagedFileDiffRaw(file);
+    const raw = await this.stagedFileDiffRaw(file, oldPath);
+    /* SNIPCODE-HOOK end */
     if (raw.length === 0) { throw new StaleDiffError(`no staged changes to unstage for ${file}`); }
     this.assertDiffFingerprint(raw, fingerprint);
     assertHunkStageable(raw.toString('latin1'), file);

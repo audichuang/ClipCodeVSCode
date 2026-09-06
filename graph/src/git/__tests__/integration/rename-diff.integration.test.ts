@@ -8,7 +8,7 @@
 // prove GitService's oldPath-aware pathspec (getUncommittedFileDiff /
 // commitFileDiff via showCommitDiff) fixes both, using real git — no mocks.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GitService } from '../../git-service';
+import { GitService, StaleDiffError } from '../../git-service';
 import { TempRepo, commit, createTempRepo, runGit, writeFile } from './helpers';
 
 // A file big enough that renaming it with a couple of edited lines still
@@ -179,6 +179,51 @@ describe('GitService integration — rename-aware diff pathspec', () => {
       // (see git-service.test.ts "assertHunkStageable (R5)"); the fix here is
       // making the rename VISIBLE to it via the -M two-pathspec diff, not the
       // regex itself.
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  describe('X3: unstageHunks/stageHunks with oldPath end-to-end (Diff tab tree-click path)', () => {
+    it('unstageHunks on a staged rename+modify, given the SAME oldPath the diff was rendered with, throws the clear R5 error — not StaleDiffError', async () => {
+      commit(repo.path, 'base', { 'old.ts': BASE });
+      runGit(repo.path, ['mv', 'old.ts', 'new.ts']);
+      writeFile(repo.path, 'new.ts', renamedAndModified());
+      runGit(repo.path, ['add', '-A']);
+
+      // Exactly what DiffPanel.push does: render with oldPath, get its fingerprint.
+      const rendered = await svc.getUncommittedFileDiff('new.ts', true, 'old.ts');
+      expect(rendered!.oldPath).toBe('old.ts');
+      expect(rendered!.hunks.length).toBeGreaterThan(0);
+
+      // Exactly what the diffStageHunk handler now does: same oldPath, so the
+      // raw bytes assertHunkStageable inspects are the SAME rename-shaped diff
+      // that was rendered (not the pathspec-bug "new file" shape) — fingerprint
+      // matches, so the rejection is the R5 message, never StaleDiffError.
+      let caught: unknown;
+      try {
+        await svc.unstageHunks('new.ts', [0], rendered!.fingerprint!, 'old.ts');
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBeInstanceOf(StaleDiffError);
+      expect((caught as Error).message).toMatch(/mode or rename/);
+      // And the mutation must not have gone through — the rename is still staged.
+      expect(runGit(repo.path, ['diff', '--cached', '--name-status', '-M'])).toMatch(/^R\d+\s+old\.ts\s+new\.ts/m);
+    });
+
+    it('does not change stage/unstage of an ordinary (non-renamed) file — oldPath omitted, same as before', async () => {
+      const BASE_LINE = 'alpha\nbeta\ngamma\ndelta\n';
+      const CHANGED = 'alpha\nBETA\ngamma\nDELTA\n';
+      commit(repo.path, 'base', { 'f.txt': BASE_LINE });
+      writeFile(repo.path, 'f.txt', CHANGED);
+
+      const rendered = await svc.getUncommittedFileDiff('f.txt', false);
+      expect(rendered!.oldPath).toBeUndefined();
+      await svc.stageHunks('f.txt', [0], rendered!.fingerprint!);
+
+      expect(runGit(repo.path, ['diff', '--cached', 'f.txt'])).toContain('+BETA');
     });
   });
   /* SNIPCODE-HOOK end */

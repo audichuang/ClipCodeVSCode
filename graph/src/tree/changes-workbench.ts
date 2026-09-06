@@ -412,9 +412,11 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  stageHunks/unstageHunks re-fetch (same git diff command per side).
    *  Throws on git failure — null strictly means "this side has no diff",
    *  so the panel can tell an error apart from an empty state. */
-  async fileDiffData(repoPath: string, file: string, side: ChangeGroup): Promise<DiffData | null> {
-    return this.svcFor(repoPath).getUncommittedFileDiff(file, side === 'staged');
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async fileDiffData(repoPath: string, file: string, side: ChangeGroup, oldPath?: string): Promise<DiffData | null> {
+    return this.svcFor(repoPath).getUncommittedFileDiff(file, side === 'staged', oldPath);
   }
+  /* SNIPCODE-HOOK end */
 
   /** Image bytes at a ref for the Diff tab's ImageDiff ('working' is handled by
    *  the panel itself — this only serves real git refs like 'HEAD' / ':0'). */
@@ -432,14 +434,18 @@ export class ChangesWorkbench implements vscode.Disposable {
     /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
     if (!node) return;
     /* SNIPCODE-HOOK end */
-    this.diffPanel?.show(node.repoPath, node.path);
+    /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+    this.diffPanel?.show(node.repoPath, node.path, undefined, node.oldPath);
+    /* SNIPCODE-HOOK end */
   }
 
   /** Stage the selected hunks of one unstaged file, then refresh the tree and
    *  re-render the file's (now smaller) unstaged diff in the panel. */
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
-  async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint));
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint, oldPath));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
@@ -448,23 +454,29 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
    *  file's remaining staged diff. */
-  async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint));
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint, oldPath));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
   /** Stage the selected changed lines of one hunk of an unstaged file. */
-  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint));
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint, oldPath));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
 
   /** Unstage the selected changed lines of one hunk of a staged file. */
-  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
-    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint));
+  /* SNIPCODE-HOOK start: X3 Diff tab oldPath threading */
+  async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string, oldPath?: string): Promise<void> {
+    await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint, oldPath));
+    /* SNIPCODE-HOOK end */
     await this.refresh();
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
   }
