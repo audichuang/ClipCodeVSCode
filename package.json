@@ -409,22 +409,26 @@
         {
           "id": "gitGraphPlus.remotes",
           "name": "Remotes",
-          "icon": "$(cloud)"
+          "icon": "$(cloud)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.tags",
           "name": "Tags",
-          "icon": "$(tag)"
+          "icon": "$(tag)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.stashes",
           "name": "Stashes",
-          "icon": "$(archive)"
+          "icon": "$(archive)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.worktrees",
           "name": "Worktrees",
-          "icon": "$(worktree)"
+          "icon": "$(worktree)",
+          "visibility": "collapsed"
         }
       ]
     },
