@@ -68,7 +68,9 @@ type StatusChange = { path: string; status: string; oldPath?: string };
  * A new/deleted whole file (its `/dev/null` header) is fine: its single hunk IS
  * the whole file. `old mode`/`new mode` mark an in-place mode change.
  */
-function assertHunkStageable(rawFileDiff: string, file: string): void {
+/* SNIPCODE-HOOK start: ui/diff R5 exported for direct unit testing */
+export function assertHunkStageable(rawFileDiff: string, file: string): void {
+  /* SNIPCODE-HOOK end */
   if (/^(old mode |new mode |rename from |rename to |copy from |copy to )/m.test(rawFileDiff)) {
     throw new Error(`per-hunk staging not supported for ${file} (file mode or rename change); stage the whole file instead`);
   }
@@ -996,15 +998,33 @@ export class GitService {
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec */
+  /** Pathspec (plus `-M`) for the uncommitted (staged or unstaged) diff of one
+   *  tracked file, shared by getUncommittedFileDiff (parsed, for display) and
+   *  workingFileDiffRaw/stagedFileDiffRaw (raw bytes, for patch-builder) so the
+   *  two routes can never diverge — a mismatch would desync the rendered
+   *  fingerprint from the bytes patch-builder reverses, and every stage click
+   *  would throw StaleDiffError. Without `oldPath` (or when it equals `file`,
+   *  i.e. not actually renamed) this is the original single-pathspec command;
+   *  a caller-supplied oldPath adds `-M` with BOTH paths so git can pair the
+   *  rename instead of rendering it as an unrelated whole-file add (X3). */
+  private uncommittedDiffArgs(staged: boolean, file: string, oldPath?: string): string[] {
+    const pathspec = oldPath && oldPath !== file ? ['-M', '--', oldPath, file] : ['--', file];
+    return staged ? ['diff', '--no-color', '--cached', ...pathspec] : ['diff', '--no-color', ...pathspec];
+  }
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: uncommitted per-file diff for the workbench/Diff tab.
    *  A git failure THROWS so callers can surface it — swallowing it here made the
    *  Diff tab render the affirmative "No changes" empty state on e.g. index.lock
    *  contention or a broken repo. null strictly means "this side has no diff". */
-  async getUncommittedFileDiff(file: string, staged: boolean): Promise<DiffData | null> {
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec */
+  async getUncommittedFileDiff(file: string, staged: boolean, oldPath?: string): Promise<DiffData | null> {
     this.assertSafePath(file, 'diff');
+    if (oldPath) this.assertSafePath(oldPath, 'diff');
     if (staged) {
       /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
-      const raw = await this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' });
+      const raw = await this.exec(this.uncommittedDiffArgs(true, file, oldPath), { encoding: 'buffer' });
       /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
       return this.parseFingerprintDiff(raw, file);
       /* SNIPCODE-HOOK end */
@@ -1024,12 +1044,13 @@ export class GitService {
       /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK start: Batch B fingerprint raw bytes */
-    const raw = await this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' });
+    const raw = await this.exec(this.uncommittedDiffArgs(false, file, oldPath), { encoding: 'buffer' });
     /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
     return this.parseFingerprintDiff(raw, file);
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   private diffFingerprint(raw: string | Buffer): string {
@@ -1570,7 +1591,13 @@ export class GitService {
     return this.mergeNameStatus(lists);
   }
 
-  async showCommitDiff(hash: string, file?: string): Promise<DiffData[]> {
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec (commit view) */
+  /** `oldPath`, when the caller already knows this file was renamed at `hash`
+   *  (e.g. CommitDetails' file-tree entry carries CommitFile.oldPath), lets
+   *  commitFileDiff pair it as a rename+modify instead of a whole-file add —
+   *  otherwise not a new public method, just an optional extension of the
+   *  existing one so every other caller (unaffected) keeps compiling as-is. */
+  async showCommitDiff(hash: string, file?: string, oldPath?: string): Promise<DiffData[]> {
     this.assertSafeRef(hash, 'show');
     if (file) this.assertSafePath(file, 'show');
 
@@ -1580,12 +1607,13 @@ export class GitService {
     }
 
     if (file) {
-      return (await this.commitFileDiff(hash, file)).parsed;
+      return (await this.commitFileDiff(hash, file, oldPath)).parsed;
     }
 
     const parents = await this.commitParents(hash);
     return this.showCommitDiffOverviewWithParents(hash, parents);
   }
+  /* SNIPCODE-HOOK end */
 
   private async showCommitDiffOverviewWithParents(hash: string, parents: string[]): Promise<DiffData[]> {
     if (parents.length === 0) {
@@ -1604,10 +1632,16 @@ export class GitService {
    * parents — see the merge-commit case below.
    */
   /* SNIPCODE-HOOK start: byte-preserving commit reverse */
-  private async commitFileDiff(hash: string, file: string): Promise<{ raw: Buffer; parsed: DiffData[] }> {
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec (commit view) */
+  private async commitFileDiff(hash: string, file: string, oldPath?: string): Promise<{ raw: Buffer; parsed: DiffData[] }> {
     this.assertSafeRef(hash, 'diff');
     this.assertSafePath(file, 'diff');
+    if (oldPath) this.assertSafePath(oldPath, 'diff');
     const parents = await this.commitParents(hash);
+    // Two pathspecs + -M let git pair the rename instead of rendering it as an
+    // unrelated whole-file add (X3); a root commit has no parent to have
+    // renamed FROM, so it always uses the plain single-path form.
+    const pathspec = oldPath && oldPath !== file ? ['-M', '--', oldPath, file] : ['--', file];
 
     // Raw bytes feed `git apply --reverse` and must stay byte-identical (a lossy
     // utf8 decode rewrites invalid sequences as U+FFFD); the parsed form is
@@ -1627,7 +1661,7 @@ export class GitService {
       // doesn't shadow the later parent that actually holds the content.
       for (const parent of parents) {
         this.assertSafeRef(parent, 'diff');
-        const raw = await this.exec(['diff', '--no-color', `${parent}..${hash}`, '--', file], { encoding: 'buffer' });
+        const raw = await this.exec(['diff', '--no-color', `${parent}..${hash}`, ...pathspec], { encoding: 'buffer' });
         const parsed = parseDiff(raw.toString('utf8'));
         if (parsed.length > 0 && parsed[0].hunks.length > 0) {
           return { raw, parsed };
@@ -1636,8 +1670,9 @@ export class GitService {
       return { raw: Buffer.alloc(0), parsed: [] };
     }
 
-    const raw = await this.exec(['diff', '--no-color', `${hash}^..${hash}`, '--', file], { encoding: 'buffer' });
+    const raw = await this.exec(['diff', '--no-color', `${hash}^..${hash}`, ...pathspec], { encoding: 'buffer' });
     return { raw, parsed: parseDiff(raw.toString('utf8')) };
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
 
@@ -2480,16 +2515,19 @@ export class GitService {
    * `git diff --no-index /dev/null file` (which exits 1 when it finds the
    * additions — normal, its stdout carries the diff).
    */
-  private async workingFileDiffRaw(file: string): Promise<Buffer> {
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec */
+  private async workingFileDiffRaw(file: string, oldPath?: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
+    if (oldPath) this.assertSafePath(oldPath, 'diff');
     /* SNIPCODE-HOOK start: Batch B surface raw diff failures */
     const isTracked = await this.isTrackedFile(file);
     if (!isTracked) {
       return this.exec(['diff', '--no-color', '--no-index', '--', '/dev/null', file], { encoding: 'buffer' })
         .catch(err => { if (err instanceof GitError && err.exitCode === 1) return err.stdoutBuffer; throw err; });
     }
-    return this.exec(['diff', '--no-color', '--', file], { encoding: 'buffer' });
+    return this.exec(this.uncommittedDiffArgs(false, file, oldPath), { encoding: 'buffer' });
   }
+  /* SNIPCODE-HOOK end */
 
   /**
    * Raw HEAD→index (staged) unified diff bytes for one file (no color), which
@@ -2497,10 +2535,13 @@ export class GitService {
    * getUncommittedFileDiff(file, true)'s command so the parsed hunk order lines
    * up with the diff the webview rendered.
    */
-  private async stagedFileDiffRaw(file: string): Promise<Buffer> {
+  /* SNIPCODE-HOOK start: ui/diff D3 rename-aware pathspec */
+  private async stagedFileDiffRaw(file: string, oldPath?: string): Promise<Buffer> {
     this.assertSafePath(file, 'diff');
-    return this.exec(['diff', '--no-color', '--cached', '--', file], { encoding: 'buffer' });
+    if (oldPath) this.assertSafePath(oldPath, 'diff');
+    return this.exec(this.uncommittedDiffArgs(true, file, oldPath), { encoding: 'buffer' });
   }
+  /* SNIPCODE-HOOK end */
 
   private async isTrackedFile(file: string): Promise<boolean> {
     return this.exec(['ls-files', '--error-unmatch', '--', file])

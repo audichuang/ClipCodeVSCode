@@ -744,4 +744,19 @@ export const en: Record<string, string> = {
   'pr.localBranches': 'Local',
   'pr.remoteBranches': 'Remote',
   /* SNIPCODE-HOOK end */
+  // ui/diff
+  'diff.noNewlineAtEof': 'No newline at end of file',
+  'diff.renamedFrom': 'Renamed from {oldPath} (similarity {similarity}%)',
+  'diff.modeChanged': 'Mode {oldMode} → {newMode}',
+  'diff.noTextualChanges': 'No textual changes',
+  'diff.newFile': 'New file',
+  'diff.deletedFile': 'Deleted file',
+  'diff.mixedLineEndings': 'This line ends in CRLF, unlike the rest of the file',
+  'diff.prevHunk': 'Previous change',
+  'diff.nextHunk': 'Next change',
+  'image.sideBySide': 'Side by Side',
+  'image.swipe': 'Swipe',
+  'image.onionSkin': 'Onion Skin',
+  'image.before': 'Before',
+  'image.after': 'After',
 };

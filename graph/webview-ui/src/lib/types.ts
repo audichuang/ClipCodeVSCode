@@ -140,6 +140,14 @@ export interface DiffData {
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   fingerprint?: string;
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D3 rename/mode diff-header metadata */
+  oldPath?: string;
+  similarity?: number;
+  oldMode?: string;
+  newMode?: string;
+  newFile?: boolean;
+  deletedFile?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface DiffHunk {
@@ -156,6 +164,14 @@ export interface DiffLine {
   content: string;
   oldLineNumber?: number;
   newLineNumber?: number;
+  /* SNIPCODE-HOOK start: ui/diff D2 no-newline-at-EOF marker */
+  /** Set when this line is immediately followed by git's `\ No newline at end
+   *  of file` marker — i.e. this line has no trailing newline in that blob. */
+  noNewline?: boolean;
+  /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/diff D4 CRLF marker */
+  cr?: boolean;
+  /* SNIPCODE-HOOK end */
 }
 
 export interface WorktreeInfo {

@@ -126,7 +126,11 @@ export class DiffPanel {
     this.current = { repoPath, file, generation: ticket };
     /* SNIPCODE-HOOK end */
     if (!this.panel) { this.createPanel(); }
-    this.panel!.title = `Diff: ${path.basename(file)}`;
+    /* SNIPCODE-HOOK start: D6/X2 tab title carries the dir too — basename-only
+       collides when two changed files share a name in different folders. */
+    const fileDir = path.dirname(file);
+    this.panel!.title = fileDir === '.' ? `Diff: ${file}` : `Diff: ${fileDir}/${path.basename(file)}`;
+    /* SNIPCODE-HOOK end */
     // Reveal without stealing the editor group focus away from the tree click.
     this.panel!.reveal(vscode.ViewColumn.Active, false);
     // Before the handshake lands, the webview's listener isn't installed yet and

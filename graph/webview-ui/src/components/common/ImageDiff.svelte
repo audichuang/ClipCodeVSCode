@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getVsCodeApi } from '../../lib/vscode-api';
+  /* SNIPCODE-HOOK start: ui/diff D P2 i18n */
+  import { t } from '../../lib/i18n/index.svelte';
+  /* SNIPCODE-HOOK end */
 
   interface Props {
     file: string;
@@ -124,18 +127,18 @@
 
 <div class="image-diff">
   <div class="image-diff-toolbar">
-    <button class:active={mode === 'side-by-side'} onclick={() => { mode = 'side-by-side'; }}>Side by Side</button>
-    <button class:active={mode === 'swipe'} onclick={() => { mode = 'swipe'; }}>Swipe</button>
-    <button class:active={mode === 'onion'} onclick={() => { mode = 'onion'; }}>Onion Skin</button>
+    <button class:active={mode === 'side-by-side'} onclick={() => { mode = 'side-by-side'; }}>{t('image.sideBySide')}</button>
+    <button class:active={mode === 'swipe'} onclick={() => { mode = 'swipe'; }}>{t('image.swipe')}</button>
+    <button class:active={mode === 'onion'} onclick={() => { mode = 'onion'; }}>{t('image.onionSkin')}</button>
   </div>
 
   {#if mode === 'side-by-side'}
     <div class="sbs-container">
       <div class="sbs-panel">
-        <div class="sbs-label">Before</div>
+        <div class="sbs-label">{t('image.before')}</div>
         {#if oldImage}
           <div class="sbs-image-wrapper">
-            <img src={oldImage} alt="Before" class="diff-image" />
+            <img src={oldImage} alt={t('image.before')} class="diff-image" />
             {#if oldImageInfo}
               <div class="image-info">W: {oldImageInfo.width}px | H: {oldImageInfo.height}px ({formatBytes(oldImageInfo.bytes)})</div>
             {/if}
@@ -145,10 +148,10 @@
         {/if}
       </div>
       <div class="sbs-panel">
-        <div class="sbs-label">After</div>
+        <div class="sbs-label">{t('image.after')}</div>
         {#if newImage}
           <div class="sbs-image-wrapper">
-            <img src={newImage} alt="After" class="diff-image" />
+            <img src={newImage} alt={t('image.after')} class="diff-image" />
             {#if newImageInfo}
               <div class="image-info">W: {newImageInfo.width}px | H: {newImageInfo.height}px ({formatBytes(newImageInfo.bytes)})</div>
             {/if}
@@ -162,17 +165,17 @@
     <div class="swipe-wrapper">
       <div class="swipe-inner">
         <div class="swipe-labels">
-          <span class="swipe-label-text">Before</span>
-          <span class="swipe-label-text">After</span>
+          <span class="swipe-label-text">{t('image.before')}</span>
+          <span class="swipe-label-text">{t('image.after')}</span>
         </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="swipe-container" bind:this={swipeContainerEl}>
           {#if newImage}
-            <img src={newImage} alt="After" class="swipe-image swipe-new" />
+            <img src={newImage} alt={t('image.after')} class="swipe-image swipe-new" />
           {/if}
           <div class="swipe-old-clip" style="clip-path: inset(0 {100 - swipePosition}% 0 0);">
             {#if oldImage}
-              <img src={oldImage} alt="Before" class="swipe-image" />
+              <img src={oldImage} alt={t('image.before')} class="swipe-image" />
             {/if}
           </div>
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -190,16 +193,16 @@
   {:else}
     <div class="onion-container">
       <div class="onion-controls">
-        <span class="onion-label">Before</span>
+        <span class="onion-label">{t('image.before')}</span>
         <input type="range" min="0" max="1" step="0.01" bind:value={onionOpacity} />
-        <span class="onion-label">After</span>
+        <span class="onion-label">{t('image.after')}</span>
       </div>
       <div class="onion-images">
         {#if oldImage}
-          <img src={oldImage} alt="Before" class="onion-image" />
+          <img src={oldImage} alt={t('image.before')} class="onion-image" />
         {/if}
         {#if newImage}
-          <img src={newImage} alt="After" class="onion-image onion-overlay" style="opacity: {onionOpacity};" />
+          <img src={newImage} alt={t('image.after')} class="onion-image onion-overlay" style="opacity: {onionOpacity};" />
         {/if}
       </div>
     </div>
