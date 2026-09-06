@@ -621,3 +621,15 @@ describe('buildFullGraph rail pathIndex (G7)', () => {
   });
 });
 /* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: G12/P2 — root commit stable color */
+describe('buildFullGraph root commit stable color (G12/P2)', () => {
+  it('a root commit tagged with a branch ref gets that branch\'s stable color instead of always palette[0]', () => {
+    // hashStringToIndex('feature') === 10 with this module's djb2-ish hash +
+    // 12-color palette; recompute if either changes.
+    const commits = [makeCommit('root', [], [{ type: 'branch', name: 'feature' }])];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].color).toBe(10);
+  });
+});
+/* SNIPCODE-HOOK end */
