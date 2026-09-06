@@ -4,6 +4,9 @@ import { buildChangeTree, type GroupNode, type RepoNode, type FileNode, type Rep
 /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
 import { SequenceGuard } from '../utils/sequence-guard';
 /* SNIPCODE-HOOK end */
+/* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+import { changeUri, STATUS_LABEL } from './change-decorations';
+/* SNIPCODE-HOOK end */
 
 export type ChangeTreeNode = GroupNode | RepoNode | FileNode;
 
@@ -13,10 +16,14 @@ export type LoadStatus = () => Promise<RepoStatus[]>;
 
 /**
  * TreeDataProvider for the Snipcode Git commit workbench. Paints the IntelliJ
- * hierarchy Staged/Unstaged → repo → file. File nodes carry a `resourceUri` so
- * VS Code renders the native file-type icon and the built-in git decoration
- * colour for free; `contextValue` (`file-staged` / `file-unstaged`) drives the
- * inline +/- stage/unstage menu.
+ * hierarchy Staged/Unstaged/Merge Conflicts → repo → file. File nodes carry a
+ * `snipcode-change:` resourceUri (see change-decorations.ts) so VS Code still
+ * resolves the native file-type icon by basename, while our own
+ * FileDecorationProvider (registered in extension.ts) supplies the
+ * badge/color/tooltip decoration — independent of vscode.git's, which can
+ * only show one status per real `file:` path; `contextValue`
+ * (`file-staged` / `file-unstaged` / `file-conflict`) drives the inline
+ * stage/unstage/discard/mark-resolved menu.
  */
 export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -93,7 +100,13 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       return item;
     }
     // file
-    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
+    const absPath = path.join(node.repoPath, node.path);
+    /* SNIPCODE-HOOK start: S5 own FileDecorationProvider — custom scheme carries
+       status+group so our provider can badge/color this row without colliding
+       with vscode.git's own (which only ever reflects one status per real
+       `file:` path — wrong for an `MM` file shown on both Staged and Unstaged). */
+    const uri = changeUri(absPath, node.status, node.group);
+    /* SNIPCODE-HOOK end */
     const item = new vscode.TreeItem(uri, vscode.TreeItemCollapsibleState.None);
     const dir = path.dirname(node.path) === '.' ? '' : path.dirname(node.path);
     /* SNIPCODE-HOOK start: R4/S7 nested repo dirs get their own look; untracked files are labeled */
@@ -109,8 +122,12 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     }
     /* SNIPCODE-HOOK end */
     item.contextValue = `file-${node.group}`;
-    item.resourceUri = uri; // native file icon + git decoration colour
+    item.resourceUri = uri; // file-icon-theme icon (by basename) + our decoration
     item.id = `${node.group}:${node.repoPath}:${node.path}`;
+    /* SNIPCODE-HOOK start: S5 tooltip: path + human status + which side */
+    const sideSuffix = node.group === 'staged' ? ' (staged)' : node.group === 'conflict' ? ' (unresolved)' : '';
+    item.tooltip = `${node.path}\n${STATUS_LABEL[node.status] ?? node.status}${sideSuffix}`;
+    /* SNIPCODE-HOOK end */
     item.command = {
       command: 'snipcode.git.showDiff',
       title: 'Show Diff',

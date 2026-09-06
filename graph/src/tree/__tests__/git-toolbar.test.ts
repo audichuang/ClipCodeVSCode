@@ -633,4 +633,33 @@ describe('Changes tree repo badges', () => {
     expect(provider.getTreeItem(fileNode).description).toBe('untracked');
   });
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+  it('renders a file resourceUri on the snipcode-change scheme carrying status+group, and a tooltip', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'src/foo.ts', status: 'M' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0]; // Staged group → repo
+    const fileNode = provider.getChildren(repoNode)[0];
+    const item = provider.getTreeItem(fileNode);
+
+    const uri = item.resourceUri as unknown as { scheme: string; query: string; fsPath: string };
+    expect(uri.scheme).toBe('snipcode-change');
+    expect(uri.query).toBe('status=M&group=staged');
+    expect(uri.fsPath).toBe('/r/src/foo.ts');
+    expect(item.tooltip).toBe('src/foo.ts\nModified (staged)');
+  });
+
+  it('tooltips a conflict file as unresolved', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }] },
+    ]);
+    await provider.refresh();
+    const conflictGroup = provider.getChildren()[2];
+    const repoNode = provider.getChildren(conflictGroup)[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).tooltip).toBe('both.ts\nConflicting (unresolved)');
+  });
+  /* SNIPCODE-HOOK end */
 });

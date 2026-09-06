@@ -36,6 +36,7 @@ vi.mock('vscode', () => ({
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     activeTextEditor: undefined,
     registerWebviewViewProvider: vi.fn(() => ({ dispose() {} })),
+    registerFileDecorationProvider: vi.fn(() => ({ dispose() {} })),
   },
   commands: {
     registerCommand: (id: string, cb: (...args: unknown[]) => unknown) => { H.registeredCommands.push(id); H.commandHandlers[id] = cb; return { dispose() {} }; },
@@ -172,6 +173,16 @@ describe('activate', () => {
       expect.anything(),
       { webviewOptions: { retainContextWhenHidden: true } },
     );
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+  it('registers its own FileDecorationProvider for the Changes tree (S5)', () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+
+    expect(vscode.window.registerFileDecorationProvider).toHaveBeenCalledWith(expect.anything());
   });
   /* SNIPCODE-HOOK end */
 

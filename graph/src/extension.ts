@@ -14,6 +14,9 @@ import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
 import { ChangesWorkbench } from './tree/changes-workbench';
 import { CommitBoxViewProvider } from './tree/commit-box-view';
+/* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+import { ChangeDecorationProvider } from './tree/change-decorations';
+/* SNIPCODE-HOOK end */
 import { DiffPanel } from './panels/DiffPanel';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
@@ -204,6 +207,9 @@ export function activate(context: vscode.ExtensionContext) {
     workbench,
     changesView,
     diffPanel,
+    /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+    vscode.window.registerFileDecorationProvider(new ChangeDecorationProvider()),
+    /* SNIPCODE-HOOK end */
     vscode.window.registerWebviewViewProvider(
       CommitBoxViewProvider.viewType,
       new CommitBoxViewProvider(context.extensionUri, workbench),
