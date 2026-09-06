@@ -718,4 +718,13 @@ export const en: Record<string, string> = {
   'pr.aheadInfo': '{count} commit(s) ahead of {base}',
   'pr.into': 'into',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': 'Select a base branch to compare against.',
+  'pr.emptyDetached': 'HEAD is detached — checkout a branch to compare.',
+  'pr.emptyError': 'Could not load comparison: {message}',
+  'pr.emptySameRef': '{base} and {head} are the same ref — nothing to compare.',
+  'pr.emptyUpToDate': '{head} is already fully merged into {base}.',
+  /* SNIPCODE-HOOK end */
 };

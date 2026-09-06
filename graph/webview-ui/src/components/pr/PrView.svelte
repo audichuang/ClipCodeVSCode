@@ -94,6 +94,12 @@
 
   let files = $state<PrFile[]>([]);
   let loadingFiles = $state(false);
+  /* SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — the last host
+     error for the in-flight/most-recent getCommitsBetween request, shown
+     inline in .pr-empty instead of relying solely on the global error bar
+     (which auto-dismisses after a few seconds — App.svelte's ui store timer). */
+  let lastError = $state<string | null>(null);
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — parsed diffs for the
      current compare (Task D1's commitsBetween.diffs) plus the shared
      inline/side-by-side mode every stacked FileDiffView renders with, and a
@@ -124,14 +130,25 @@
   /* SNIPCODE-HOOK end */
 
   // Default base: current branch's upstream, else a remote branch literally
-  // named "origin/main", else the first remote branch, else null (dropdown
-  // stays unselected — no remotes configured).
+  // named "origin/main", else the first remote branch, else (P0-2/P2) a
+  // conventional local mainline branch (main/master/develop, in that order),
+  // else null (dropdown stays unselected — nothing sensible to default to).
+  // The local fallback matters for a repo with no remote configured at all —
+  // without it, `base` (and so any getCommitsBetween request) never fires and
+  // the Files/Commits tabs are permanently stuck on "pickBase".
   function defaultBase(): string | null {
     const cur = branchStore.currentBranch;
     if (cur?.upstream && !cur.upstreamGone) return cur.upstream;
     const originMain = branchStore.remoteBranches.find((b) => b.name === 'origin/main');
     if (originMain) return originMain.name;
-    return branchStore.remoteBranches[0]?.name ?? null;
+    if (branchStore.remoteBranches[0]) return branchStore.remoteBranches[0].name;
+    /* SNIPCODE-HOOK start: PR tab (P2) local-branch fallback */
+    for (const name of ['main', 'master', 'develop']) {
+      const local = branchStore.localBranches.find((b) => b.name === name && b.name !== cur?.name);
+      if (local) return local.name;
+    }
+    /* SNIPCODE-HOOK end */
+    return null;
   }
 
   function loadCommits(newBase: string, newHead: string) {
@@ -154,6 +171,7 @@
        atomically. (The `error` handler below still clears them, so a failed
        refresh doesn't leave stale data on screen looking current.) */
     currentHunk = -1; // new compare, new hunk list
+    lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — clear any previous error for this new attempt
     /* SNIPCODE-HOOK end */
     vscode.postMessage({ type: 'getCommitsBetween', payload: { base: newBase, head: newHead, requestId: reqId } });
   }
@@ -268,6 +286,7 @@
       behind = 0;
       loadingCommits = false;
       loadingFiles = false;
+      lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — an old repo's error must not leak into the new repo's empty state
     }
   });
 
@@ -459,6 +478,45 @@
     return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString();
   }
 
+  /* SNIPCODE-HOOK start: PR tab (P0-2/P2) empty-state machine — "No changed
+     files" / "No commits" used to be the single shared message for four very
+     different situations (nothing selected yet, detached HEAD, a host error,
+     and a genuine no-diff compare), which reads as "there is nothing here"
+     even when the real reason is "you haven't picked a base yet" or
+     "something failed". Plain functions (not $derived) so they react like the
+     existing statusColor/statusLabel above — called from the template, which
+     re-evaluates whenever the $state they read changes.
+     Precedence: an in-flight error always wins (freshest signal); then a
+     detached HEAD (a real, distinct situation — not just "no ref picked");
+     then no base/head picked yet; then same ref; then a real compare with
+     nothing new on head (ahead === 0); 'noDiff' is the leftover Files-tab-only
+     case where there ARE commits ahead but the diff nets to nothing (e.g. an
+     empty commit) — Commits tab can't hit it, ahead>0 implies commits.length>0. */
+  type EmptyReason = 'pickBase' | 'detached' | 'error' | 'sameRef' | 'upToDate' | 'noDiff';
+
+  function emptyReason(kind: 'files' | 'commits'): EmptyReason | null {
+    if (lastError !== null) return 'error';
+    if (branchStore.currentBranch?.detached) return 'detached';
+    if (base === null || head === null) return 'pickBase';
+    if (base === head) return 'sameRef';
+    if (ahead === 0) return 'upToDate';
+    if (kind === 'files' && files.length === 0) return 'noDiff';
+    return null;
+  }
+
+  function emptyReasonText(kind: 'files' | 'commits'): string {
+    switch (emptyReason(kind)) {
+      case 'error': return t('pr.emptyError', { message: lastError ?? '' });
+      case 'detached': return t('pr.emptyDetached');
+      case 'pickBase': return t('pr.emptyPickBase');
+      case 'sameRef': return t('pr.emptySameRef', { base: base ?? '', head: head ?? '' });
+      case 'upToDate': return t('pr.emptyUpToDate', { head: head ?? '', base: base ?? '' });
+      case 'noDiff': return t('pr.noFiles');
+      default: return kind === 'files' ? t('pr.noFiles') : t('pr.noCommits');
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
@@ -482,6 +540,7 @@
         filesRepoRoot = uiStore.activeRepo;
         loadingCommits = false;
         loadingFiles = false;
+        lastError = null; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine — a success clears any earlier error
         /* SNIPCODE-HOOK end */
       }
       /* SNIPCODE-HOOK start: Minor 1 — a host error while a getCommitsBetween
@@ -492,6 +551,7 @@
       if (msg.type === 'error' && msg.payload?.source === 'getCommitsBetween') {
         loadingCommits = false;
         loadingFiles = false;
+        lastError = msg.payload?.message ?? ''; // SNIPCODE-HOOK: PR tab (P0-2/P2) empty-state machine
         /* SNIPCODE-HOOK start: PR tab (P1/R7) stale-data refresh — since
            loadCommits no longer clears commits/files/diffs/mergeBase/ahead/
            behind up front (see above), a failed refresh must clear them here
@@ -677,7 +737,7 @@
       {#if (loadingCommits || loadingFiles) && files.length === 0}
         <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
       {:else if files.length === 0}
-        <div class="pr-empty">{t('pr.noFiles')}</div>
+        <div class="pr-empty">{emptyReasonText('files')}</div>
       {:else}
       <!-- SNIPCODE-HOOK end -->
         <!-- SNIPCODE-HOOK start: PR tab inline diff (Task D2) — left file
@@ -747,7 +807,7 @@
     {:else if loadingCommits && commits.length === 0}
       <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
     {:else if commits.length === 0}
-      <div class="pr-empty">{t('pr.noCommits')}</div>
+      <div class="pr-empty">{emptyReasonText('commits')}</div>
     {:else}
       <div class="pr-commit-list">
         {#each commits as c (c.hash)}

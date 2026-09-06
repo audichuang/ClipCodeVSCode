@@ -716,4 +716,13 @@ export const zh: Record<string, string> = {
   'pr.aheadInfo': '领先 {base} {count} 个提交',
   'pr.into': '合并到',
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/pr */
+  // ui/pr
+  'pr.emptyPickBase': '请选择要比较的基础分支。',
+  'pr.emptyDetached': 'HEAD 处于 detached 状态 — 请先检出一个分支再进行比较。',
+  'pr.emptyError': '无法加载比较结果：{message}',
+  'pr.emptySameRef': '{base} 与 {head} 是同一个 ref，没有可比较的内容。',
+  'pr.emptyUpToDate': '{head} 已经完全合并到 {base} 中。',
+  /* SNIPCODE-HOOK end */
 };
