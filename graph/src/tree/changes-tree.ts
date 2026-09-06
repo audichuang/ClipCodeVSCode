@@ -156,7 +156,9 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     } else if (node.status === 'U') {
       item.description = dir ? `${dir} · untracked` : 'untracked';
     } else {
-      item.description = dir;
+      /* SNIPCODE-HOOK start: S P2 rename description shows the old path */
+      item.description = node.oldPath ? `${dir}${dir ? ' ' : ''}← ${node.oldPath}` : dir;
+      /* SNIPCODE-HOOK end */
     }
     /* SNIPCODE-HOOK end */
     item.contextValue = `file-${node.group}`;

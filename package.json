@@ -339,6 +339,12 @@
         "icon": "$(filter)"
       },
       {
+        "command": "snipcode.git.filterReposActive",
+        "title": "Filter Repos (Active)",
+        "category": "Snipcode Git",
+        "icon": "$(filter-filled)"
+      },
+      {
         "command": "snipcode.git.showDiff",
         "title": "Show Diff",
         "category": "Snipcode Git"
@@ -452,12 +458,13 @@
       "editor/title": [
         {
           "command": "gitGraphPlus.open",
-          "group": "navigation"
+          "group": "navigation",
+          "when": "gitOpenRepositoryCount != 0"
         },
         {
           "command": "clipcode.blame.toggle",
           "group": "navigation",
-          "when": "editorIsOpen"
+          "when": "editorIsOpen && gitOpenRepositoryCount != 0"
         }
       ],
       "scm/title": [
@@ -500,7 +507,12 @@
       "view/title": [
         {
           "command": "snipcode.git.filterRepos",
-          "when": "view == snipcode.changes",
+          "when": "view == snipcode.changes && !snipcode.changes.filtered",
+          "group": "navigation@0"
+        },
+        {
+          "command": "snipcode.git.filterReposActive",
+          "when": "view == snipcode.changes && snipcode.changes.filtered",
           "group": "navigation@0"
         },
         {
@@ -848,6 +860,10 @@
         {
           "command": "clipcode.history.loadMore",
           "when": "false"
+        },
+        {
+          "command": "snipcode.git.filterReposActive",
+          "when": "false"
         }
       ]
     },
@@ -857,47 +873,58 @@
         "properties": {
           "clipcode.headerFormat": {
             "type": "string",
-            "default": "// file: $FILE_PATH"
+            "default": "// file: $FILE_PATH",
+            "markdownDescription": "Per-file header prepended to each copied file. `$FILE_PATH` is replaced with the file's path."
           },
           "clipcode.preText": {
             "type": "string",
-            "default": ""
+            "default": "",
+            "description": "Text inserted before the first file in a copy payload."
           },
           "clipcode.postText": {
             "type": "string",
-            "default": ""
+            "default": "",
+            "description": "Text appended after the last file in a copy payload."
           },
           "clipcode.addExtraLineBetweenFiles": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Insert a blank line between files in a copy payload."
           },
           "clipcode.setMaxFileCount": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Cap the number of files a single copy can include (see fileCountLimit)."
           },
           "clipcode.fileCountLimit": {
             "type": "number",
-            "default": 30
+            "default": 30,
+            "description": "Maximum number of files a single copy may include, when setMaxFileCount is enabled."
           },
           "clipcode.maxFileSizeKB": {
             "type": "number",
-            "default": 500
+            "default": 500,
+            "description": "Files larger than this size (in KB) are skipped when copying."
           },
           "clipcode.showCopyNotification": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Show a notification with character/line/word/token counts after each copy."
           },
           "clipcode.useFilters": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Apply the include/exclude filter rules below when copying."
           },
           "clipcode.useIncludeFilters": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "When filters are enabled, apply INCLUDE rules from filterRules."
           },
           "clipcode.useExcludeFilters": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "When filters are enabled, apply EXCLUDE rules from filterRules."
           },
           "clipcode.filterRules": {
             "type": "array",
@@ -930,7 +957,8 @@
                 "value",
                 "enabled"
               ]
-            }
+            },
+            "description": "Path/pattern INCLUDE and EXCLUDE rules used when useFilters is enabled."
           }
         }
       },
@@ -1069,27 +1097,33 @@
               "with-lease",
               "force"
             ],
-            "default": "none"
+            "default": "none",
+            "description": "Default force-push mode preselected in the Push dialog."
           },
           "gitGraphPlus.defaults.push.setUpstream": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"set upstream\" in the Push dialog."
           },
           "gitGraphPlus.defaults.push.allTags": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push all tags\" in the Push dialog."
           },
           "gitGraphPlus.defaults.pull.rebase": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"rebase\" in the Pull dialog."
           },
           "gitGraphPlus.defaults.pull.stash": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"stash local changes first\" in the Pull dialog."
           },
           "gitGraphPlus.defaults.fetch.allRemotes": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"fetch all remotes\" in the Fetch dialog."
           },
           "gitGraphPlus.defaults.merge.mode": {
             "type": "string",
@@ -1098,43 +1132,53 @@
               "no-ff",
               "squash"
             ],
-            "default": "default"
+            "default": "default",
+            "description": "Default merge mode preselected in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.merge.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after merge\" in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.merge.deleteSource": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"delete source branch after merge\" in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.rebase.autostash": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"autostash\" in the Rebase dialog."
           },
           "gitGraphPlus.defaults.rebase.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after rebase\" in the Rebase dialog."
           },
           "gitGraphPlus.defaults.amend.keepMessage": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"keep the previous commit message\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.resetDate": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"reset the commit date\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.resetAuthor": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"reset the author\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.only": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"amend only, don't add currently staged changes\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after amend\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.checkout.dirty": {
             "type": "string",
@@ -1143,7 +1187,8 @@
               "stash",
               "discard"
             ],
-            "default": "keep"
+            "default": "keep",
+            "description": "Default handling of uncommitted changes preselected in the Checkout dialog."
           },
           "gitGraphPlus.defaults.checkoutRemote.dirty": {
             "type": "string",
@@ -1152,35 +1197,43 @@
               "stash",
               "discard"
             ],
-            "default": "keep"
+            "default": "keep",
+            "description": "Default handling of uncommitted changes preselected in the Checkout Remote Branch dialog."
           },
           "gitGraphPlus.defaults.createBranch.checkout": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"checkout the new branch\" in the Create Branch dialog."
           },
           "gitGraphPlus.defaults.createBranch.publish": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"publish to remote\" in the Create Branch dialog."
           },
           "gitGraphPlus.defaults.createTag.push": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"push the tag to remote\" in the Create Tag dialog."
           },
           "gitGraphPlus.defaults.cherryPick.noCommit": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"don't commit, apply to the working tree only\" in the Cherry-pick dialog."
           },
           "gitGraphPlus.defaults.cherryPick.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after cherry-pick\" in the Cherry-pick dialog."
           },
           "gitGraphPlus.defaults.revert.noCommit": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"don't commit, apply to the working tree only\" in the Revert dialog."
           },
           "gitGraphPlus.defaults.revert.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after revert\" in the Revert dialog."
           },
           "gitGraphPlus.defaults.reset.mode": {
             "type": "string",
@@ -1189,31 +1242,38 @@
               "mixed",
               "hard"
             ],
-            "default": "mixed"
+            "default": "mixed",
+            "description": "Default reset mode preselected in the Reset dialog."
           },
           "gitGraphPlus.defaults.stashSave.includeUntracked": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"include untracked files\" in the Stash dialog."
           },
           "gitGraphPlus.defaults.stashSave.keepIndex": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"keep the index (staged changes)\" in the Stash dialog."
           },
           "gitGraphPlus.defaults.deleteBranch.force": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"force delete\" in the Delete Branch dialog."
           },
           "gitGraphPlus.defaults.deleteBranch.deleteRemote": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the remote-tracking branch\" in the Delete Branch dialog."
           },
           "gitGraphPlus.defaults.deleteTag.deleteRemote": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the tag on remote\" in the Delete Tag dialog."
           },
           "gitGraphPlus.defaults.removeWorktree.deleteBranch": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the worktree's branch\" in the Remove Worktree dialog."
           }
         }
       }
