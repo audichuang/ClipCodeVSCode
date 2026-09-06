@@ -1,11 +1,18 @@
 <script lang="ts">
   import { workbenchStore } from './workbench-store.svelte';
-  import { postCommit } from './messaging';
+  import { postCommit, saveDraft } from './messaging';
 
   const store = workbenchStore;
 
   const failures = $derived(store.results.filter((r) => !r.ok));
   const okCount = $derived(store.results.filter((r) => r.ok).length);
+
+  /* SNIPCODE-HOOK start: R6 persist the draft on every edit so a hidden/remounted
+     view (retainContextWhenHidden, extension.ts) can restore it via getState() */
+  $effect(() => {
+    saveDraft(store.message);
+  });
+  /* SNIPCODE-HOOK end */
 </script>
 
 <div class="commit-box">

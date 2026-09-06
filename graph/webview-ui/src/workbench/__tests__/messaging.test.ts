@@ -54,3 +54,58 @@ describe('postCommit timeout fallback', () => {
     expect(workbenchStore.commitError).toBeNull();
   });
 });
+
+/* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+describe('draft persistence (R6)', () => {
+  const originalAcquire = (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi;
+
+  afterEach(() => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = originalAcquire;
+  });
+
+  it('restores a saved draft from getState() on boot', async () => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => ({ message: '未完成的訊息' }),
+      setState() {},
+    });
+    vi.resetModules();
+    const { listenForHostMessages: freshListen } = await import('../messaging');
+    const { workbenchStore: freshStore } = await import('../workbench-store.svelte');
+
+    freshListen();
+
+    expect(freshStore.message).toBe('未完成的訊息');
+  });
+
+  it('does nothing when there is no saved state', async () => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => undefined,
+      setState() {},
+    });
+    vi.resetModules();
+    const { listenForHostMessages: freshListen } = await import('../messaging');
+    const { workbenchStore: freshStore } = await import('../workbench-store.svelte');
+
+    freshListen();
+
+    expect(freshStore.message).toBe('');
+  });
+
+  it('saveDraft writes the current message through setState', async () => {
+    const setState = vi.fn();
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => undefined,
+      setState,
+    });
+    vi.resetModules();
+    const { saveDraft: freshSaveDraft } = await import('../messaging');
+
+    freshSaveDraft('草稿內容');
+
+    expect(setState).toHaveBeenCalledWith({ message: '草稿內容' });
+  });
+});
+/* SNIPCODE-HOOK end */
