@@ -355,7 +355,10 @@
           if (selectedFile) {
             const isStaged = selectedFile.startsWith('staged:');
             const filePath = selectedFile.replace(/^(staged|unstaged):/, '');
-            vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: filePath, staged: isStaged } });
+            /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+            const oldPath = (isStaged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged)?.find(f => f.path === filePath)?.oldPath;
+            vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: filePath, staged: isStaged, oldPath } });
+            /* SNIPCODE-HOOK end */
           }
         }
       }
@@ -625,8 +628,11 @@
     const staged = key.startsWith('staged:');
     const path = stripPrefix(key);
     const list = staged ? uncommittedFiles?.staged : uncommittedFiles?.unstaged;
-    if (list?.find(f => f.path === path)?.status !== 'N') {
-      vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: path, staged } });
+    const file = list?.find(f => f.path === path);
+    if (file?.status !== 'N') {
+      /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+      vscode.postMessage({ type: 'getUncommittedFileDiff', payload: { file: path, staged, oldPath: file?.oldPath } });
+      /* SNIPCODE-HOOK end */
     }
   }
 

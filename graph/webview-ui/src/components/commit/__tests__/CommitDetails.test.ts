@@ -591,7 +591,7 @@ describe('CommitDetails — diff mode toggle', () => {
 });
 
 describe('CommitDetails — uncommitted (staged/unstaged)', () => {
-  function deliverUncommitted(staged: Array<{ path: string; status: string }>, unstaged: Array<{ path: string; status: string }>) {
+  function deliverUncommitted(staged: Array<{ path: string; status: string; oldPath?: string }>, unstaged: Array<{ path: string; status: string; oldPath?: string }>) {
     window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'uncommittedDiffData', payload: { staged, unstaged } },
     }));
@@ -650,6 +650,24 @@ describe('CommitDetails — uncommitted (staged/unstaged)', () => {
       (m) => (m.data as { type?: string }).type === 'getUncommittedFileDiff'
     )).toBe(false);
   });
+
+  /* SNIPCODE-HOOK start: F2 uncommitted diff rename-aware pathspec (X3 third entry) */
+  it('selecting a renamed unstaged file posts getUncommittedFileDiff with oldPath', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'UNCOMMITTED' }) });
+    deliverUncommitted([], [{ path: 'new.txt', status: 'R', oldPath: 'old.txt' }]);
+    const unstagedTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /unstaged/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(unstagedTab);
+    await waitFor(() => container.querySelector('.file-item'));
+    globalThis.__postedMessages = [];
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.file-item')!);
+    const msg = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'getUncommittedFileDiff'
+    );
+    expect(msg).toBeDefined();
+    expect((msg!.data as { payload: unknown }).payload).toMatchObject({ file: 'new.txt', staged: false, oldPath: 'old.txt' });
+  });
+  /* SNIPCODE-HOOK end */
 
   it('double-clicking an unstaged file opens its working-tree diff', async () => {
     const { container } = render(CommitDetails, { commit: commit({ hash: 'UNCOMMITTED' }) });
