@@ -733,7 +733,11 @@
   });
 
   function statusColor(s?: string): string {
-    if (document.body.classList.contains('vscode-light')) {
+    /* SNIPCODE-HOOK start: C7 — HC Light is `vscode-high-contrast-light`, treat as light */
+    const light = document.body.classList.contains('vscode-light')
+      || document.body.classList.contains('vscode-high-contrast-light');
+    /* SNIPCODE-HOOK end */
+    if (light) {
       switch (s) {
         case 'A': return '#2e7d32';
         case 'M': return '#8a6d3b';
@@ -1868,21 +1872,31 @@
     font-weight: 600;
   }
 
-  /* Light theme overrides */
-  :global(body.vscode-light) .ref-badge {
+  /* Light theme overrides. SNIPCODE-HOOK start: C7 — VS Code marks the HC Light
+     theme with `vscode-high-contrast-light` (not `vscode-light`), so the light
+     rules must name it explicitly or HC Light falls through to the dark defaults. */
+  :global(body.vscode-light) .ref-badge,
+  :global(body.vscode-high-contrast-light) .ref-badge {
     background: rgba(0, 0, 0, 0.04);
     color: #000;
     border: 1px solid rgba(0, 0, 0, 0.15);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-fixed {
+  :global(body.vscode-light) .ref-badge.badge-fixed,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-fixed {
     background: color-mix(in srgb, var(--badge-color) var(--fixed-tint, 20%), #fff);
   }
 
-  :global(body.vscode-light) .ref-badge.badge-head {
+  :global(body.vscode-light) .ref-badge.badge-head,
+  :global(body.vscode-high-contrast-light) .ref-badge.badge-head {
     background: color-mix(in srgb, var(--badge-color) 70%, #fff);
     color: #000;
   }
+
+  :global(body.vscode-high-contrast-light) .ref-badge {
+    border: 1px solid var(--badge-color);
+  }
+  /* SNIPCODE-HOOK end */
 
   /* High contrast overrides */
   :global(body.vscode-high-contrast) .ref-badge {
