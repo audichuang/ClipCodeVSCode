@@ -30,13 +30,6 @@
   /* Scrollbar */
   --scrollbar-bg: var(--vscode-scrollbarSlider-background);
   --scrollbar-hover-bg: var(--vscode-scrollbarSlider-hoverBackground);
-
-  /* Extension-specific */
-  --row-height: 30px;
-  --lane-width: 14px;
-  --bottom-panel-height: 250px;
-  --graph-node-radius: 4px;
-  --toolbar-height: 44px;
 }
 
 * {
