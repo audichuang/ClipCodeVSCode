@@ -13,7 +13,7 @@
   import { tooltip } from '../../lib/actions/tooltip';
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — stacked FileDiffView
      per changed file, reusing Task D1's diffMode/hideModeToggle prop. */
-  import type { DiffData } from '../../lib/types';
+  import type { DiffData, BranchInfo } from '../../lib/types';
   import FileDiffView from '../commit/FileDiffView.svelte';
   /* SNIPCODE-HOOK end */
 
@@ -56,6 +56,38 @@
   let filteredHeadBranches = $derived(
     branchStore.branches.filter((b) => !b.detached && b.name.toLowerCase().includes(headFilter.trim().toLowerCase()))
   );
+
+  /* SNIPCODE-HOOK start: PR tab (P-P2) dropdown Local/Remote grouping — the
+     dropdown used to be one flat alphabetical list (`git branch -a` order)
+     with no indication of local vs. remote and the current branch buried
+     wherever its name sorted. Groups by remote (Local first, since that's
+     almost always the one being picked as head) with the current branch
+     pinned to the top of its own group — pure $derived over the already-
+     filtered list, no new state. */
+  interface BranchGroup { label: string; branches: BranchInfo[] }
+
+  function groupBranches(list: BranchInfo[]): BranchGroup[] {
+    const cur = branchStore.currentBranch;
+    const pinCurrent = (arr: BranchInfo[]): BranchInfo[] => {
+      if (!cur) return arr;
+      const idx = arr.findIndex((b) => b.name === cur.name);
+      if (idx <= 0) return arr;
+      const copy = arr.slice();
+      const [item] = copy.splice(idx, 1);
+      copy.unshift(item);
+      return copy;
+    };
+    const local = pinCurrent(list.filter((b) => !b.remote));
+    const remote = pinCurrent(list.filter((b) => !!b.remote));
+    const groups: BranchGroup[] = [];
+    if (local.length) groups.push({ label: t('pr.localBranches'), branches: local });
+    if (remote.length) groups.push({ label: t('pr.remoteBranches'), branches: remote });
+    return groups;
+  }
+
+  let groupedBaseBranches = $derived.by(() => groupBranches(filteredBaseBranches));
+  let groupedHeadBranches = $derived.by(() => groupBranches(filteredHeadBranches));
+  /* SNIPCODE-HOOK end */
 
   function closeBaseDropdown() {
     showBaseDropdown = false;
@@ -492,6 +524,8 @@
   }
 
   function statusColor(s?: string): string {
+    // SNIPCODE-HOOK: PR tab (P-P2) — 'N' (nested repo) case, matching
+    // CommitDetails.svelte's statusColor so the two don't drift.
     if (document.body.classList.contains('vscode-light')) {
       switch (s) {
         case 'A': return '#2e7d32';
@@ -499,6 +533,7 @@
         case 'D': return '#b71c1c';
         case 'R': return '#1565c0';
         case 'C': return '#6a1b9a';
+        case 'N': return '#616161';
         default: return 'var(--text-secondary)';
       }
     }
@@ -508,6 +543,7 @@
       case 'D': return '#f44336';
       case 'R': return '#2196f3';
       case 'C': return '#9c27b0';
+      case 'N': return '#9e9e9e';
       default: return 'var(--text-secondary)';
     }
   }
@@ -519,6 +555,7 @@
       case 'D': return t('status.deleted');
       case 'R': return t('status.renamed');
       case 'C': return t('status.copied');
+      case 'N': return t('details.nestedRepoLabel'); // SNIPCODE-HOOK: PR tab (P-P2) — reuses CommitDetails' existing key
       default: return '';
     }
   }
@@ -700,7 +737,7 @@
           <input
             type="text"
             class="dropdown-filter-input"
-            placeholder="Filter branches…"
+            placeholder={t('pr.filterBranches')}
             bind:value={headFilter}
             use:focusInput
             onkeydown={(e) => {
@@ -712,18 +749,23 @@
               }
             }}
           />
-          {#each filteredHeadBranches as b (b.name)}
-            <button
-              class="repo-dropdown-item"
-              class:active={head === b.name}
-              onclick={() => selectHead(b.name)}
-            >
-              <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
-              <span class="repo-dropdown-item-name">{b.name}</span>
-            </button>
+          <!-- SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping -->
+          {#each groupedHeadBranches as group (group.label)}
+            <div class="repo-dropdown-group-label">{group.label}</div>
+            {#each group.branches as b (b.name)}
+              <button
+                class="repo-dropdown-item"
+                class:active={head === b.name}
+                onclick={() => selectHead(b.name)}
+              >
+                <i class="codicon {head === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+                <span class="repo-dropdown-item-name">{b.name}</span>
+              </button>
+            {/each}
           {:else}
-            <div class="repo-dropdown-empty">No matching branches</div>
+            <div class="repo-dropdown-empty">{t('pr.noMatchingBranches')}</div>
           {/each}
+          <!-- SNIPCODE-HOOK end -->
         </div>
       {/if}
     </div>
@@ -747,7 +789,7 @@
           <input
             type="text"
             class="dropdown-filter-input"
-            placeholder="Filter branches…"
+            placeholder={t('pr.filterBranches')}
             bind:value={baseFilter}
             use:focusInput
             onkeydown={(e) => {
@@ -759,22 +801,27 @@
               }
             }}
           />
-          {#each filteredBaseBranches as b (b.name)}
-            <button
-              class="repo-dropdown-item"
-              class:active={base === b.name}
-              onclick={() => selectBase(b.name)}
-            >
-              <i class="codicon {base === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
-              <span class="repo-dropdown-item-name">{b.name}</span>
-            </button>
+          <!-- SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping -->
+          {#each groupedBaseBranches as group (group.label)}
+            <div class="repo-dropdown-group-label">{group.label}</div>
+            {#each group.branches as b (b.name)}
+              <button
+                class="repo-dropdown-item"
+                class:active={base === b.name}
+                onclick={() => selectBase(b.name)}
+              >
+                <i class="codicon {base === b.name ? 'codicon-check' : 'codicon-git-branch'}"></i>
+                <span class="repo-dropdown-item-name">{b.name}</span>
+              </button>
+            {/each}
           {:else}
-            <div class="repo-dropdown-empty">No matching branches</div>
+            <div class="repo-dropdown-empty">{t('pr.noMatchingBranches')}</div>
           {/each}
+          <!-- SNIPCODE-HOOK end -->
         </div>
       {/if}
     </div>
-    <button class="pr-swap-btn" aria-label="Swap base and head" onclick={swap} use:tooltip={'Swap base and head'}>
+    <button class="pr-swap-btn" aria-label={t('pr.swapBaseHead')} onclick={swap} use:tooltip={t('pr.swapBaseHead')}>
       <i class="codicon codicon-arrow-swap"></i>
     </button>
     <!-- SNIPCODE-HOOK end -->
@@ -823,10 +870,10 @@
         <button class:active={diffMode === 'inline'} onclick={() => { diffMode = 'inline'; currentHunk = -1; }}>{t('details.inline')}</button>
         <button class:active={diffMode === 'side-by-side'} onclick={() => { diffMode = 'side-by-side'; currentHunk = -1; }}>{t('details.sideBySide')}</button>
       </div>
-      <button class="pr-jump-btn pr-jump-prev" aria-label="Previous change" onclick={() => jumpChange(-1)} use:tooltip={'Previous change'}>
+      <button class="pr-jump-btn pr-jump-prev" aria-label={t('pr.prevChange')} onclick={() => jumpChange(-1)} use:tooltip={t('pr.prevChange')}>
         <i class="codicon codicon-arrow-up"></i>
       </button>
-      <button class="pr-jump-btn pr-jump-next" aria-label="Next change" onclick={() => jumpChange(1)} use:tooltip={'Next change'}>
+      <button class="pr-jump-btn pr-jump-next" aria-label={t('pr.nextChange')} onclick={() => jumpChange(1)} use:tooltip={t('pr.nextChange')}>
         <i class="codicon codicon-arrow-down"></i>
       </button>
       <!-- SNIPCODE-HOOK end -->
@@ -838,9 +885,9 @@
         <i class="codicon codicon-expand-all"></i>
       </button>
       <!-- SNIPCODE-HOOK end -->
-      <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={'Copy Full Source'}>
+      <button class="pr-copy-btn" disabled={files.length === 0} onclick={copyAll} use:tooltip={t('pr.copyFullSource')}>
         <i class="codicon codicon-copy"></i>
-        Copy Full Source
+        {t('pr.copyFullSource')}
       </button>
     {/if}
   </div>
@@ -863,7 +910,7 @@
            content instead of blanking to a spinner; it's replaced in place
            once the fresh response lands. -->
       {#if (loadingCommits || loadingFiles) && files.length === 0}
-        <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
+        <div class="pr-empty"><span class="spinner"></span> {t('pr.loading')}</div>
       {:else if files.length === 0}
         <div class="pr-empty">{emptyReasonText('files')}</div>
       {:else}
@@ -968,7 +1015,7 @@
         <!-- SNIPCODE-HOOK end -->
       {/if}
     {:else if loadingCommits && commits.length === 0}
-      <div class="pr-empty"><span class="spinner"></span> {t('reflog.loading')}</div>
+      <div class="pr-empty"><span class="spinner"></span> {t('pr.loading')}</div>
     {:else if commits.length === 0}
       <div class="pr-empty">{emptyReasonText('commits')}</div>
     {:else}
@@ -997,6 +1044,7 @@
   .pr-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* SNIPCODE-HOOK: PR tab (P-P2) — don't overflow at ~600px */
     gap: 8px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
@@ -1118,6 +1166,15 @@
     color: var(--text-secondary);
     text-align: center;
   }
+
+  /* SNIPCODE-HOOK: PR tab (P-P2) dropdown Local/Remote grouping */
+  .repo-dropdown-group-label {
+    padding: 6px 10px 2px;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+  }
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab two-sided compare */
@@ -1196,6 +1253,7 @@
   .pr-subtabs {
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* SNIPCODE-HOOK: PR tab (P-P2) — don't overflow at ~600px */
     gap: 4px;
     padding: 6px 14px;
     border-bottom: 1px solid var(--border-color);

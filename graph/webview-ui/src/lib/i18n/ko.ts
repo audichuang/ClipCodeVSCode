@@ -732,5 +732,14 @@ export const ko: Record<string, string> = {
   'pr.openNativeDiff': '기본 diff 열기',
   'pr.collapseAll': '모두 접기',
   'pr.expandAll': '모두 펼치기',
+  'pr.filterBranches': '브랜치 필터…',
+  'pr.noMatchingBranches': '일치하는 브랜치 없음',
+  'pr.swapBaseHead': 'base와 head 바꾸기',
+  'pr.prevChange': '이전 변경',
+  'pr.nextChange': '다음 변경',
+  'pr.copyFullSource': '전체 소스 복사',
+  'pr.loading': '비교 결과 불러오는 중',
+  'pr.localBranches': '로컬',
+  'pr.remoteBranches': '리모트',
   /* SNIPCODE-HOOK end */
 };
