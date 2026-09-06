@@ -103,7 +103,9 @@
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — parsed diffs for the
      current compare (Task D1's commitsBetween.diffs) plus the shared
      inline/side-by-side mode every stacked FileDiffView renders with, and a
-     ref to the scrolling `.pr-content` pane for prev/next-change nav.
+     ref to the scrolling diff pane for prev/next-change nav — (P5) this is now
+     `.pr-diff-stack` specifically, not the outer `.pr-content`, since the
+     Files sub-tab's file list and diff stack scroll independently.
      currentHunk (fix: index-based prev/next nav) is a plain index into the
      flattened hunk list jumpChange walks; -1 means "no jump made yet" so the
      first "next" press lands on the first hunk (index 0) instead of skipping
@@ -772,7 +774,12 @@
     {/if}
   </div>
 
-  <div class="pr-content" bind:this={prContentEl}>
+  <!-- SNIPCODE-HOOK: PR tab (P5) — pr-content-files switches this pane from a
+       single scrolling container (Commits tab / empty states) to a plain flex
+       row host for two independently-scrolling columns (see .pr-files-layout
+       below); bind:this moved to .pr-diff-stack, the pane jumpChange/
+       scrollToFile actually need. -->
+  <div class="pr-content" class:pr-content-files={subTab === 'files'}>
     {#if subTab === 'files'}
       <!-- SNIPCODE-HOOK: Minor 1 — files come from the same commitsBetween
            response as commits, so a commit list still loading means the
@@ -820,7 +827,7 @@
             aria-orientation="vertical"
           ></div>
           <!-- SNIPCODE-HOOK end -->
-          <div class="pr-diff-stack">
+          <div class="pr-diff-stack" bind:this={prContentEl}>
             {#each files as file (file.path)}
               {@const d = diffs.find((x) => x.file === file.path)}
               <div class="pr-diff-file" data-pr-file={file.path}>
@@ -1175,16 +1182,30 @@
   .pr-content {
     flex: 1;
     overflow-y: auto;
+    min-height: 0;
   }
 
-  /* SNIPCODE-HOOK start: PR tab inline diff (Task D2) — two-pane Files
-     layout: sticky file list at left (click scrolls the right pane to that
-     file), stacked FileDiffViews at right. Both scroll together inside the
-     single .pr-content pane so jumpChange only has one scroll container to
-     read hunk positions from. */
+  /* SNIPCODE-HOOK start: PR tab (P5) — the Files sub-tab used to be one
+     scrolling container holding a `position: sticky` file list; sticky has no
+     max-height/own scrollbar, so once the file list was taller than the
+     viewport its lower rows were only reachable by scrolling the right-hand
+     diff stack all the way down first (100+ file PRs). Now the two columns
+     scroll independently: `.pr-content-files` turns this pane into a plain
+     (non-scrolling) flex row host, and each column gets its own
+     `overflow-y: auto`. min-height: 0 on every flex link in this chain is
+     required or a flex child's default `min-height: auto` refuses to shrink
+     below its content height and neither column's overflow ever kicks in. */
+  .pr-content.pr-content-files {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
   .pr-files-layout {
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
   }
 
   .pr-files-layout .pr-file-list {
@@ -1192,22 +1213,20 @@
        driven by the inline style (fileListWidth, clamped 120-600px); no
        fixed flex-basis here so that inline width takes effect. */
     flex-shrink: 0;
-    position: sticky;
-    top: 0;
+    overflow-y: auto;
     border-right: 1px solid var(--border-color);
   }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab resizable file-list/diff splitter — mirrors
      CommitDetails.svelte's .resize-handle (:1826-1836). */
   .pr-resize-handle {
-    /* SNIPCODE-HOOK: PR tab resize handle (review fix) — .pr-files-layout is
-       align-items: flex-start (so the sticky .pr-file-list doesn't stretch to
-       the full diff-stack height); without align-self here the handle's own
-       cross-size collapsed to ~0px and couldn't be grabbed. align-self:
-       stretch pulls just this element back to the row's full height.
-       border-right dropped too — .pr-file-list already draws one divider
-       line; keeping both drew two ~5px apart. The hover/active background
-       below is still the drag affordance. */
+    /* SNIPCODE-HOOK: PR tab resize handle — .pr-files-layout is now
+       align-items: stretch (P5), so this is redundant for cross-size but kept
+       explicit for clarity/robustness against a future layout change.
+       border-right dropped — .pr-file-list already draws one divider line;
+       keeping both drew two ~5px apart. The hover/active background below is
+       still the drag affordance. */
     width: 5px;
     align-self: stretch;
     flex-shrink: 0;
@@ -1225,6 +1244,7 @@
   .pr-diff-stack {
     flex: 1;
     min-width: 0;
+    overflow-y: auto; /* SNIPCODE-HOOK: PR tab (P5) — own scroll, independent of the file list */
   }
 
   .pr-diff-placeholder {
