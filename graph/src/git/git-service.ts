@@ -2418,6 +2418,30 @@ export class GitService {
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: S4 Discard — revert unstaged working-tree changes
+   * Tracked paths are restored from HEAD (index untouched, `--worktree` only);
+   * untracked paths are removed from disk with `git clean`. Both 'restore' and
+   * 'clean' are already in invalidatesReadCache, so exec() routes this through
+   * withMutationLock + clearReadCache with no extra plumbing here. A nested
+   * repo dir (status 'N') is never touched — `git clean -f` on one would delete
+   * an entire embedded repository. */
+  async discardPaths(changes: StatusChange[]): Promise<void> {
+    const tracked = new Set<string>();
+    const untracked = new Set<string>();
+    for (const c of changes) {
+      if (c.status === 'N') continue;
+      if (c.status === 'U') { untracked.add(c.path); continue; }
+      tracked.add(c.path);
+      if (c.oldPath) tracked.add(c.oldPath);
+    }
+    const trackedPaths = [...tracked];
+    const untrackedPaths = [...untracked];
+    for (const p of [...trackedPaths, ...untrackedPaths]) this.assertSafePath(p, 'restore');
+    if (trackedPaths.length) await this.exec(['restore', '--worktree', '--source=HEAD', '--', ...trackedPaths]);
+    if (untrackedPaths.length) await this.exec(['clean', '-f', '--', ...untrackedPaths]);
+  }
+  /* SNIPCODE-HOOK end */
+
   /**
    * Commit whatever is currently staged (`git commit -m`). Throws with a clear
    * message when the index is empty (git would fail anyway). Returns the new

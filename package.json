@@ -298,6 +298,16 @@
         "command": "snipcode.git.markResolved",
         "title": "Snipcode Git: Mark Resolved",
         "icon": "$(check)"
+      },
+      {
+        "command": "snipcode.git.discard",
+        "title": "Snipcode Git: Discard Changes",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "snipcode.git.discardRepo",
+        "title": "Snipcode Git: Discard All in Repo",
+        "icon": "$(discard)"
       }
     ],
     "viewsContainers": {
@@ -529,6 +539,11 @@
           "group": "inline"
         },
         {
+          "command": "snipcode.git.discard",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "inline"
+        },
+        {
           "command": "snipcode.git.unstage",
           "when": "view == snipcode.changes && viewItem == file-staged",
           "group": "inline"
@@ -545,6 +560,11 @@
         },
         {
           "command": "snipcode.git.stageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.discardRepo",
           "when": "view == snipcode.changes && viewItem == repo-unstaged",
           "group": "inline"
         },

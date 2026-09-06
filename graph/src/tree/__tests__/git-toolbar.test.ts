@@ -77,6 +77,9 @@ function mkSvc(over: Record<string, unknown> = {}) {
     stagePaths: vi.fn(async () => {}),
     unstagePaths: vi.fn(async () => {}),
     commitIndex: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+    discardPaths: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
     setExtraEnv: vi.fn(),
     setAuthRetryHandler: vi.fn(),
@@ -204,6 +207,58 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     await H.commands.get('snipcode.git.stageRepo')!(repoNode);
 
     expect(a.stagePaths).toHaveBeenCalledWith([{ kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' }]);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+  it('discard confirms via a modal warning before calling discardPaths', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+
+    const target = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.discard')!(target, [target]);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('a-worktree.ts'),
+      { modal: true },
+      '捨棄',
+    );
+    expect(a.discardPaths).toHaveBeenCalledWith([target]);
+  });
+
+  it('discard does nothing when the modal warning is dismissed', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined);
+
+    const target = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.discard')!(target, [target]);
+
+    expect(a.discardPaths).not.toHaveBeenCalled();
+  });
+
+  it('discardRepo confirms once for the whole repo and filters out nested repo dirs', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+
+    const repoNode = {
+      kind: 'repo', repoName: 'a', repoPath: '/a', branch: 'main', group: 'unstaged',
+      files: [
+        { kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' },
+        { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' },
+      ],
+    };
+    await H.commands.get('snipcode.git.discardRepo')!(repoNode);
+
+    expect(a.discardPaths).toHaveBeenCalledWith([{ kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' }]);
   });
   /* SNIPCODE-HOOK end */
 
