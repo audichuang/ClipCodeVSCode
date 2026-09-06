@@ -729,4 +729,5 @@ export const ko: Record<string, string> = {
   'details.flatView': '평면',
   'details.expandAll': '모두 펼치기',
   'details.collapseAll': '모두 접기',
+  'details.workingTree': '작업 트리',
 };

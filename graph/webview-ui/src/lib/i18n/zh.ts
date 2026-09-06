@@ -729,4 +729,5 @@ export const zh: Record<string, string> = {
   'details.flatView': '平铺',
   'details.expandAll': '全部展开',
   'details.collapseAll': '全部折叠',
+  'details.workingTree': '工作树',
 };
