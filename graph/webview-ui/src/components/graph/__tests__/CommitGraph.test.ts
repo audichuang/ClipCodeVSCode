@@ -111,7 +111,10 @@ describe('CommitGraph smoke', () => {
     }
   });
 
-  it('clicking the UNCOMMITTED row opens the SCM view instead of selecting it', async () => {
+  /* SNIPCODE-HOOK start: M2 — clicking UNCOMMITTED now selects it (so the bottom
+     panel shows Staged/Unstaged) instead of jumping straight to the SCM view;
+     opening the SCM view moved to the row's own context menu. */
+  it('clicking the UNCOMMITTED row selects it instead of opening the SCM view', async () => {
     commitStore.setData(makeGraphData([
       makeCommit('UNCOMMITTED', 'Uncommitted changes'),
       makeCommit('h1', 'first'),
@@ -122,9 +125,10 @@ describe('CommitGraph smoke', () => {
     const rows = container.querySelectorAll<HTMLElement>('.commit-row');
     await fireEvent.click(rows[0]);
     await tick();
-    expect(globalThis.__postedMessages.some(m => (m.data as { type?: string }).type === 'openScmView')).toBe(true);
-    expect(uiStore.selectedCommitHash).toBeNull();
+    expect(globalThis.__postedMessages.some(m => (m.data as { type?: string }).type === 'openScmView')).toBe(false);
+    expect(uiStore.selectedCommitHash).toBe('UNCOMMITTED');
   });
+  /* SNIPCODE-HOOK end */
 
   it('right-clicking the UNCOMMITTED row opens an Amend menu, then the amend modal + SCM', async () => {
     const { modalStore } = await import('../../../lib/stores/modals.svelte');
