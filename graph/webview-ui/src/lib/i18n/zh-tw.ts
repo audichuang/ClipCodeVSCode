@@ -794,4 +794,8 @@ export const zhTw: Record<string, string> = {
   'graph.selectForCompare': '選擇以進行比較…',
   'graph.clickToViewChanges': '點選檢視暫存和未暫存的變更',
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: ui/cleanup */
+  // ui/cleanup
+  'pr.statsRenamed': '已重新命名',
+  /* SNIPCODE-HOOK end */
 };
