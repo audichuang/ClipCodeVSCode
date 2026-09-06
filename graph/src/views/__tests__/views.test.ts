@@ -170,11 +170,13 @@ describe('StashesViewProvider', () => {
     expect(items[0].command?.command).toBe('gitGraphPlus.showStashMenu');
   });
 
-  it('falls back to stash@{n} as the label when there is no message', async () => {
+  it('falls back to stash@{n} as the label when there is no message, with no duplicate description', async () => {
     const stashList: StashEntry[] = [{ index: 1, message: '', date: '2024-01-01' }];
     const items = await new StashesViewProvider(mockSvc({ stashList })).getChildren();
     expect(items[0].label).toBe('stash@{1}');
-    expect(items[0].description).toBe('stash@{1}');
+    // stash@{1} is already the label — repeating it as the description would
+    // show 'stash@{1}  stash@{1}' in the tree.
+    expect(items[0].description).toBe('');
   });
   /* SNIPCODE-HOOK end */
 });
