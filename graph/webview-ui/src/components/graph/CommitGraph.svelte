@@ -701,13 +701,17 @@
   /** Combined G2 (non-current-branch dim) + G7 (hover/select rail spotlight)
    *  visual for one path/link. When nothing is hovered/selected, G2 alone
    *  decides (highlighted ? full : dim). Once something IS active, the active
-   *  rail(s) go fully opaque and everything else drops to whichever is MORE
-   *  dimmed of the two rules ("與 G2 疊加時取較低"), so the spotlight reads
-   *  clearly regardless of which branch the other rails belong to. */
+   *  rail(s) go fully opaque+thick and every other rail drops further still
+   *  so the spotlight reads clearly — but C8: `Math.min(g2Opacity, 0.3)`
+   *  collapsed both G2 buckets (1 and 0.35) to the same 0.3, erasing the
+   *  highlighted/non-highlighted distinction the instant anything is active.
+   *  Scale each bucket down by the same factor instead, so a highlighted
+   *  (current-branch) rail still reads as more present than a dimmed one
+   *  even while neither is the spotlighted rail. */
   function railVisual(highlighted: boolean, pathIndex: number): { opacity: number; strokeWidth: number } {
     if (activePathIndices.has(pathIndex)) return { opacity: 1, strokeWidth: 3 };
     const g2Opacity = highlighted ? 1 : 0.35;
-    return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
+    return { opacity: activePathIndices.size > 0 ? (highlighted ? 0.3 : 0.15) : g2Opacity, strokeWidth: 2 };
   }
   /* SNIPCODE-HOOK end */
 
