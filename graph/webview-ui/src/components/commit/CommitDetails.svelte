@@ -320,14 +320,11 @@
       // Check if we already have the diff
       if (!diffs.some(d => d.file === selectedFile)) {
         /* SNIPCODE-HOOK start: X3 — carry oldPath so a rename/copy resolves the
-           pre-rename blob on the host side (mirrors PrView.svelte's openDiff call).
-           message-bus.ts's getFileDiff payload doesn't declare oldPath yet on this
-           branch (added on ui/diff, pending merge) — `as` cast bypasses the excess-
-           property check until the branches merge and the type catches up. */
+           pre-rename blob on the host side (mirrors PrView.svelte's openDiff call). */
         const oldPath = files.find(f => f.path === selectedFile)?.oldPath;
         vscode.postMessage({
           type: 'getFileDiff',
-          payload: { hash: activeHash, file: selectedFile, oldPath } as { hash: string; file: string; oldPath?: string },
+          payload: { hash: activeHash, file: selectedFile, oldPath },
         });
         /* SNIPCODE-HOOK end */
       }
