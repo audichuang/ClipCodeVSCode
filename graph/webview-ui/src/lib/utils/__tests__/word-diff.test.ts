@@ -53,6 +53,27 @@ describe('computeWordDiff', () => {
     });
   });
   /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D12 fall back to whole-line for over-fragmented diffs */
+  it('falls back to whole-line ranges for a total line rewrite instead of scattering ~10 tiny ranges', () => {
+    // Before D12 this produced 5 delRanges + 5 addRanges of 1-4 chars each
+    // (LCS matching on stray parens/commas/spaces) — noise, not signal.
+    const { delRanges, addRanges } = computeWordDiff(
+      'const a = foo(bar, baz);',
+      'let result = compute(x, y, z);',
+    );
+    expect(delRanges).toEqual([{ start: 0, end: 24 }]);
+    expect(addRanges).toEqual([{ start: 0, end: 30 }]);
+  });
+
+  it('still fine-grains a short, mostly-shared rewrite (does not over-trigger)', () => {
+    // Same shape as the "Audi Mac" test above but checked explicitly against
+    // the new ratio/range-count guards: small edit, should NOT fall back.
+    const { delRanges, addRanges } = computeWordDiff('return value', 'return newValue');
+    expect(delRanges).toEqual([{ start: 7, end: 12 }]);
+    expect(addRanges).toEqual([{ start: 7, end: 15 }]);
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('pairHunkWordDiffs', () => {
@@ -81,6 +102,20 @@ describe('pairHunkWordDiffs', () => {
     ];
     expect(pairHunkWordDiffs(lines).size).toBe(0);
   });
+
+  /* SNIPCODE-HOOK start: ui/diff D12 minimum similarity to pair as a "replace" */
+  it('does not pair two structurally-similar but content-unrelated lines (weak bigram overlap only)', () => {
+    // "if (x) {" / "while (predicate) {" share only the "( " / " {" shape —
+    // before D12's >=35 similarity floor this paired and produced meaningless
+    // punctuation-only word-diff ranges on two lines that aren't really the
+    // same statement rewritten.
+    const lines: DiffLineLite[] = [
+      { type: 'delete', content: 'if (x) {' },
+      { type: 'add', content: 'while (predicate) {' },
+    ];
+    expect(pairHunkWordDiffs(lines).size).toBe(0);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('pairs only min(dels, adds) lines when the block is uneven', () => {
     const lines: DiffLineLite[] = [
