@@ -90,7 +90,9 @@ describe('BranchesViewProvider', () => {
     const [item] = await p.getChildren();
     expect(item.contextValue).toBe('branch-current');
     expect(themeId(item)).toBe('check');
-    expect(item.description).toBe('current ↑2 ↓1');
+    /* SNIPCODE-HOOK start: S17/X5 unify ↓behind ↑ahead order with the Changes tree */
+    expect(item.description).toBe('current ↓1 ↑2');
+    /* SNIPCODE-HOOK end */
     expect(p.getCurrentItem()?.label).toBe('main');
     // setContext is pushed so the sidebar shows Push vs Publish correctly.
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'gitGraphPlus.currentBranchHasUpstream', true);
