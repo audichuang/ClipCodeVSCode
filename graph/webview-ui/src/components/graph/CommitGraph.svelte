@@ -1641,7 +1641,14 @@
                   })()}
                   {@const trackedUpstream = (ref.type === 'branch' || ref.type === 'head') ? (localBranchMap.get(ref.name)?.upstream ?? null) : null}
                   {@const isWtBranch = (ref.type === 'branch' || ref.type === 'head') && worktreeBranches.has(ref.name)}
-                  {@const badgeColor = ref.type === 'tag' ? '#f0c040' : ref.type === 'stash' ? 'var(--text-secondary, #888)' : isWtBranch ? '#4caf50' : nodeColor}
+                  <!-- SNIPCODE-HOOK start: G8 — tag/worktree used fixed colors
+                     (#f0c040 / #4caf50) that alias against the lane palette
+                     (#ffc53d/#faad14, #73d13d), reading as "this belongs to
+                     that lane". Route them through the same neutral tint as
+                     stash instead — icon alone carries their meaning; color
+                     stays a lane-identity signal exclusively. -->
+                  {@const badgeColor = (ref.type === 'tag' || ref.type === 'stash' || isWtBranch) ? 'var(--text-secondary, #888)' : nodeColor}
+                  <!-- SNIPCODE-HOOK end -->
                   {@const showCloudOnly = hasRemote && trackedUpstream && (remoteFilter.length === 0 || (remoteFilter.includes('local') && remoteFilter.includes(trackedUpstream.split('/')[0])))}
                   {#if showCloudOnly}
                     <span
@@ -2494,11 +2501,16 @@
     box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.06);
   }
 
+  /* SNIPCODE-HOOK start: G8 — badge had no cap; a long branch name (e.g.
+     "ui: sticky header and column…") could push the commit message down to
+     nearly nothing. 180px matches a ~2-word branch name comfortably while
+     always leaving the message legible. */
   .ref-badge {
     position: relative;
     display: inline-flex;
     align-items: center;
     gap: 3px;
+    max-width: 180px;
     padding: 1px 7px 1px calc(var(--badge-bar-width, 4px) + 6px);
     border-radius: 4px;
     font-size: 0.95em;
@@ -2508,12 +2520,14 @@
     line-height: 17px;
     cursor: pointer;
     overflow: hidden;
+    text-overflow: ellipsis;
     transition: box-shadow 0.1s;
     /* Dark theme defaults: neutral fill */
     background: rgba(255, 255, 255, 0.05);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.12);
   }
+  /* SNIPCODE-HOOK end */
 
   /* Colored accent bar. Clipped to the badge's rounded corners by its
      overflow:hidden, so it reads as an integrated edge accent. Painted above the
