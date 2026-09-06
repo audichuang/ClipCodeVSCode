@@ -144,6 +144,35 @@ export function computeJumpTarget(
   return { target, path: trimmed };
 }
 
+/* SNIPCODE-HOOK start: M14 — Home/End/PageUp/PageDown were entirely missing */
+export type PageDir = 'home' | 'end' | 'pageUp' | 'pageDown';
+
+/**
+ * Home/End/PageUp/PageDown navigation target. `pageSize` is how many rows a
+ * page jumps (typically the number of fully visible rows) — Home/End ignore
+ * it and jump straight to either end. Clamps to the list bounds; returns null
+ * only for an empty list.
+ */
+export function computePagedTarget(
+  commits: ReadonlyArray<{ hash: string }>,
+  currentHash: string | null,
+  dir: PageDir,
+  pageSize: number,
+): string | null {
+  if (commits.length === 0) return null;
+  if (dir === 'home') return commits[0].hash;
+  if (dir === 'end') return commits[commits.length - 1].hash;
+
+  const index = currentHash ? commits.findIndex((c) => c.hash === currentHash) : -1;
+  const base = index < 0 ? 0 : index;
+  const step = Math.max(1, pageSize);
+  const nextIndex = dir === 'pageDown'
+    ? Math.min(commits.length - 1, base + step)
+    : Math.max(0, base - step);
+  return commits[nextIndex].hash;
+}
+/* SNIPCODE-HOOK end */
+
 /**
  * True when the row at `rowIndex` is entirely outside the visible viewport
  * (fully above the top or fully below the bottom). A row that is even partially

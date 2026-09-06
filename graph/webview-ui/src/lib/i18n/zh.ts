@@ -768,4 +768,10 @@ export const zh: Record<string, string> = {
   'flow.loading': '加载中……',
   'details.noStagedChanges': '没有暂存的更改',
   'details.noUnstagedChanges': '没有未暂存的更改',
+  /* SNIPCODE-HOOK start: ui/graph */
+  // ui/graph
+  'graph.openSourceControl': '打开源代码管理',
+  'graph.selectForCompare': '选择以进行比较…',
+  'graph.clickToViewChanges': '点击查看暂存和未暂存的变更',
+  /* SNIPCODE-HOOK end */
 };

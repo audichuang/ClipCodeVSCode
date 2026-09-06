@@ -770,4 +770,10 @@ export const en: Record<string, string> = {
   'flow.loading': 'Loading...',
   'details.noStagedChanges': 'No staged changes',
   'details.noUnstagedChanges': 'No unstaged changes',
+  /* SNIPCODE-HOOK start: ui/graph */
+  // ui/graph
+  'graph.openSourceControl': 'Open Source Control',
+  'graph.selectForCompare': 'Select for compare…',
+  'graph.clickToViewChanges': 'Click to view staged and unstaged changes',
+  /* SNIPCODE-HOOK end */
 };

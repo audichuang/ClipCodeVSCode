@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { commitStore } from '../../lib/stores/commits.svelte';
   import { branchStore } from '../../lib/stores/branches.svelte';
   import { uiStore } from '../../lib/stores/ui.svelte';
@@ -31,7 +31,7 @@
   import DirtyActionModal from '../modals/DirtyActionModal.svelte';
   import type { DirtyPayload } from '../../lib/utils/dirty-payload';
   import { resolveDrop, dragRebaseMessage, dragMergeMessage } from '../../lib/utils/dragDrop';
-  import { computeNavigationTarget, computeScrollTop, computeJumpTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
+  import { computeNavigationTarget, computeScrollTop, computeJumpTarget, computePagedTarget, isRowOffscreen, type ScrollAlign } from '../../lib/graph-navigation';
   import LinkifiedText from '../common/LinkifiedText.svelte';
 
 
@@ -101,21 +101,26 @@
   // but logically identical (e.g., file watcher refresh while only the synthesized
   // "Uncommitted changes" virtual node body changes — first/last hash, length, and
   // branch sync state stay stable).
+  /* SNIPCODE-HOOK start: G9 — dropped `currentBranchRemoteAhead` (was BFS 3
+     below): its only consumer was the row's remote-only indicator, which now
+     reads the builder's `dot.remoteTip` (X6-fixed, covers every branch, not
+     just the current one). `currentBranchLocalOnly` (BFS 2) stays — besides
+     feeding the same row indicator, SquashModal's hasPushedCommits still
+     depends on it (see the squashChain guard further down). */
   type BranchSets = {
     currentBranchCommits: Set<string>;
     currentBranchLocalOnly: Set<string>;
-    currentBranchRemoteAhead: Set<string>;
   };
   let branchSetsCache: { fp: string; value: BranchSets } | null = null;
 
   // Single pass: build hashIndex once, run all BFS traversals together
   const branchSets = $derived.by<BranchSets>(() => {
     const commits = commitStore.commits;
-    const empty: BranchSets = { currentBranchCommits: new Set(), currentBranchLocalOnly: new Set(), currentBranchRemoteAhead: new Set() };
+    const empty: BranchSets = { currentBranchCommits: new Set(), currentBranchLocalOnly: new Set() };
     if (commits.length === 0) return empty;
 
     const current = branchStore.currentBranch;
-    const fp = `${commits.length}|${commits[0].hash}|${commits[commits.length - 1].hash}|${current?.name ?? ''}|${current?.upstream ?? ''}|${current?.ahead ?? 0}|${current?.behind ?? 0}`;
+    const fp = `${commits.length}|${commits[0].hash}|${commits[commits.length - 1].hash}|${current?.name ?? ''}|${current?.upstream ?? ''}|${current?.ahead ?? 0}`;
     if (branchSetsCache && branchSetsCache.fp === fp) return branchSetsCache.value;
 
     const hashIndex = new Map<string, number>();
@@ -140,7 +145,6 @@
     }
 
     const currentBranchLocalOnly = new Set<string>();
-    const currentBranchRemoteAhead = new Set<string>();
 
     if (current?.upstream) {
       const [remote, ...rest] = current.upstream.split('/');
@@ -167,35 +171,17 @@
             if (!upstreamReachable.has(hash)) currentBranchLocalOnly.add(hash);
           }
         }
-
-        // BFS 3: commits reachable from upstream tip but not on current branch
-        if (current.behind > 0) {
-          const queue: string[] = [remoteTipCommit.hash];
-          let head = 0;
-          while (head < queue.length) {
-            const hash = queue[head++];
-            if (currentBranchRemoteAhead.has(hash) || currentBranchCommits.has(hash)) continue;
-            currentBranchRemoteAhead.add(hash);
-            const idx = hashIndex.get(hash);
-            if (idx === undefined) continue;
-            for (const parent of commits[idx].parents) {
-              if (!currentBranchRemoteAhead.has(parent) && !currentBranchCommits.has(parent)) {
-                queue.push(parent);
-              }
-            }
-          }
-        }
       }
     }
 
-    const value: BranchSets = { currentBranchCommits, currentBranchLocalOnly, currentBranchRemoteAhead };
+    const value: BranchSets = { currentBranchCommits, currentBranchLocalOnly };
     branchSetsCache = { fp, value };
     return value;
   });
 
   const currentBranchCommits = $derived(branchSets.currentBranchCommits);
   const currentBranchLocalOnly = $derived(branchSets.currentBranchLocalOnly);
-  const currentBranchRemoteAhead = $derived(branchSets.currentBranchRemoteAhead);
+  /* SNIPCODE-HOOK end */
 
   let bisectBadCommit = $state<string | null>(null);
   let bisectStartBad = $state<string | null>(null);
@@ -335,8 +321,12 @@
   // Rows of breathing room kept between the selection and the viewport edge when
   // stepping with the arrow keys, so context above/below the selection stays visible.
   const KEYBOARD_NAV_SCROLL_MARGIN_ROWS = 3;
-  // SourceGit uses unitWidth=12 for X coordinates, we scale them up for display
-  const X_SCALE = 1.05; // multiply SourceGit X coords by this for pixel positions
+  // SourceGit uses unitWidth=12 for X coordinates, we scale them up for display.
+  /* SNIPCODE-HOOK start: G5 — 1.05 (12.6px lanes) left only 7.6px of clearance
+     between a dot and a neighboring line (vs IntelliJ's 11.25px); 1.25 (15px
+     lanes) brings that in line without the graph column ballooning. */
+  const X_SCALE = 1.25; // multiply SourceGit X coords by this for pixel positions
+  /* SNIPCODE-HOOK end */
   const BUFFER_ROWS = 20; // Larger buffer to keep lines visible during scroll
 
   let container: HTMLDivElement | undefined = $state();
@@ -352,7 +342,12 @@
   // Right-side columns (author + sha + date) and the minimum width we always
   // reserve for the commit message. These mirror the fixed column widths in the
   // CSS below.
-  const RIGHT_COLS_WIDTH = 120 + 75 + 150;
+  /* SNIPCODE-HOOK start: M8 — author widened 120 -> 160 (flex basis; CSS below
+     lets it shrink to 100 min instead of a hard 120px truncation cliff). This
+     constant sizes the h-scroll pinned meta overlay/spacer, so it must track
+     the CSS column width or the overlay misaligns with the scrolling header. */
+  const RIGHT_COLS_WIDTH = 160 + 75 + 150;
+  /* SNIPCODE-HOOK end */
   const MIN_MESSAGE_WIDTH = 120;
 
   // In huge repos (e.g. nixpkgs) hundreds of concurrent branches make the graph
@@ -481,6 +476,19 @@
     }))
   );
 
+  /* SNIPCODE-HOOK start: M13 — roving tabindex. Every row previously carried
+     tabindex=0, so Tab from outside the graph had to walk hundreds of rows
+     before reaching anything else. Only one row is ever tabbable: the
+     selected one, or (nothing selected, or the selection scrolled out of the
+     virtualized window and has no DOM node to focus) the first rendered row. */
+  const rovingTabTargetHash = $derived.by(() => {
+    const primary = uiStore.selectedCommitHash
+      ?? (uiStore.selectedCommitHashes.length > 0 ? uiStore.selectedCommitHashes[uiStore.selectedCommitHashes.length - 1] : null);
+    if (primary && visibleCommits.some(vc => vc.commit.hash === primary)) return primary;
+    return visibleCommits[0]?.commit.hash ?? null;
+  });
+  /* SNIPCODE-HOOK end */
+
   // Precompute path Y-bounds once per paths change so scroll-time filtering is O(1) per path
   // instead of iterating each path's points on every scroll event.
   let pathBounds = $derived.by(() => {
@@ -503,13 +511,17 @@
   let pathDs = $derived(displayPaths.map(p => buildPathD(p.points)));
 
   let visiblePaths = $derived.by(() => {
-    const out: Array<{ color: number; colorOverride?: string; d: string }> = [];
+    /* SNIPCODE-HOOK start: G2/G7 — carry highlighted + this path's own index
+       (== FullGraphData.paths index, since we iterate displayPaths in order)
+       through to the template, which the remap below used to drop. */
+    const out: Array<{ color: number; colorOverride?: string; d: string; highlighted: boolean; pathIndex: number }> = [];
     for (let i = 0; i < displayPaths.length; i++) {
       const b = pathBounds[i];
       if (b.maxY >= startIndex && b.minY <= endIndex) {
-        out.push({ color: displayPaths[i].color, colorOverride: displayPaths[i].colorOverride, d: pathDs[i] });
+        out.push({ color: displayPaths[i].color, colorOverride: displayPaths[i].colorOverride, d: pathDs[i], highlighted: displayPaths[i].highlighted, pathIndex: i });
       }
     }
+    /* SNIPCODE-HOOK end */
     return out;
   });
   let visibleLinks = $derived(displayLinks.filter(link => {
@@ -586,14 +598,18 @@
       vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } });
       return;
     }
-    // The uncommitted-changes row opens VS Code's Source Control view
-    // (where the user stages/commits) instead of the in-graph detail panel.
+    /* SNIPCODE-HOOK start: M2 — select UNCOMMITTED like any other row instead of
+       hijacking the click to open VS Code's SCM view. This is what makes
+       CommitDetails' Staged | Unstaged tabs reachable at all (they only ever
+       render for uiStore.selectedCommitHash === 'UNCOMMITTED', which nothing
+       previously wrote). Opening the SCM view is still one right-click away
+       (onUncommittedContextMenu). */
     if (commit.hash === 'UNCOMMITTED') {
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
-      uiStore.selectedCommitHash = null;
-      vscode.postMessage({ type: 'openScmView' });
+      uiStore.selectCommit('UNCOMMITTED');
       return;
     }
+    /* SNIPCODE-HOOK end */
 
     // In multi-select mode, only modifier clicks change the set. Shift extends
     // the range, Ctrl/Cmd toggles membership. A plain click falls through to the
@@ -635,32 +651,61 @@
   // surface. One coordinate-based handler covers the rows and the pinned meta
   // overlay alike, so they always resolve to the same row with no cross-element
   // enter/leave flicker.
+  /* SNIPCODE-HOOK start: G7 — track the hovered row's index (already computed
+     here) so the rail it sits on can be looked up in O(1) (displayDots[idx]),
+     instead of a findIndex-by-hash per pointermove. */
+  let hoveredRowIndex = $state(-1);
   function handleRowHover(e: PointerEvent) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const idx = Math.floor((e.clientY - rect.top) / ROW_HEIGHT);
-    hoveredHash = idx >= 0 && idx < displayCommits.length ? displayCommits[idx].hash : null;
+    const inRange = idx >= 0 && idx < displayCommits.length;
+    hoveredHash = inRange ? displayCommits[idx].hash : null;
+    hoveredRowIndex = inRange ? idx : -1;
   }
 
-  function handleRowDblClick(commit: typeof displayCommits[0]) {
-    if (commit.hash === 'UNCOMMITTED') return;
-    // In selection / compare mode a double-click is just two membership toggles —
-    // never a checkout.
-    if (uiStore.multiSelectArmed || uiStore.comparing) return;
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; clickTimerHash = null; }
-    const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
-    if (localRefs.length === 1) {
-      doCheckout(localRefs[0].name, false, {}, true);
-    } else if (localRefs.length > 1) {
-      openCheckoutCommitModal(commit.hash);
-    } else {
-      const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
-      if (remoteRef) {
-        doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name);
-      } else {
-        openCheckoutCommitModal(commit.hash);
-      }
+  // Selected row's index, for the same rail lookup (selection is by hash, not
+  // by row index, so this needs an O(1) map rather than a scan).
+  const hashToIndex = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < displayCommits.length; i++) m.set(displayCommits[i].hash, i);
+    return m;
+  });
+  const selectedRowIndex = $derived(uiStore.selectedCommitHash ? (hashToIndex.get(uiStore.selectedCommitHash) ?? -1) : -1);
+
+  // Rail(s) to highlight on hover/selection (G7). A Set (not a single index)
+  // because hover and selection can land on two different rails at once.
+  const activePathIndices = $derived.by(() => {
+    const s = new Set<number>();
+    if (hoveredRowIndex >= 0) {
+      const idx = displayDots[hoveredRowIndex]?.pathIndex;
+      if (idx !== undefined && idx >= 0) s.add(idx);
     }
+    if (selectedRowIndex >= 0) {
+      const idx = displayDots[selectedRowIndex]?.pathIndex;
+      if (idx !== undefined && idx >= 0) s.add(idx);
+    }
+    return s;
+  });
+
+  /** Combined G2 (non-current-branch dim) + G7 (hover/select rail spotlight)
+   *  visual for one path/link. When nothing is hovered/selected, G2 alone
+   *  decides (highlighted ? full : dim). Once something IS active, the active
+   *  rail(s) go fully opaque and everything else drops to whichever is MORE
+   *  dimmed of the two rules ("與 G2 疊加時取較低"), so the spotlight reads
+   *  clearly regardless of which branch the other rails belong to. */
+  function railVisual(highlighted: boolean, pathIndex: number): { opacity: number; strokeWidth: number } {
+    if (activePathIndices.has(pathIndex)) return { opacity: 1, strokeWidth: 3 };
+    const g2Opacity = highlighted ? 1 : 0.35;
+    return { opacity: activePathIndices.size > 0 ? Math.min(g2Opacity, 0.3) : g2Opacity, strokeWidth: 2 };
   }
+
+  /* SNIPCODE-HOOK start: R1 — double-click on a row no longer checks out a
+     branch with zero confirmation (R1). This function had no other caller
+     once the row's `ondblclick` is removed; the badge's own dblclick handler
+     (which still offers the same fast-forward/checkout, with its own
+     tooltip warning) is the only remaining double-click checkout entry
+     point, so this dead handler is removed rather than left unreachable. */
+  /* SNIPCODE-HOOK end */
 
   function selectCommit(hash: string) {
     navPath = [];
@@ -1075,17 +1120,23 @@
     // Groups are collected separately, then joined with separators at the end.
     // Each non-empty group gets a separator before it (after the refs block).
     const groups: any[][] = [];
+    /* SNIPCODE-HOOK start: M5 — Checkout + Copy SHA moved to the first group
+       (were buried in the 4th/last group); populated below, unshifted onto
+       `groups` right before the flatten step. */
+    const topGroup: any[] = [];
+    /* SNIPCODE-HOOK end */
 
     if (!isStashCommit) {
       // ── Create ──
       const createGroup: any[] = [
-        { label: t('graph.createBranchHere'), action: () => { modalStore.openCreateBranch(commit.hash, commit.subject); } },
-        { label: t('graph.newTag'),           action: () => { modalStore.openCreateTag(commit.hash, commit.subject); } },
+        { label: t('graph.createBranchHere'), icon: 'git-branch', action: () => { modalStore.openCreateBranch(commit.hash, commit.subject); } },
+        { label: t('graph.newTag'),           icon: 'tag',        action: () => { modalStore.openCreateTag(commit.hash, commit.subject); } },
       ];
       const worktreeStartRef = commit.refs.find(r => r.type === 'head' || r.type === 'branch');
       if (worktreeStartRef) {
         createGroup.push({
           label: t('graph.createWorktree'),
+          icon: 'empty-window',
           action: () => vscode.postMessage({ type: 'worktreeAddModalRequest', payload: { startPoint: worktreeStartRef.name } }),
         });
       }
@@ -1100,20 +1151,23 @@
         const tagRef    = commit.refs.find(r => r.type === 'tag');
         const mergeRef  = localRef?.name ?? (remoteRef ? `${remoteRef.remote}/${remoteRef.name}` : undefined) ?? tagRef?.name ?? commit.hash;
         if (mergeRef !== currentBranch) {
-          branchOps.push({ label: t('graph.mergeInto', { branch: currentBranch }), action: () => { modalStore.openMerge(mergeRef, branchStore.currentBranch?.name ?? 'current branch'); } });
+          branchOps.push({ label: t('graph.mergeInto', { branch: currentBranch }), icon: 'git-merge', action: () => { modalStore.openMerge(mergeRef, branchStore.currentBranch?.name ?? 'current branch'); } });
         }
       }
       const isOnCurrentBranch = currentBranchCommits.has(commit.hash);
       if (!isOnCurrentBranch) {
-        branchOps.push({ label: t('graph.rebaseTo', { branch: currentBranch }), action: () => { rebaseTarget = commit.hash; showRebaseModal = true; } });
+        branchOps.push({ label: t('graph.rebaseTo', { branch: currentBranch }), icon: 'git-pull-request', action: () => { rebaseTarget = commit.hash; showRebaseModal = true; } });
       }
-      branchOps.push({ label: t('graph.interactiveRebaseTo', { branch: currentBranch }), action: () => { interactiveRebaseBase = commit.hash; } });
+      branchOps.push({ label: t('graph.interactiveRebaseTo', { branch: currentBranch }), icon: 'list-ordered', action: () => { interactiveRebaseBase = commit.hash; } });
       groups.push(branchOps);
 
       // ── Reset ──
       const isHead = commit.refs.some(r => r.type === 'head');
       if (!isHead) {
-        groups.push([{ label: t('graph.resetBranchToHere', { branch: currentBranch }), action: () => { resetTarget = commit.hash; resetMode = 'mixed'; showResetModal = true; } }]);
+        /* SNIPCODE-HOOK start: M5 — Reset can run `--hard`, discarding work;
+           mark it danger like the other destructive menu items (R2 policy). */
+        groups.push([{ label: t('graph.resetBranchToHere', { branch: currentBranch }), icon: 'discard', danger: true, action: () => { resetTarget = commit.hash; resetMode = 'mixed'; showResetModal = true; } }]);
+        /* SNIPCODE-HOOK end */
       }
 
       // ── Modify commit with staged changes (amend / fixup) ──
@@ -1130,11 +1184,13 @@
       // commit → a rebase that rewords it, rewriting history from there forward).
       modifyOps.push({
         label: t('graph.reword'),
+        icon: 'edit',
         action: () => modalStore.openReword({ hash: commit.hash, message: fullMessage, isHead, isPushed: fullyPushed }),
       });
       if (isHead) {
         modifyOps.push({
           label: t('graph.amendCommit'),
+          icon: 'pencil',
           action: () => {
             modalStore.openAmend({ hash: commit.hash, subject: commit.subject, message: fullMessage, isPushed: fullyPushed });
             vscode.postMessage({ type: 'openScmView', payload: { returnFocus: true } });
@@ -1147,34 +1203,38 @@
         autosquashTarget = { hash: commit.hash, subject: commit.subject, mode };
         vscode.postMessage({ type: 'openScmView', payload: { returnFocus: true } });
       };
-      modifyOps.push({ label: t('graph.commitFixup'),  action: () => openAutosquash('fixup') });
-      modifyOps.push({ label: t('graph.commitSquash'), action: () => openAutosquash('squash') });
+      modifyOps.push({ label: t('graph.commitFixup'),  icon: 'combine', action: () => openAutosquash('fixup') });
+      modifyOps.push({ label: t('graph.commitSquash'), icon: 'combine', action: () => openAutosquash('squash') });
       groups.push(modifyOps);
 
-      // ── Commit operations ──
-      groups.push([
-        {
-          label: t('graph.checkoutCommit'),
-          action: () => {
-            const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
-            if (localRefs.length === 1) {
-              doCheckout(localRefs[0].name);
-            } else if (localRefs.length > 1) {
-              openCheckoutCommitModal(commit.hash);
-            } else {
-              const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
-              if (remoteRef) { doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name); }
-              else            { openCheckoutCommitModal(commit.hash); }
-            }
-          },
+      /* SNIPCODE-HOOK start: M5 — Checkout is first-group now; Cherry-pick/Revert
+         stay together as their own group (2nd-to-last). */
+      topGroup.push({
+        label: t('graph.checkoutCommit'),
+        icon: 'check',
+        action: () => {
+          const localRefs = commit.refs.filter(r => r.type === 'head' || r.type === 'branch');
+          if (localRefs.length === 1) {
+            doCheckout(localRefs[0].name);
+          } else if (localRefs.length > 1) {
+            openCheckoutCommitModal(commit.hash);
+          } else {
+            const remoteRef = commit.refs.find(r => r.type === 'remote-branch' && r.name !== 'HEAD');
+            if (remoteRef) { doCheckoutRemote(`${remoteRef.remote}/${remoteRef.name}`, remoteRef.name); }
+            else            { openCheckoutCommitModal(commit.hash); }
+          }
         },
-        { label: t('graph.cherryPickCommit'), action: () => { cherryPickTarget = commit.hash; showCherryPickModal = true; } },
-        { label: t('graph.revertCommit'),     action: () => { revertTarget = commit.hash; showRevertModal = true; } },
+      });
+      groups.push([
+        { label: t('graph.cherryPickCommit'), icon: 'git-commit', action: () => { cherryPickTarget = commit.hash; showCherryPickModal = true; } },
+        { label: t('graph.revertCommit'),     icon: 'discard',    action: () => { revertTarget = commit.hash; showRevertModal = true; } },
       ]);
+      /* SNIPCODE-HOOK end */
 
       // ── Compare / Multi-select ──
       const compareGroup: any[] = [{
         label: t('graph.compareToLocal'),
+        icon: 'diff',
         action: () => {
           uiStore.multiSelectArmed = false;
           uiStore.comparing = true; uiStore.selectedCommitHash = null;
@@ -1189,25 +1249,38 @@
       if (uiStore.multiSelectArmed) {
         compareGroup.push({
           label: t('graph.addToSelection'),
+          icon: 'add',
           action: () => { uiStore.toggleHash(commit.hash); },
         });
         compareGroup.push({
           label: t('graph.cancelSelection'),
+          icon: 'close',
           action: () => { uiStore.exitMultiSelect(); },
         });
+      } else {
+        /* SNIPCODE-HOOK start: M6 — a standing entry point into multi-select,
+           since previously the only way in was an unlabeled Ctrl/Shift+click
+           (uiStore.enterMultiSelect existed but no menu ever called it). */
+        compareGroup.push({
+          label: t('graph.selectForCompare'),
+          icon: 'checklist',
+          action: () => { uiStore.enterMultiSelect(commit.hash); },
+        });
+        /* SNIPCODE-HOOK end */
       }
       // ── Bisect ── (shares the compare/inspect group)
       if (bisectBadCommit) {
-        compareGroup.push({ label: t('bisect.startGood'), action: () => { const bad = bisectBadCommit!; bisectBadCommit = null; bisectStartBad = bad; bisectStartGood = commit.hash; vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } }); } });
-        compareGroup.push({ label: t('bisect.cancelSelect'), action: () => { bisectBadCommit = null; } });
+        compareGroup.push({ label: t('bisect.startGood'), icon: 'search', action: () => { const bad = bisectBadCommit!; bisectBadCommit = null; bisectStartBad = bad; bisectStartGood = commit.hash; vscode.postMessage({ type: 'bisectStart', payload: { bad, good: commit.hash } }); } });
+        compareGroup.push({ label: t('bisect.cancelSelect'), icon: 'close', action: () => { bisectBadCommit = null; } });
       } else {
-        compareGroup.push({ label: t('bisect.selectBad'), action: () => { bisectBadCommit = commit.hash; uiStore.selectedCommitHash = null; uiStore.showBottomPanel = false; } });
+        compareGroup.push({ label: t('bisect.selectBad'), icon: 'search', action: () => { bisectBadCommit = commit.hash; uiStore.selectedCommitHash = null; uiStore.showBottomPanel = false; } });
       }
       groups.push(compareGroup);
     } else {
       // ── Stash: compare to working ──
       groups.push([{
         label: t('graph.compareToLocal'),
+        icon: 'diff',
         action: () => {
           uiStore.comparing = true; uiStore.selectedCommitHash = null;
           uiStore.compareRef1 = commit.hash; uiStore.compareRef2 = null;
@@ -1223,13 +1296,16 @@
     // for real commits only (not stashes).
     const copyGroup: any[] = [];
     if (!isStashCommit) {
-      copyGroup.push({ label: t('graph.savePatch'), action: () => vscode.postMessage({ type: 'saveCommitPatch', payload: { hash: commit.hash } }) });
+      copyGroup.push({ label: t('graph.savePatch'), icon: 'save', action: () => vscode.postMessage({ type: 'saveCommitPatch', payload: { hash: commit.hash } }) });
     }
+    /* SNIPCODE-HOOK start: M5 — Copy SHA moves to the first group; the other
+       two copy variants (short SHA, "hash - subject") stay here. */
+    topGroup.push({ label: t('graph.copySHA'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.hash } }) });
     copyGroup.push(
-      { label: t('graph.copySHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.hash } }) },
-      { label: t('graph.copyShortSHA'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
-      { label: t('graph.copyCommitInfo'), action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
+      { label: t('graph.copyShortSHA'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: commit.abbreviatedHash } }) },
+      { label: t('graph.copyCommitInfo'), icon: 'copy', action: () => vscode.postMessage({ type: 'copyToClipboard', payload: { text: `${commit.abbreviatedHash} - ${commit.subject}` } }) },
     );
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Copy Full Source (S4) — whole commit, lazy-loaded files.
        The graph row has the hash but NOT the commit's changed-file list (that is
        lazy-loaded into CommitDetails' local state, not in scope here). So the
@@ -1239,11 +1315,16 @@
     if (!isStashCommit) {
       copyGroup.push({
         label: 'Copy Full Source',
+        icon: 'copy',
         action: () => copyFullSourceForCommit(commit.hash),
       });
     }
     /* SNIPCODE-HOOK end */
     groups.push(copyGroup);
+
+    /* SNIPCODE-HOOK start: M5 — Checkout + Copy SHA lead the menu */
+    if (topGroup.length > 0) groups.unshift(topGroup);
+    /* SNIPCODE-HOOK end */
 
     // Flatten groups with separators between them, preceded by a separator if there were refs
     if (refs.length > 0) items.push(sep);
@@ -1260,6 +1341,20 @@
   function onUncommittedContextMenu(e: MouseEvent) {
     e.preventDefault();
     const items: any[] = [];
+
+    /* SNIPCODE-HOOK start: M2 — openScmView moved here from the single-click
+       handler, which now selects the row instead (so CommitDetails' Staged |
+       Unstaged tabs are reachable). */
+    items.push({
+      label: t('graph.openSourceControl'),
+      icon: 'source-control',
+      action: () => {
+        contextMenu = null;
+        vscode.postMessage({ type: 'openScmView' });
+      },
+    });
+    items.push({ separator: true, label: '', action: () => {} });
+    /* SNIPCODE-HOOK end */
 
     // Stash is always available: the row only renders when there are uncommitted
     // changes to stash.
@@ -1291,17 +1386,21 @@
     contextMenu = { x: e.clientX, y: e.clientY, items };
   }
 
+  /* SNIPCODE-HOOK start: M7 — locale-aware date format, matching the format
+     CommitDetails uses for the full date, instead of a hand-written
+     AM/PM-before-time layout that matches no locale (X5). */
+  const graphDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function formatDate(dateStr: string): string {
     const d = new Date(dateStr);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const hours = d.getHours();
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    const ampm = hours < 12 ? 'AM' : 'PM';
-    const h12 = hours % 12 || 12;
-    return `${year}-${month}-${day} ${ampm} ${h12}:${mins}`;
+    // The synthetic UNCOMMITTED commit (and several test fixtures) ship an
+    // empty date string -- Intl.DateTimeFormat throws RangeError on an
+    // invalid Date, so guard and pass the raw value through unchanged
+    // (matches lib/utils/format-date.ts's formatCommitDate, which MainPanel's
+    // side will switch this over to importing once the branches merge).
+    if (isNaN(d.getTime())) return dateStr;
+    return graphDateFormatter.format(d);
   }
+  /* SNIPCODE-HOOK end */
 
   // Keep the viewport size in sync with the actual container. Its height changes
   // when the bottom panel opens/closes or is resized, which fires no window
@@ -1351,8 +1450,26 @@
     }
   });
 
+  /* SNIPCODE-HOOK start: M13 — move DOM focus to match the newly selected row
+     after keyboard navigation. Without this, focus stays on the previously
+     selected row, which just dropped to tabindex=-1 (roving tabindex) — the
+     browser doesn't blur it automatically, so a subsequent Tab press would
+     leave the grid from an arbitrary stale position instead of the row the
+     user is now actually looking at. */
+  async function focusSelectedRow() {
+    await tick();
+    const hash = uiStore.selectedCommitHash;
+    if (!hash || !container) return;
+    const el = container.querySelector<HTMLElement>(`.commit-row[data-commit-hash="${CSS.escape(hash)}"]`);
+    el?.focus();
+  }
+  /* SNIPCODE-HOOK end */
+
   function handleGraphNavKey(e: KeyboardEvent) {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    /* SNIPCODE-HOOK start: M14 — Home/End/PageUp/PageDown were entirely missing */
+    const isPageKey = e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown';
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && !isPageKey) return;
+    /* SNIPCODE-HOOK end */
     // Ignore while a modal is open, a multi-select range is armed, or the user
     // is typing in an input (e.g. the search box).
     if (modalStore.anyOpen || uiStore.multiSelectArmed) return;
@@ -1361,6 +1478,23 @@
                el.tagName === 'SELECT' || el.isContentEditable)) return;
 
     const navCommits = displayCommits.filter(c => c.hash !== 'UNCOMMITTED');
+
+    /* SNIPCODE-HOOK start: M14 */
+    if (isPageKey) {
+      e.preventDefault();
+      navPath = [];
+      const dir = e.key === 'Home' ? 'home' : e.key === 'End' ? 'end' : e.key === 'PageUp' ? 'pageUp' : 'pageDown';
+      const pageSize = Math.max(1, Math.floor(viewportHeight / ROW_HEIGHT));
+      const target = computePagedTarget(navCommits, uiStore.selectedCommitHash, dir, pageSize);
+      if (target) {
+        uiStore.selectSingle(target);
+        scrollHashIntoView(target, dir === 'home' || dir === 'end' ? 'center' : 'edge');
+        focusSelectedRow();
+      }
+      return;
+    }
+    /* SNIPCODE-HOOK end */
+
     const dir = e.key === 'ArrowDown' ? 'down' : 'up';
     e.preventDefault();
 
@@ -1370,6 +1504,7 @@
       if (result.target) {
         uiStore.selectSingle(result.target);
         scrollHashIntoView(result.target, 'edge');
+        focusSelectedRow();
       }
       return;
     }
@@ -1380,6 +1515,7 @@
     if (target) {
       uiStore.selectSingle(target);
       scrollHashIntoView(target, 'edge');
+      focusSelectedRow();
     }
   }
 
@@ -1392,12 +1528,19 @@
     // 1st Esc closes the open bottom panel; 2nd Esc clears the selection.
     else if (uiStore.multiSelectArmed && uiStore.showBottomPanel) { uiStore.showBottomPanel = false; }
     else if (uiStore.multiSelectArmed) { uiStore.exitMultiSelect(); }
+    /* SNIPCODE-HOOK start: M14 — none of the graph's own Esc cases applied
+       (e.g. the search box was just cleared and blurred, per SearchBar.svelte
+       — its own change, out of scope here), so focus has nowhere to go.
+       Hand it back to the graph container so arrow-key nav keeps working
+       instead of dying until the next click. */
+    else { container?.focus(); }
+    /* SNIPCODE-HOOK end */
   } else {
     handleGraphNavKey(e);
   }
 }} />
 
-<div class="commit-graph" class:h-scroll={horizontalScroll} bind:this={container} onscroll={handleScroll}>
+<div class="commit-graph" class:h-scroll={horizontalScroll} bind:this={container} onscroll={handleScroll} tabindex="-1">
   {#if uiStore.operating}
     <!-- Non-blocking busy indicator: a git op is in flight. Sticky so it stays
          pinned to the top of the scroll viewport; the graph underneath keeps its
@@ -1450,7 +1593,7 @@
       style="height: {totalHeight}px; position: relative;{contentWidth ? ` width: ${contentWidth}px;` : ''}"
       role="presentation"
       onpointermove={handleRowHover}
-      onpointerleave={() => { hoveredHash = null; }}
+      onpointerleave={() => { hoveredHash = null; hoveredRowIndex = -1; }}
     >
       <!-- SVG for graph - SourceGit-style Path + Link + Dot rendering -->
       <svg
@@ -1459,17 +1602,24 @@
         style="position: absolute; top: 0; height: {totalHeight}px; overflow: hidden;"
       >
         <!-- Paths: continuous branch lines -->
+        <!-- SNIPCODE-HOOK start: G4/G2/G7/G11 — single line (glow layer removed,
+             it was ~1.05:1 contrast and invisible in every screenshot while
+             doubling <path> count); color via --c custom prop (G11 lets the
+             light/high-contrast CSS below recolor without touching this
+             template); opacity/width from railVisual (G2 dim + G7 spotlight). -->
         {#each visiblePaths as path}
           {@const pathColor = resolveGraphColor(graphColorsStore.palette, path.color, path.colorOverride)}
+          {@const v = railVisual(path.highlighted, path.pathIndex)}
           {#if path.d}
-            <path d={path.d} fill="none" stroke={pathColor} stroke-width="5" opacity="0.07" stroke-linecap="round" />
-            <path d={path.d} fill="none" stroke={pathColor} stroke-width="2" opacity="0.85" stroke-linecap="round" />
+            <path class="rail" d={path.d} style="--c: {pathColor}" stroke-width={v.strokeWidth} opacity={v.opacity} stroke-linecap="round" />
           {/if}
         {/each}
+        <!-- SNIPCODE-HOOK end -->
 
         <!-- Links: merge connection curves -->
         {#each visibleLinks as link}
           {@const linkColor = resolveGraphColor(graphColorsStore.palette, link.color, link.colorOverride)}
+          {@const v = railVisual(link.highlighted, link.pathIndex)}
           {@const sx = laneX(link.start.x)}
           {@const sy = link.start.y * ROW_HEIGHT}
           {@const cx = laneX(link.control.x)}
@@ -1477,32 +1627,43 @@
           {@const ex = laneX(link.end.x)}
           {@const ey = link.end.y * ROW_HEIGHT}
           <path
+            class="rail"
             d="M {sx} {sy} Q {cx} {cy}, {ex} {ey}"
-            fill="none" stroke={linkColor} stroke-width="5" opacity="0.07" stroke-linecap="round"
-          />
-          <path
-            d="M {sx} {sy} Q {cx} {cy}, {ex} {ey}"
-            fill="none" stroke={linkColor} stroke-width="2" opacity="0.85" stroke-linecap="round"
+            style="--c: {linkColor}" stroke-width={v.strokeWidth} opacity={v.opacity} stroke-linecap="round"
           />
         {/each}
 
         <!-- Dots: commit nodes -->
+        <!-- SNIPCODE-HOOK start: G6/G2/G11/P2 — isHead now independent of type,
+             so a HEAD commit that is also a merge keeps the merge rendering
+             (ring+center dot) and additionally draws the HEAD ring (r6.5) on
+             top instead of losing the merge marker (old `head` took priority
+             over `merge` in dotType). Ring circles use the .dot-ring class
+             (fill: transparent, not --bg-primary — P2, was a dark disc on a
+             selected/hovered row). Color via --c (G11). Opacity follows G2
+             (highlighted) same as rows/text, unaffected by G7 (rail hover
+             only restyles paths/links, not dots, per spec). -->
         {#each visibleDots as dot, i}
           {@const dotColor = resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride)}
           {@const dx = laneX(dot.center.x)}
           {@const dy = dot.center.y * ROW_HEIGHT}
           {@const dotCommit = displayCommits[startIndex + i]}
+          {@const dotOpacity = dot.highlighted ? 1 : 0.5}
           {#if dotCommit?.hash === 'UNCOMMITTED'}
-            <circle cx={dx} cy={dy} r={5} fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3 2" />
-          {:else if dot.type === 'head'}
-            <circle cx={dx} cy={dy} r={5} fill="var(--bg-primary, #1e1e1e)" stroke={dotColor} stroke-width="2" />
-          {:else if dot.type === 'merge'}
-            <circle cx={dx} cy={dy} r={4} fill="var(--bg-primary, #1e1e1e)" stroke={dotColor} stroke-width="1.5" />
-            <circle cx={dx} cy={dy} r={2} fill={dotColor} />
+            <circle class="dot-ring" cx={dx} cy={dy} r={5} style="--c: #888888" stroke-width="1.5" stroke-dasharray="3 2" opacity={dotOpacity} />
           {:else}
-            <circle cx={dx} cy={dy} r={4} fill={dotColor} />
+            {#if dot.type === 'merge'}
+              <circle class="dot-ring" cx={dx} cy={dy} r={4} style="--c: {dotColor}" stroke-width="1.5" opacity={dotOpacity} />
+              <circle class="dot-fill" cx={dx} cy={dy} r={2} style="--c: {dotColor}" opacity={dotOpacity} />
+            {:else}
+              <circle class="dot-fill" cx={dx} cy={dy} r={4} style="--c: {dotColor}" opacity={dotOpacity} />
+            {/if}
+            {#if dot.isHead}
+              <circle class="dot-ring" cx={dx} cy={dy} r={6.5} style="--c: {dotColor}" stroke-width="1.5" opacity={dotOpacity} />
+            {/if}
           {/if}
         {/each}
+        <!-- SNIPCODE-HOOK end -->
       </svg>
 
       <!-- Commit rows -->
@@ -1514,13 +1675,14 @@
         {#each visibleCommits as { commit, index } (commit.hash)}
           {@const dot = displayDots[index]}
           {@const nodeColor = dot ? resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride) : '#888'}
-          {@const isRemoteTip = dot?.remoteTip ?? false}
+          {@const isSelected = uiStore.selectedCommitHashes.length > 0
+            ? uiStore.selectedCommitHashes.includes(commit.hash)
+            : uiStore.selectedCommitHash === commit.hash}
           <div
             class="commit-row"
+            data-commit-hash={commit.hash}
             class:hovered={hoveredHash === commit.hash}
-            class:selected={uiStore.selectedCommitHashes.length > 0
-              ? uiStore.selectedCommitHashes.includes(commit.hash)
-              : uiStore.selectedCommitHash === commit.hash}
+            class:selected={isSelected}
             class:highlighted={contextMenuHash === commit.hash}
             class:search-match={isSearchActive && searchMatchedHashes?.has(commit.hash)}
             class:search-dim={isSearchActive && !searchMatchedHashes?.has(commit.hash)}
@@ -1534,29 +1696,33 @@
             class:bisect-start-bad={bisectActive && bisectStartBad === commit.hash}
             class:bisect-start-good={bisectActive && bisectStartGood === commit.hash}
             class:bisect-culprit={bisectCulpritHash !== null && commit.hash.startsWith(bisectCulpritHash)}
-            style="height: {ROW_HEIGHT}px;"
+            class:head-row={dot?.isHead ?? false}
+            style="height: {ROW_HEIGHT}px;{dot?.isHead ? ` --head-lane-color: ${nodeColor};` : ''}"
             onclick={(e) => handleRowClick(commit, e)}
-            ondblclick={() => handleRowDblClick(commit)}
             oncontextmenu={(e) => { if (commit.hash === 'UNCOMMITTED') onUncommittedContextMenu(e); else onCommitContextMenu(e, commit); }}
-            use:tooltip={commit.hash === 'UNCOMMITTED' ? t('graph.clickToOpenScm') : ''}
             role="row"
-            tabindex={0}
+            tabindex={commit.hash === rovingTabTargetHash ? 0 : -1}
             onkeydown={(e) => {
               if (e.key !== 'Enter') return;
               if (commit.hash === 'UNCOMMITTED') {
-                uiStore.selectedCommitHash = null;
-                vscode.postMessage({ type: 'openScmView' });
+                uiStore.selectCommit('UNCOMMITTED');
               } else {
                 selectCommit(commit.hash);
               }
             }}
           >
             <div class="col-message" style="padding-left: {(displayLeftMargin[index] ?? 0) * X_SCALE + 4}px;">
-              {#if currentBranchLocalOnly.has(commit.hash)}
-                <span class="local-dot" use:tooltip={t('graph.notPushed')}></span>
-              {:else if currentBranchRemoteAhead.has(commit.hash)}
-                <span class="remote-dot" use:tooltip={t('graph.remoteOnly')}></span>
+              <!-- SNIPCODE-HOOK start: G9 — was a 5px dot (read as a stray
+                   node on top of a lane, and only ever computed for the
+                   current branch); now an icon sourced from the builder's
+                   dot.localOnly / dot.remoteTip (X6-fixed, so this is
+                   correct for every branch, not only HEAD's). -->
+              {#if dot?.localOnly}
+                <i class="codicon codicon-arrow-up local-dot" style="color: {nodeColor}" use:tooltip={t('graph.notPushed')}></i>
+              {:else if dot?.remoteTip}
+                <i class="codicon codicon-cloud remote-dot" use:tooltip={t('graph.remoteOnly')}></i>
               {/if}
+              <!-- SNIPCODE-HOOK end -->
               {#each commit.refs.filter(r => {
                   if (r.type === 'working-dir') return false;
                   if (r.type === 'remote-branch') {
@@ -1587,7 +1753,14 @@
                   })()}
                   {@const trackedUpstream = (ref.type === 'branch' || ref.type === 'head') ? (localBranchMap.get(ref.name)?.upstream ?? null) : null}
                   {@const isWtBranch = (ref.type === 'branch' || ref.type === 'head') && worktreeBranches.has(ref.name)}
-                  {@const badgeColor = ref.type === 'tag' ? '#f0c040' : ref.type === 'stash' ? 'var(--text-secondary, #888)' : isWtBranch ? '#4caf50' : nodeColor}
+                  <!-- SNIPCODE-HOOK start: G8 — tag/worktree used fixed colors
+                     (#f0c040 / #4caf50) that alias against the lane palette
+                     (#ffc53d/#faad14, #73d13d), reading as "this belongs to
+                     that lane". Route them through the same neutral tint as
+                     stash instead — icon alone carries their meaning; color
+                     stays a lane-identity signal exclusively. -->
+                  {@const badgeColor = (ref.type === 'tag' || ref.type === 'stash' || isWtBranch) ? 'var(--text-secondary, #888)' : nodeColor}
+                  <!-- SNIPCODE-HOOK end -->
                   {@const showCloudOnly = hasRemote && trackedUpstream && (remoteFilter.length === 0 || (remoteFilter.includes('local') && remoteFilter.includes(trackedUpstream.split('/')[0])))}
                   {#if showCloudOnly}
                     <span
@@ -1694,7 +1867,12 @@
                 {#if commit.hash === 'UNCOMMITTED'}
                   {@const counts = JSON.parse(commit.body || '{}')}
                   {@const label = t('graph.uncommitted', { staged: counts.staged ?? 0, unstaged: counts.unstaged ?? 0 })}
-                  <span class="commit-subject truncate" use:tooltip={t('graph.clickToOpenScm')}>{label}</span>
+                  <!-- SNIPCODE-HOOK start: M2 — clicking this row now selects it
+                       (Staged | Unstaged in the bottom panel) instead of jumping
+                       to Source Control, so the stale "click to open Source
+                       Control" tooltip is replaced to match. -->
+                  <span class="commit-subject truncate" use:tooltip={t('graph.clickToViewChanges')}>{label}</span>
+                  <!-- SNIPCODE-HOOK end -->
                 {:else}
                   <span class="commit-subject truncate" use:tooltip={commit.subject}><LinkifiedText text={commit.subject} /></span>
                 {/if}
@@ -1718,6 +1896,8 @@
           style="height: {totalHeight}px; width: {RIGHT_COLS_WIDTH}px;"
         >
           {#each visibleCommits as { commit, index } (commit.hash)}
+            {@const dot = displayDots[index]}
+            {@const nodeColor = dot ? resolveGraphColor(graphColorsStore.palette, dot.color, dot.colorOverride) : '#888'}
             <div
               class="meta-row"
               class:selected={uiStore.selectedCommitHashes.length > 0
@@ -1734,11 +1914,11 @@
               class:bisect-start-good={bisectActive && bisectStartGood === commit.hash}
               class:bisect-culprit={bisectCulpritHash !== null && commit.hash.startsWith(bisectCulpritHash)}
               class:hovered={hoveredHash === commit.hash}
-              style="top: {index * ROW_HEIGHT}px; height: {ROW_HEIGHT}px;"
+              class:head-row={dot?.isHead ?? false}
+              style="top: {index * ROW_HEIGHT}px; height: {ROW_HEIGHT}px;{dot?.isHead ? ` --head-lane-color: ${nodeColor};` : ''}"
               role="row"
               tabindex={-1}
               onclick={(e) => handleRowClick(commit, e)}
-              ondblclick={() => handleRowDblClick(commit)}
               oncontextmenu={(e) => { if (commit.hash === 'UNCOMMITTED') onUncommittedContextMenu(e); else onCommitContextMenu(e, commit); }}
               onkeydown={(e) => { if (e.key === 'Enter') handleRowClick(commit); }}
             >
@@ -2007,6 +2187,13 @@
     position: relative;
   }
 
+  /* SNIPCODE-HOOK start: M14 — the container itself becomes a focus target
+     (Home/End/PageUp/PageDown and the post-search Esc fallback focus it), but
+     real feedback belongs to the roving-tabindex row inside it, not the
+     container's own outline. */
+  .commit-graph:focus { outline: none; }
+  /* SNIPCODE-HOOK end */
+
   /* Indeterminate top bar shown while a git op is in flight. Sticky pins it to
      the top of the scroll viewport; a moving sheen conveys "working" without
      blocking or blanking the graph beneath it. */
@@ -2100,6 +2287,42 @@
     z-index: 3;
   }
 
+  /* SNIPCODE-HOOK start: G11 — color driven by the --c custom property (set
+     inline per element) instead of a `stroke`/`fill` SVG attribute, so a
+     single theme override below can recolor every rail/dot without touching
+     the template. Base (dark) rules just read the color straight through;
+     opacity/stroke-width stay inline (they vary per-element via G2/G7). */
+  .graph-lines .rail {
+    fill: none;
+    stroke: var(--c);
+  }
+  .graph-lines .dot-fill {
+    fill: var(--c);
+  }
+  .graph-lines .dot-ring {
+    fill: transparent;
+    stroke: var(--c);
+  }
+
+  /* Light theme: the raw palette averages ~1.5–2.3:1 contrast against white
+     (measured), well under WCAG's 3:1 graphical-object floor. Darken toward
+     black in oklab (perceptually even mixing) rather than adding a whole
+     second palette to maintain. */
+  :global(body.vscode-light) .graph-lines .rail {
+    stroke: color-mix(in oklab, var(--c) 72%, #000);
+  }
+  :global(body.vscode-light) .graph-lines .dot-fill {
+    fill: color-mix(in oklab, var(--c) 72%, #000);
+  }
+  :global(body.vscode-light) .graph-lines .dot-ring {
+    stroke: color-mix(in oklab, var(--c) 72%, #000);
+  }
+
+  :global(body.vscode-high-contrast) .graph-lines .rail {
+    stroke-width: 2.5;
+  }
+  /* SNIPCODE-HOOK end */
+
   .visible-rows {
     z-index: 1;
   }
@@ -2119,6 +2342,17 @@
   .commit-row.hovered {
     background: var(--bg-hover);
   }
+
+  /* SNIPCODE-HOOK start: G6 — HEAD row gets a subtle, always-visible ambient
+     marker (independent of hover/selection) so the current commit is findable
+     at a glance while scrolling. --head-lane-color is set inline per-row to
+     the dot's own resolved lane color. Placed before .selected/.compare-* so
+     those still win the background/box-shadow when combined with this row. */
+  .commit-row.head-row {
+    box-shadow: inset 3px 0 0 var(--head-lane-color);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+  }
+  /* SNIPCODE-HOOK end */
 
   .commit-row.compare-base {
     background: rgba(99, 176, 244, 0.12);
@@ -2151,8 +2385,15 @@
     outline: 1px solid var(--vscode-focusBorder, #007fd4);
     outline-offset: -1px;
   }
-  /* No focus ring on click/keyboard focus (selection is shown by the row background). */
-  .commit-row:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — roving tabindex means the focused row and the
+     selected row can differ while arrowing through the list before Enter/click
+     commits a selection, so keyboard users need a real focus indicator instead
+     of relying on the (possibly stale) selection background. */
+  .commit-row:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
 
   .commit-row:not(.other-branch) .commit-subject {
     font-weight: normal;
@@ -2270,8 +2511,21 @@
       inset 0 -1px 0 var(--vscode-focusBorder, #007fd4),
       inset -1px 0 0 var(--vscode-focusBorder, #007fd4);
   }
-  /* No focus ring on click/keyboard focus. */
-  .meta-row:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — mirrors .commit-row:focus-visible above so the
+     pinned overlay stays visually consistent, even though this row is not
+     currently a keyboard focus target itself (tabindex is always -1 here). */
+  .meta-row:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: G6 — mirrors .commit-row.head-row for the pinned
+     overlay (horizontal-scroll mode) so the HEAD marker isn't message-side only. */
+  .meta-row.head-row {
+    background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+  }
+  /* SNIPCODE-HOOK end */
 
   .meta-row.hovered { background-color: var(--bg-hover); }
   .meta-row.selected { background-color: var(--bg-selected); }
@@ -2290,37 +2544,36 @@
   .meta-row.bisect-start-good { background-color: color-mix(in srgb, #4caf50 12%, var(--bg-primary)); }
   .meta-row.bisect-culprit { background-color: color-mix(in srgb, #ff9800 15%, var(--bg-primary)); }
 
-  .local-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
+  /* SNIPCODE-HOOK start: G9 — was a 5px dot indistinguishable from a lane
+     node at 1x zoom (sat right where a lower lane's X crossed it); an icon
+     reads as "status", not "another commit". local-dot colors to the row's
+     own lane (inline style="color") so it still carries that association;
+     remote-dot stays neutral (it's not "this branch", just "not pulled"). */
+  .local-dot, .remote-dot {
     flex-shrink: 0;
-    background: #4da6ff;
-    opacity: 0.8;
-  }
-
-  :global(body.vscode-light) .local-dot {
-    background: #1565c0;
+    font-size: 12px;
+    line-height: 1;
   }
 
   .remote-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: var(--text-secondary, #888);
-    opacity: 0.8;
+    color: var(--text-secondary, #888);
   }
+  /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: M8 — was a hard `width:120px` that truncated most
+     names ("Bob Martí…"); flex-basis 160 with a 100 floor gives real names
+     room while still yielding to a squeezed viewport. Keep in sync with
+     RIGHT_COLS_WIDTH above. */
   .col-author {
-    width: 120px;
-    flex-shrink: 0;
+    flex: 0 1 160px;
+    min-width: 100px;
     padding: 0 10px;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
   }
+  /* SNIPCODE-HOOK end */
 
   /* Wraps avatar + name so the author-name tooltip is scoped to them only;
      the signature icon sits outside as a sibling so hovering it doesn't also
@@ -2418,11 +2671,16 @@
     box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.06);
   }
 
+  /* SNIPCODE-HOOK start: G8 — badge had no cap; a long branch name (e.g.
+     "ui: sticky header and column…") could push the commit message down to
+     nearly nothing. 180px matches a ~2-word branch name comfortably while
+     always leaving the message legible. */
   .ref-badge {
     position: relative;
     display: inline-flex;
     align-items: center;
     gap: 3px;
+    max-width: 180px;
     padding: 1px 7px 1px calc(var(--badge-bar-width, 4px) + 6px);
     border-radius: 4px;
     font-size: 0.95em;
@@ -2432,12 +2690,14 @@
     line-height: 17px;
     cursor: pointer;
     overflow: hidden;
+    text-overflow: ellipsis;
     transition: box-shadow 0.1s;
     /* Dark theme defaults: neutral fill */
     background: rgba(255, 255, 255, 0.05);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.12);
   }
+  /* SNIPCODE-HOOK end */
 
   /* Colored accent bar. Clipped to the badge's rounded corners by its
      overflow:hidden, so it reads as an integrated edge accent. Painted above the
@@ -2452,9 +2712,16 @@
     background: var(--badge-color);
   }
 
-  /* No focus ring on click/keyboard focus. Otherwise clicking a badge and then
-     pressing Esc flips it into :focus-visible, drawing an unwanted outline. */
-  .ref-badge:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — was unconditionally outline:none (clicking a
+     badge then pressing Esc used to flip it into :focus-visible and draw the
+     browser's default ring). Now that a real, theme-matched focus ring is a
+     deliberate part of keyboard-accessibility (see .commit-row:focus-visible),
+     that same case is no longer unwanted — it's consistent feedback. */
+  .ref-badge:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* Fixed-color refs: tag/worktree 20%, stash 28% (via inline --fixed-tint). */
   .ref-badge.badge-fixed {
