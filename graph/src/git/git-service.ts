@@ -952,10 +952,13 @@ export class GitService {
   }
 
   /* SNIPCODE-HOOK start: Batch B retain rename source path */
-  async getUncommittedDiff(): Promise<{ staged: StatusChange[]; unstaged: StatusChange[] }> {
+  async getUncommittedDiff(): Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }> {
     const raw = await this.exec(['status', '--porcelain', '-z', '-uall']);
     const staged: StatusChange[] = [];
     const unstaged: StatusChange[] = [];
+    /* SNIPCODE-HOOK start: R3/S3 route unmerged entries to a third conflict array */
+    const conflict: StatusChange[] = [];
+    /* SNIPCODE-HOOK end */
     for (const entry of this.parseStatusPorcelainZ(raw)) {
       const { x, y } = entry;
       let { path } = entry;
@@ -965,11 +968,25 @@ export class GitService {
       // so the UI can show a meaningful label instead of an empty diff.
       const isNestedRepo = x === '?' && y === '?' && path.endsWith('/');
       if (isNestedRepo) path = path.slice(0, -1);
+      /* SNIPCODE-HOOK start: R3/S3 route unmerged entries to a third conflict array
+         Standard porcelain unmerged pairs: DD, AU, UD, UA, DU, AA, UU — any pair
+         where either side is 'U', or both sides agree on 'A'/'D'. These used to
+         land in BOTH staged and unstaged (status letter collided with untracked
+         'U'), so a conflicted file looked like a normal stageable change and
+         Commit failed with an opaque "unmerged files" error. Route them here
+         instead, with a distinct status letter ('!') so the tree/decoration
+         layer never confuses a conflict with an untracked file. */
+      const isConflict = x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D');
+      if (isConflict) {
+        conflict.push({ path, status: '!', ...(entry.oldPath ? { oldPath: entry.oldPath } : {}) });
+        continue;
+      }
+      /* SNIPCODE-HOOK end */
       if (x !== ' ' && x !== '?') staged.push({ path, status: x, ...((x === 'R' || x === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
       if (y !== ' ' && y !== '?') unstaged.push({ path, status: y, ...((y === 'R' || y === 'C') && entry.oldPath ? { oldPath: entry.oldPath } : {}) });
       if (x === '?' && y === '?') unstaged.push({ path, status: isNestedRepo ? 'N' : 'U' });
     }
-    return { staged, unstaged };
+    return { staged, unstaged, conflict };
   }
   /* SNIPCODE-HOOK end */
 
@@ -2436,6 +2453,30 @@ export class GitService {
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: S4 Discard — revert unstaged working-tree changes
+   * Tracked paths are restored from HEAD (index untouched, `--worktree` only);
+   * untracked paths are removed from disk with `git clean`. Both 'restore' and
+   * 'clean' are already in invalidatesReadCache, so exec() routes this through
+   * withMutationLock + clearReadCache with no extra plumbing here. A nested
+   * repo dir (status 'N') is never touched — `git clean -f` on one would delete
+   * an entire embedded repository. */
+  async discardPaths(changes: StatusChange[]): Promise<void> {
+    const tracked = new Set<string>();
+    const untracked = new Set<string>();
+    for (const c of changes) {
+      if (c.status === 'N') continue;
+      if (c.status === 'U') { untracked.add(c.path); continue; }
+      tracked.add(c.path);
+      if (c.oldPath) tracked.add(c.oldPath);
+    }
+    const trackedPaths = [...tracked];
+    const untrackedPaths = [...untracked];
+    for (const p of [...trackedPaths, ...untrackedPaths]) this.assertSafePath(p, 'restore');
+    if (trackedPaths.length) await this.exec(['restore', '--worktree', '--source=HEAD', '--', ...trackedPaths]);
+    if (untrackedPaths.length) await this.exec(['clean', '-f', '--', ...untrackedPaths]);
+  }
+  /* SNIPCODE-HOOK end */
+
   /**
    * Commit whatever is currently staged (`git commit -m`). Throws with a clear
    * message when the index is empty (git would fail anyway). Returns the new
@@ -2456,6 +2497,14 @@ export class GitService {
     await this.exec(opts?.amend ? ['commit', '--amend', '-m', message] : ['commit', '-m', message]);
     return (await this.exec(['rev-parse', 'HEAD'])).trim();
   }
+
+  /* SNIPCODE-HOOK start: S13 Amend prefill — read HEAD's full message */
+  /** HEAD's full commit message (subject + body), for prefilling the Amend
+   *  textarea when the user hasn't typed one. `%B` keeps embedded newlines. */
+  async headCommitMessage(): Promise<string> {
+    return this.exec(['log', '-1', '--format=%B']);
+  }
+  /* SNIPCODE-HOOK end */
 
   async getConflictFiles(): Promise<string[]> {
     try {

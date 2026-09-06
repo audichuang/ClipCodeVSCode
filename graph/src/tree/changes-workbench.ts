@@ -110,7 +110,10 @@ export class ChangesWorkbench implements vscode.Disposable {
           if (strict && !uncheckedSnapshot.has(r.path)) {
             throw new Error(`${r.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
-          return { staged: [], unstaged: [] };
+          /* SNIPCODE-HOOK start: S12 a read failure stays visible instead of vanishing */
+          const message = err instanceof Error ? err.message : String(err);
+          return { staged: [], unstaged: [], conflict: [], error: message };
+          /* SNIPCODE-HOOK end */
         }),
         svc.branches().catch(() => []),
         svc.aheadBehind(), // never throws; null when no upstream
@@ -121,6 +124,12 @@ export class ChangesWorkbench implements vscode.Disposable {
         repoName: r.name, repoPath: r.path, branch,
         ahead: aheadBehind?.ahead, behind: aheadBehind?.behind,
         staged: diff.staged, unstaged: diff.unstaged,
+        /* SNIPCODE-HOOK start: R3/S3 conflict is a third change group */
+        conflict: diff.conflict ?? [],
+        /* SNIPCODE-HOOK end */
+        /* SNIPCODE-HOOK start: S12 a read failure stays visible instead of vanishing */
+        error: (diff as { error?: string }).error,
+        /* SNIPCODE-HOOK end */
       });
     }
     return out;
@@ -129,8 +138,16 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
   async refresh(): Promise<void> {
-    await this.tree.refresh();
+    /* SNIPCODE-HOOK start: S12 show progress in the Changes view while refreshing */
+    await vscode.window.withProgress({ location: { viewId: 'snipcode.changes' } }, () => this.tree.refresh());
+    /* SNIPCODE-HOOK end */
     this.diffPanel?.invalidateIndexDocuments();
+    /* SNIPCODE-HOOK start: S P2 activity-bar badge = staged repo count */
+    if (this.view) {
+      const count = this.tree.getStagedRepoCount();
+      this.view.badge = count > 0 ? { value: count, tooltip: `${count} 個 repo 待提交` } : undefined;
+    }
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
 
@@ -215,21 +232,67 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Stage every file of one repo (the repo node under Unstaged). */
   private async stageRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B retain rename source path */
-    if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(node.files));
+    /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+    const files = node.files.filter(f => f.status !== 'N');
+    /* SNIPCODE-HOOK end */
+    if (files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).stagePaths(files));
     /* SNIPCODE-HOOK end */
     await this.refresh();
   }
   /** Unstage every file of one repo (the repo node under Staged). */
   private async unstageRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B retain rename source path */
     if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths(node.files));
     /* SNIPCODE-HOOK end */
     await this.refresh();
   }
 
+  /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+  /** Revert the working-tree edits for the selected unstaged file(s) — tracked
+   *  paths restore from HEAD, untracked paths are deleted. Destructive and
+   *  unrecoverable, so it always confirms via a modal warning first. */
+  private async discard(nodes: FileNode[]): Promise<void> {
+    if (nodes.length === 0) return;
+    const label = nodes.length === 1 ? nodes[0].path : `${nodes.length} 個檔案`;
+    const confirmed = await vscode.window.showWarningMessage(
+      `捨棄 ${label} 的變更？此動作無法復原。`,
+      { modal: true },
+      '捨棄',
+    );
+    if (confirmed !== '捨棄') return;
+    await this.byRepo(nodes, (svc, changes) => svc.discardPaths(changes));
+  }
+
+  /** Discard every unstaged file of one repo (the repo node under Unstaged). */
+  private async discardRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
+    const files = node.files.filter(f => f.status !== 'N');
+    if (files.length === 0) return;
+    const confirmed = await vscode.window.showWarningMessage(
+      `捨棄 ${node.repoName} 中 ${files.length} 個檔案的變更？此動作無法復原。`,
+      { modal: true },
+      '捨棄',
+    );
+    if (confirmed !== '捨棄') return;
+    await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).discardPaths(files));
+    await this.refresh();
+  }
+  /* SNIPCODE-HOOK end */
+
   /** Flatten any selected node(s) — file, repo, or group — to their file nodes. */
   private nodeFiles(node: ChangeTreeNode): FileNode[] {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return [];
+    /* SNIPCODE-HOOK end */
     if (node.kind === 'file') return [node];
     if (node.kind === 'repo') return node.files;
     return node.repos.flatMap(r => r.files); // group → every repo's files
@@ -256,7 +319,10 @@ export class ChangesWorkbench implements vscode.Disposable {
   private async stageAll(): Promise<void> {
     for (const r of await this.loadStatus()) {
       /* SNIPCODE-HOOK start: Batch B retain rename source path */
-      if (r.unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(r.unstaged));
+      /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+      const unstaged = r.unstaged.filter(f => f.status !== 'N');
+      /* SNIPCODE-HOOK end */
+      if (unstaged.length) await runExclusive(r.repoPath, () => this.svcFor(r.repoPath).stagePaths(unstaged));
       /* SNIPCODE-HOOK end */
     }
     await this.refresh();
@@ -279,8 +345,16 @@ export class ChangesWorkbench implements vscode.Disposable {
     // strict veto and the filter below must see the same selection even if the
     // user toggles checkboxes while status reads are in flight.
     const unchecked = new Set(this.uncheckedForCommit);
-    const status = (await this.loadStatus(true, unchecked))
+    const candidates = (await this.loadStatus(true, unchecked))
       .filter(r => r.staged.length > 0 && !unchecked.has(r.repoPath));
+    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: R3/S3 skip repos with unresolved conflicts instead of
+       letting `git commit` fail opaquely with "unmerged files" */
+    const blocked = candidates.filter(r => r.conflict.length > 0);
+    const status = candidates.filter(r => r.conflict.length === 0);
+    if (blocked.length > 0 && this.view) {
+      this.view.message = `已略過含未解決衝突的 repo：${blocked.map(r => r.repoName).join('、')}`;
+    }
     /* SNIPCODE-HOOK end */
     if (status.length === 0) throw new Error('沒有勾選要提交的 repo（或沒有已暫存的變更）');
     if (amend && status.length > 1) throw new Error('amend can only target a single repo');
@@ -297,14 +371,41 @@ export class ChangesWorkbench implements vscode.Disposable {
     return results;
   }
 
-  private async openChange(node: FileNode): Promise<void> {
-    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
-    try {
-      await vscode.commands.executeCommand('git.openChange', uri);
-    } catch {
-      await vscode.commands.executeCommand('vscode.open', uri);
-    }
+  /* SNIPCODE-HOOK start: S13 Amend prefill */
+  /** HEAD's commit message for the single checked+staged repo, so the commit
+   *  box can prefill an empty Amend textarea (webview asks for this on demand
+   *  rather than the tree pushing it on every refresh). Returns null when
+   *  amend wouldn't have exactly one target (same rule as commit()). */
+  async amendPrefillMessage(): Promise<string | null> {
+    const candidates = (await this.loadStatus())
+      .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath) && r.conflict.length === 0);
+    if (candidates.length !== 1) return null;
+    return this.svcFor(candidates[0].repoPath).headCommitMessage();
   }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+  /** The inline go-to-file icon: open the file itself, not VS Code's own diff
+   *  view (that was a silent second diff UI alongside the Snipcode Diff tab —
+   *  see S9 in the sidebar audit). The native diff is still reachable via the
+   *  "Open Changes (VS Code)" context-menu entry, openChangeNative below. */
+  private async openChange(node: FileNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
+    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
+    await vscode.commands.executeCommand('vscode.open', uri);
+  }
+
+  /** Right-click-only: VS Code's built-in diff view for this change. */
+  private async openChangeNative(node: FileNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
+    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
+    await vscode.commands.executeCommand('git.openChange', uri);
+  }
+  /* SNIPCODE-HOOK end */
 
   /** Read a file's parsed DiffData (staged or unstaged side) for the Diff panel.
    *  Reuses getUncommittedFileDiff so the hunk order aligns with the raw
@@ -328,6 +429,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     this.diffPanel?.show(node.repoPath, node.path);
   }
 
@@ -399,6 +503,9 @@ export class ChangesWorkbench implements vscode.Disposable {
         ? `已篩選 ${this.repoFilter.size} / ${all.length} 個 repo`
         : undefined;
     }
+    /* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+    void vscode.commands.executeCommand('setContext', 'snipcode.changes.filtered', this.repoFilter !== null);
+    /* SNIPCODE-HOOK end */
     await this.refresh();
   }
 
@@ -412,10 +519,17 @@ export class ChangesWorkbench implements vscode.Disposable {
       (Array.isArray(ns) && ns.length ? (ns as T[]) : [n as T]);
     /* SNIPCODE-HOOK start: Batch B constrain mixed tree selections */
     const sameGroup = (n: unknown, ns: unknown): FileNode[] => {
+      /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+      if (!n) return [];
+      /* SNIPCODE-HOOK end */
       const clicked = n as FileNode;
       const all = sel<FileNode>(n, ns);
       const kept = all.filter(item =>
-        item.repoPath === clicked.repoPath && item.group === clicked.group);
+        item.repoPath === clicked.repoPath && item.group === clicked.group
+        /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+        && item.status !== 'N'
+        /* SNIPCODE-HOOK end */
+      );
       // Tell the user what a mixed selection dropped — silently ignoring the
       // other repo/side's items reads as "everything was staged".
       if (kept.length < all.length) {
@@ -427,8 +541,15 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.stage', (n, ns) => this.stage(sameGroup(n, ns)));
     reg('snipcode.git.unstage', (n, ns) => this.unstage(sameGroup(n, ns)));
     /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: R3/S3 mark a conflicted file resolved (= git add) */
+    reg('snipcode.git.markResolved', (n, ns) => this.stage(sameGroup(n, ns)));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageRepo', (n) => this.stageRepo(n as RepoNode));
     reg('snipcode.git.unstageRepo', (n) => this.unstageRepo(n as RepoNode));
+    /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+    reg('snipcode.git.discard', (n, ns) => this.discard(sameGroup(n, ns)));
+    reg('snipcode.git.discardRepo', (n) => this.discardRepo(n as RepoNode));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.stageAll', () => this.stageAll());
     reg('snipcode.git.unstageAll', () => this.unstageAll());
     reg('snipcode.git.refresh', () => this.refresh());
@@ -436,9 +557,15 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.pullAll', () => this.pullAll());
     reg('snipcode.git.pushAll', () => this.pushAll());
     reg('snipcode.git.openChange', (n) => this.openChange(n as FileNode));
+    /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+    reg('snipcode.git.openChangeNative', (n) => this.openChangeNative(n as FileNode));
+    /* SNIPCODE-HOOK end */
     reg('snipcode.git.showDiff', (n) => this.showInDiffView(n as FileNode));
     reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(sel<ChangeTreeNode>(n, ns)));
     reg('snipcode.git.filterRepos', () => this.filterRepos());
+    /* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+    reg('snipcode.git.filterReposActive', () => this.filterRepos());
+    /* SNIPCODE-HOOK end */
   }
 
   dispose(): void {

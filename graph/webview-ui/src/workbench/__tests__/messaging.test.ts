@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workbenchStore } from '../workbench-store.svelte';
-import { postCommit, listenForHostMessages } from '../messaging';
+import { postCommit, listenForHostMessages, requestAmendPrefill } from '../messaging';
 
 listenForHostMessages();
 
@@ -54,3 +54,98 @@ describe('postCommit timeout fallback', () => {
     expect(workbenchStore.commitError).toBeNull();
   });
 });
+
+/* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+describe('draft persistence (R6)', () => {
+  const originalAcquire = (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi;
+
+  afterEach(() => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = originalAcquire;
+  });
+
+  it('restores a saved draft from getState() on boot', async () => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => ({ message: '未完成的訊息' }),
+      setState() {},
+    });
+    vi.resetModules();
+    const { listenForHostMessages: freshListen } = await import('../messaging');
+    const { workbenchStore: freshStore } = await import('../workbench-store.svelte');
+
+    freshListen();
+
+    expect(freshStore.message).toBe('未完成的訊息');
+  });
+
+  it('does nothing when there is no saved state', async () => {
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => undefined,
+      setState() {},
+    });
+    vi.resetModules();
+    const { listenForHostMessages: freshListen } = await import('../messaging');
+    const { workbenchStore: freshStore } = await import('../workbench-store.svelte');
+
+    freshListen();
+
+    expect(freshStore.message).toBe('');
+  });
+
+  it('saveDraft writes the current message through setState', async () => {
+    const setState = vi.fn();
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+      postMessage() {},
+      getState: () => undefined,
+      setState,
+    });
+    vi.resetModules();
+    const { saveDraft: freshSaveDraft } = await import('../messaging');
+
+    freshSaveDraft('草稿內容');
+
+    expect(setState).toHaveBeenCalledWith({ message: '草稿內容' });
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S13 Amend prefill */
+describe('Amend prefill (S13)', () => {
+  it('requestAmendPrefill posts a request to the host', () => {
+    globalThis.__postedMessages = [];
+
+    requestAmendPrefill();
+
+    expect(globalThis.__postedMessages).toContainEqual({ data: { type: 'workbenchRequestAmendPrefill' } });
+  });
+
+  it('fills an empty message from the host reply', () => {
+    workbenchStore.message = '';
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'amendPrefill', payload: { message: '之前的 commit 訊息' } },
+    }));
+
+    expect(workbenchStore.message).toBe('之前的 commit 訊息');
+  });
+
+  it('ignores a null/empty reply (e.g. no single amend target)', () => {
+    workbenchStore.message = '';
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'amendPrefill', payload: { message: null } },
+    }));
+
+    expect(workbenchStore.message).toBe('');
+  });
+
+  it('tracks amendTargetPushed from workbenchCommitState', () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'workbenchCommitState', payload: { stagedRepoCount: 1, amendTargetPushed: true } },
+    }));
+
+    expect(workbenchStore.amendTargetPushed).toBe(true);
+  });
+});
+/* SNIPCODE-HOOK end */

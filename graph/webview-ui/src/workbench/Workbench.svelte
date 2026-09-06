@@ -1,11 +1,38 @@
 <script lang="ts">
   import { workbenchStore } from './workbench-store.svelte';
-  import { postCommit } from './messaging';
+  import { postCommit, saveDraft, requestAmendPrefill } from './messaging';
 
   const store = workbenchStore;
 
   const failures = $derived(store.results.filter((r) => !r.ok));
   const okCount = $derived(store.results.filter((r) => r.ok).length);
+
+  /* SNIPCODE-HOOK start: R6 persist the draft on every edit so a hidden/remounted
+     view (retainContextWhenHidden, extension.ts) can restore it via getState() */
+  $effect(() => {
+    saveDraft(store.message);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S13 Amend prefill — empty message fetches HEAD's
+     message instead of committing; a non-empty one amends as before. */
+  function onAmendClick(): void {
+    if (!store.message.trim()) {
+      requestAmendPrefill();
+    } else {
+      postCommit(true);
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S14 Ctrl/Cmd+Enter commits from the textarea */
+  function onTextareaKeydown(e: KeyboardEvent): void {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && store.canCommit) {
+      e.preventDefault();
+      postCommit(false);
+    }
+  }
+  /* SNIPCODE-HOOK end */
 </script>
 
 <div class="commit-box">
@@ -21,6 +48,7 @@
     bind:value={store.message}
     placeholder="Commit 訊息（共用一則，套用到所有已暫存的 repo）"
     rows="3"
+    onkeydown={onTextareaKeydown}
   ></textarea>
 
   <div class="actions">
@@ -31,12 +59,18 @@
     <button
       class="btn secondary"
       disabled={!store.canAmend}
-      onclick={() => postCommit(true)}
-      title="Amend 上一個 commit（僅單一 repo）"
+      onclick={onAmendClick}
+      title="Amend 上一個 commit（僅單一 repo；訊息空白時會先帶入舊訊息）"
     >
       Amend
     </button>
   </div>
+
+  <!-- SNIPCODE-HOOK start: S13 "already pushed" warning for Amend -->
+  {#if store.amendTargetPushed}
+    <p class="banner warning"><span class="codicon codicon-warning"></span>此 commit 已推送到遠端，Amend 會改寫已推送的歷史。</p>
+  {/if}
+  <!-- SNIPCODE-HOOK end -->
 </div>
 
 <style>
@@ -56,6 +90,7 @@
   .banner .codicon { font-size: 13px; flex: none; }
   .banner.error { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); }
   .banner.ok { background: var(--vscode-inputValidation-infoBackground, #063b49); }
+  .banner.warning { background: var(--vscode-inputValidation-warningBackground, #352a05); }
   textarea {
     width: 100%; box-sizing: border-box; padding: 6px 8px; min-height: 52px;
     font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px);

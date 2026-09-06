@@ -30,269 +30,353 @@
     "commands": [
       {
         "command": "clipcode.copyToClipboard",
-        "title": "Snipcode: Copy to Clipboard"
+        "title": "Copy to Clipboard",
+        "category": "Snipcode"
       },
       {
         "command": "clipcode.copyAllOpenEditors",
-        "title": "Snipcode: Copy All Open Editors"
+        "title": "Copy All Open Editors",
+        "category": "Snipcode"
       },
       {
         "command": "clipcode.copyGitChanges",
-        "title": "Snipcode: Copy Git Changes",
+        "title": "Copy Git Changes",
+        "category": "Snipcode",
         "icon": "$(clippy)"
       },
       {
         "command": "clipcode.pasteAndRestoreFiles",
-        "title": "Snipcode: Paste and Restore Files"
+        "title": "Paste and Restore Files",
+        "category": "Snipcode"
       },
       {
         "command": "clipcode.history.switchRepository",
-        "title": "Snipcode: Switch Repository",
+        "title": "Switch Repository",
+        "category": "Snipcode",
         "icon": "$(repo)"
       },
       {
         "command": "clipcode.history.copyFullSource",
-        "title": "Snipcode: Copy Full Source"
+        "title": "Copy Full Source",
+        "category": "Snipcode"
       },
       {
         "command": "clipcode.history.loadMore",
-        "title": "Load More"
+        "title": "Load More",
+        "category": "Snipcode"
       },
       {
         "command": "clipcode.history.refresh",
         "title": "Refresh",
+        "category": "Snipcode",
         "icon": "$(refresh)"
       },
       {
         "command": "gitGraphPlus.open",
-        "title": "Git Graph+: Open Git Graph",
+        "title": "Open Git Graph",
+        "category": "Git Graph+",
         "icon": "$(git-merge)"
       },
       {
         "command": "gitGraphPlus.refresh",
-        "title": "Git Graph+: Refresh",
+        "title": "Refresh",
+        "category": "Git Graph+",
         "icon": "$(refresh)"
       },
       {
         "command": "gitGraphPlus.fetch",
-        "title": "Git Graph+: Fetch",
+        "title": "Fetch",
+        "category": "Git Graph+",
         "icon": "$(cloud-download)"
       },
       {
         "command": "gitGraphPlus.pull",
-        "title": "Git Graph+: Pull",
+        "title": "Pull",
+        "category": "Git Graph+",
         "icon": "$(arrow-down)"
       },
       {
         "command": "gitGraphPlus.push",
-        "title": "Git Graph+: Push",
+        "title": "Push",
+        "category": "Git Graph+",
         "icon": "$(arrow-up)"
       },
       {
         "command": "gitGraphPlus.publishBranch",
-        "title": "Git Graph+: Publish Branch",
+        "title": "Publish Branch",
+        "category": "Git Graph+",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "gitGraphPlus.checkoutBranch",
         "title": "Checkout Branch",
+        "category": "Git Graph+",
         "icon": "$(arrow-right)"
       },
       {
         "command": "gitGraphPlus.createBranch",
-        "title": "Git Graph+: Create Branch",
+        "title": "Create Branch",
+        "category": "Git Graph+",
         "icon": "$(add)"
       },
       {
         "command": "gitGraphPlus.stashSave",
-        "title": "Git Graph+: Stash Changes",
+        "title": "Stash Changes",
+        "category": "Git Graph+",
         "icon": "$(archive)"
       },
       {
         "command": "gitGraphPlus.createTag",
-        "title": "Git Graph+: Create Tag",
+        "title": "Create Tag",
+        "category": "Git Graph+",
         "icon": "$(tag)"
       },
       {
         "command": "gitGraphPlus.pushTag",
-        "title": "Git Graph+: Push Tag",
+        "title": "Push Tag",
+        "category": "Git Graph+",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "gitGraphPlus.pushAllTags",
-        "title": "Git Graph+: Push All Tags",
+        "title": "Push All Tags",
+        "category": "Git Graph+",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "gitGraphPlus.deleteRemoteTag",
-        "title": "Git Graph+: Delete Remote Tag",
+        "title": "Delete Remote Tag",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.deleteBranch",
-        "title": "Git Graph+: Delete Branch",
+        "title": "Delete Branch",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.renameBranch",
-        "title": "Git Graph+: Rename Branch",
+        "title": "Rename Branch",
+        "category": "Git Graph+",
         "icon": "$(edit)"
       },
       {
         "command": "gitGraphPlus.deleteTag",
-        "title": "Git Graph+: Delete Tag",
+        "title": "Delete Tag",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.mergeBranch",
-        "title": "Git Graph+: Merge Branch",
+        "title": "Merge Branch",
+        "category": "Git Graph+",
         "icon": "$(git-merge)"
       },
       {
         "command": "gitGraphPlus.showRemoteBranchMenu",
-        "title": "Checkout Remote Branch",
+        "title": "Remote Branch Menu",
+        "category": "Git Graph+",
         "icon": "$(git-branch)"
       },
       {
         "command": "gitGraphPlus.checkoutRemoteBranch",
         "title": "Checkout Remote Branch",
+        "category": "Git Graph+",
         "icon": "$(arrow-right)"
       },
       {
         "command": "gitGraphPlus.deleteRemoteBranch",
         "title": "Delete Remote Branch",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.stashApply",
-        "title": "Git Graph+: Apply Stash",
+        "title": "Apply Stash",
+        "category": "Git Graph+",
         "icon": "$(check)"
       },
       {
         "command": "gitGraphPlus.stashPop",
-        "title": "Git Graph+: Pop Stash",
+        "title": "Pop Stash",
+        "category": "Git Graph+",
         "icon": "$(check-all)"
       },
       {
         "command": "gitGraphPlus.stashDrop",
-        "title": "Git Graph+: Drop Stash",
+        "title": "Drop Stash",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.openWorktree",
-        "title": "Git Graph+: Open Worktree",
+        "title": "Open Worktree",
+        "category": "Git Graph+",
         "icon": "$(go-to-file)"
       },
       {
         "command": "gitGraphPlus.openWorktreeInFileExplorer",
-        "title": "Git Graph+: Reveal Worktree",
+        "title": "Reveal Worktree",
+        "category": "Git Graph+",
         "icon": "$(folder-opened)"
       },
       {
         "command": "gitGraphPlus.removeWorktree",
-        "title": "Git Graph+: Remove Worktree",
+        "title": "Remove Worktree",
+        "category": "Git Graph+",
         "icon": "$(trash)"
       },
       {
         "command": "gitGraphPlus.addWorktree",
-        "title": "Git Graph+: Add Worktree",
+        "title": "Add Worktree",
+        "category": "Git Graph+",
         "icon": "$(add)"
       },
       {
         "command": "gitGraphPlus.pruneWorktrees",
-        "title": "Git Graph+: Prune Worktrees",
+        "title": "Prune Worktrees",
+        "category": "Git Graph+",
         "icon": "$(clear-all)"
       },
       {
         "command": "clipcode.blame.toggle",
-        "title": "Snipcode: Toggle Inline Blame",
+        "title": "Toggle Inline Blame",
+        "category": "Snipcode",
         "icon": "$(git-commit)"
       },
       {
         "command": "clipcode.blame.revealCommit",
-        "title": "Snipcode: Reveal Blamed Commit in Graph"
+        "title": "Reveal Blamed Commit in Graph",
+        "category": "Snipcode"
       },
       {
         "command": "snipcode.git.stage",
-        "title": "Snipcode Git: Stage",
-        "icon": "$(add)"
+        "title": "Stage",
+        "category": "Snipcode Git",
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstage",
-        "title": "Snipcode Git: Unstage",
-        "icon": "$(remove)"
+        "title": "Unstage",
+        "category": "Snipcode Git",
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.stageRepo",
-        "title": "Snipcode Git: Stage All in Repo",
-        "icon": "$(add)"
+        "title": "Stage All in Repo",
+        "category": "Snipcode Git",
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstageRepo",
-        "title": "Snipcode Git: Unstage All in Repo",
-        "icon": "$(remove)"
+        "title": "Unstage All in Repo",
+        "category": "Snipcode Git",
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.copyAsClipCode",
-        "title": "Snipcode Git: Copy as ClipCode",
+        "title": "Copy as ClipCode",
+        "category": "Snipcode Git",
         "icon": "$(clippy)"
       },
       {
         "command": "snipcode.git.copyBranchSeries",
-        "title": "Snipcode Git: Copy Branch Commits",
+        "title": "Copy Branch Commits",
+        "category": "Snipcode Git",
         "icon": "$(git-branch)"
       },
       {
         "command": "snipcode.git.copyBranchSeriesFull",
-        "title": "Snipcode Git: Copy Branch Commits (Entire History)"
+        "title": "Copy Branch Commits (Entire History)",
+        "category": "Snipcode Git"
       },
       {
         "command": "snipcode.git.pasteBranchSeries",
-        "title": "Snipcode Git: Paste Branch Commits"
+        "title": "Paste Branch Commits",
+        "category": "Snipcode Git"
       },
       {
         "command": "snipcode.git.stageAll",
-        "title": "Snipcode Git: Stage All",
-        "icon": "$(add)"
+        "title": "Stage All",
+        "category": "Snipcode Git",
+        "icon": "$(check-all)"
       },
       {
         "command": "snipcode.git.unstageAll",
-        "title": "Snipcode Git: Unstage All",
-        "icon": "$(remove)"
+        "title": "Unstage All",
+        "category": "Snipcode Git",
+        "icon": "$(clear-all)"
       },
       {
         "command": "snipcode.git.refresh",
-        "title": "Snipcode Git: Refresh",
+        "title": "Refresh",
+        "category": "Snipcode Git",
         "icon": "$(refresh)"
       },
       {
         "command": "snipcode.git.fetchAll",
-        "title": "Snipcode Git: Fetch All Repos",
+        "title": "Fetch All Repos",
+        "category": "Snipcode Git",
         "icon": "$(cloud-download)"
       },
       {
         "command": "snipcode.git.pullAll",
-        "title": "Snipcode Git: Pull All Repos",
+        "title": "Pull All Repos",
+        "category": "Snipcode Git",
         "icon": "$(arrow-down)"
       },
       {
         "command": "snipcode.git.pushAll",
-        "title": "Snipcode Git: Push All Repos",
+        "title": "Push All Repos",
+        "category": "Snipcode Git",
         "icon": "$(arrow-up)"
       },
       {
         "command": "snipcode.git.filterRepos",
-        "title": "Snipcode Git: Filter Repos",
+        "title": "Filter Repos",
+        "category": "Snipcode Git",
         "icon": "$(filter)"
       },
       {
+        "command": "snipcode.git.filterReposActive",
+        "title": "Filter Repos (Active)",
+        "category": "Snipcode Git",
+        "icon": "$(filter-filled)"
+      },
+      {
         "command": "snipcode.git.showDiff",
-        "title": "Snipcode Git: Show Diff"
+        "title": "Show Diff",
+        "category": "Snipcode Git"
       },
       {
         "command": "snipcode.git.openChange",
-        "title": "Snipcode Git: Open in Editor",
+        "title": "Open in Editor",
+        "category": "Snipcode Git",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "snipcode.git.openChangeNative",
+        "title": "Open Changes (VS Code)",
+        "category": "Snipcode Git"
+      },
+      {
+        "command": "snipcode.git.markResolved",
+        "title": "Mark Resolved",
+        "category": "Snipcode Git",
+        "icon": "$(check)"
+      },
+      {
+        "command": "snipcode.git.discard",
+        "title": "Discard Changes",
+        "category": "Snipcode Git",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "snipcode.git.discardRepo",
+        "title": "Discard All in Repo",
+        "category": "Snipcode Git",
+        "icon": "$(discard)"
       }
     ],
     "viewsContainers": {
@@ -331,22 +415,26 @@
         {
           "id": "gitGraphPlus.remotes",
           "name": "Remotes",
-          "icon": "$(cloud)"
+          "icon": "$(cloud)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.tags",
           "name": "Tags",
-          "icon": "$(tag)"
+          "icon": "$(tag)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.stashes",
           "name": "Stashes",
-          "icon": "$(archive)"
+          "icon": "$(archive)",
+          "visibility": "collapsed"
         },
         {
           "id": "gitGraphPlus.worktrees",
           "name": "Worktrees",
-          "icon": "$(worktree)"
+          "icon": "$(worktree)",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -354,18 +442,29 @@
       {
         "view": "gitGraphPlus.branches",
         "contents": "No git repository found.\n[Open Folder](command:vscode.openFolder)"
+      },
+      {
+        "view": "snipcode.changes",
+        "contents": "No changes.",
+        "when": "snipcode.changes.hasRepos"
+      },
+      {
+        "view": "snipcode.changes",
+        "contents": "No git repository found.\n[Open Folder](command:vscode.openFolder)",
+        "when": "!snipcode.changes.hasRepos"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "gitGraphPlus.open",
-          "group": "navigation"
+          "group": "navigation",
+          "when": "gitOpenRepositoryCount != 0"
         },
         {
           "command": "clipcode.blame.toggle",
           "group": "navigation",
-          "when": "editorIsOpen"
+          "when": "editorIsOpen && gitOpenRepositoryCount != 0"
         }
       ],
       "scm/title": [
@@ -408,43 +507,48 @@
       "view/title": [
         {
           "command": "snipcode.git.filterRepos",
-          "when": "view == snipcode.changes",
+          "when": "view == snipcode.changes && !snipcode.changes.filtered",
+          "group": "navigation@0"
+        },
+        {
+          "command": "snipcode.git.filterReposActive",
+          "when": "view == snipcode.changes && snipcode.changes.filtered",
           "group": "navigation@0"
         },
         {
           "command": "snipcode.git.stageAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@1"
+          "group": "1_bulk@1"
         },
         {
           "command": "snipcode.git.unstageAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@2"
+          "group": "1_bulk@2"
         },
         {
           "command": "snipcode.git.refresh",
           "when": "view == snipcode.changes",
-          "group": "navigation@3"
+          "group": "1_bulk@3"
         },
         {
           "command": "snipcode.git.fetchAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@4"
+          "group": "navigation@1"
         },
         {
           "command": "snipcode.git.pullAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@5"
+          "group": "navigation@2"
         },
         {
           "command": "snipcode.git.pushAll",
           "when": "view == snipcode.changes",
-          "group": "navigation@6"
+          "group": "navigation@3"
         },
         {
           "command": "gitGraphPlus.open",
           "when": "view == snipcode.changes",
-          "group": "navigation@7"
+          "group": "navigation@4"
         },
         {
           "command": "clipcode.history.switchRepository",
@@ -524,8 +628,18 @@
           "group": "inline"
         },
         {
+          "command": "snipcode.git.discard",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "inline"
+        },
+        {
           "command": "snipcode.git.unstage",
           "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "inline"
+        },
+        {
+          "command": "snipcode.git.markResolved",
+          "when": "view == snipcode.changes && viewItem == file-conflict",
           "group": "inline"
         },
         {
@@ -539,14 +653,69 @@
           "group": "inline"
         },
         {
+          "command": "snipcode.git.discardRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "inline"
+        },
+        {
           "command": "snipcode.git.unstageRepo",
           "when": "view == snipcode.changes && viewItem == repo-staged",
           "group": "inline"
         },
         {
+          "command": "snipcode.git.stage",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.unstage",
+          "when": "view == snipcode.changes && viewItem == file-staged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.markResolved",
+          "when": "view == snipcode.changes && viewItem == file-conflict",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.stageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.unstageRepo",
+          "when": "view == snipcode.changes && viewItem == repo-staged",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "snipcode.git.openChange",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@1"
+        },
+        {
+          "command": "snipcode.git.showDiff",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@2"
+        },
+        {
+          "command": "snipcode.git.openChangeNative",
+          "when": "view == snipcode.changes && viewItem =~ /^file-/",
+          "group": "2_open@3"
+        },
+        {
+          "command": "snipcode.git.discard",
+          "when": "view == snipcode.changes && viewItem == file-unstaged",
+          "group": "3_discard@1"
+        },
+        {
+          "command": "snipcode.git.discardRepo",
+          "when": "view == snipcode.changes && viewItem == repo-unstaged",
+          "group": "3_discard@1"
+        },
+        {
           "command": "snipcode.git.copyAsClipCode",
           "when": "view == snipcode.changes && viewItem =~ /^(file|repo|group)-/",
-          "group": "navigation@10"
+          "group": "9_copy@1"
         },
         {
           "command": "clipcode.history.copyFullSource",
@@ -638,6 +807,64 @@
           "when": "view == gitGraphPlus.worktrees && viewItem == worktree",
           "group": "2_danger@1"
         }
+      ],
+      "commandPalette": [
+        {
+          "command": "snipcode.git.stage",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.unstage",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.stageRepo",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.unstageRepo",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.markResolved",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.openChange",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.openChangeNative",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.showDiff",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.copyAsClipCode",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.discard",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.discardRepo",
+          "when": "false"
+        },
+        {
+          "command": "gitGraphPlus.showRemoteBranchMenu",
+          "when": "false"
+        },
+        {
+          "command": "clipcode.history.loadMore",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.filterReposActive",
+          "when": "false"
+        }
       ]
     },
     "configuration": [
@@ -646,47 +873,58 @@
         "properties": {
           "clipcode.headerFormat": {
             "type": "string",
-            "default": "// file: $FILE_PATH"
+            "default": "// file: $FILE_PATH",
+            "markdownDescription": "Per-file header prepended to each copied file. `$FILE_PATH` is replaced with the file's path."
           },
           "clipcode.preText": {
             "type": "string",
-            "default": ""
+            "default": "",
+            "description": "Text inserted before the first file in a copy payload."
           },
           "clipcode.postText": {
             "type": "string",
-            "default": ""
+            "default": "",
+            "description": "Text appended after the last file in a copy payload."
           },
           "clipcode.addExtraLineBetweenFiles": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Insert a blank line between files in a copy payload."
           },
           "clipcode.setMaxFileCount": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Cap the number of files a single copy can include (see fileCountLimit)."
           },
           "clipcode.fileCountLimit": {
             "type": "number",
-            "default": 30
+            "default": 30,
+            "description": "Maximum number of files a single copy may include, when setMaxFileCount is enabled."
           },
           "clipcode.maxFileSizeKB": {
             "type": "number",
-            "default": 500
+            "default": 500,
+            "description": "Files larger than this size (in KB) are skipped when copying."
           },
           "clipcode.showCopyNotification": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Show a notification with character/line/word/token counts after each copy."
           },
           "clipcode.useFilters": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Apply the include/exclude filter rules below when copying."
           },
           "clipcode.useIncludeFilters": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "When filters are enabled, apply INCLUDE rules from filterRules."
           },
           "clipcode.useExcludeFilters": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "When filters are enabled, apply EXCLUDE rules from filterRules."
           },
           "clipcode.filterRules": {
             "type": "array",
@@ -719,7 +957,8 @@
                 "value",
                 "enabled"
               ]
-            }
+            },
+            "description": "Path/pattern INCLUDE and EXCLUDE rules used when useFilters is enabled."
           }
         }
       },
@@ -858,27 +1097,33 @@
               "with-lease",
               "force"
             ],
-            "default": "none"
+            "default": "none",
+            "description": "Default force-push mode preselected in the Push dialog."
           },
           "gitGraphPlus.defaults.push.setUpstream": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"set upstream\" in the Push dialog."
           },
           "gitGraphPlus.defaults.push.allTags": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push all tags\" in the Push dialog."
           },
           "gitGraphPlus.defaults.pull.rebase": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"rebase\" in the Pull dialog."
           },
           "gitGraphPlus.defaults.pull.stash": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"stash local changes first\" in the Pull dialog."
           },
           "gitGraphPlus.defaults.fetch.allRemotes": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"fetch all remotes\" in the Fetch dialog."
           },
           "gitGraphPlus.defaults.merge.mode": {
             "type": "string",
@@ -887,43 +1132,53 @@
               "no-ff",
               "squash"
             ],
-            "default": "default"
+            "default": "default",
+            "description": "Default merge mode preselected in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.merge.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after merge\" in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.merge.deleteSource": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"delete source branch after merge\" in the Merge Branch dialog."
           },
           "gitGraphPlus.defaults.rebase.autostash": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"autostash\" in the Rebase dialog."
           },
           "gitGraphPlus.defaults.rebase.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after rebase\" in the Rebase dialog."
           },
           "gitGraphPlus.defaults.amend.keepMessage": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"keep the previous commit message\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.resetDate": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"reset the commit date\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.resetAuthor": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"reset the author\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.only": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"amend only, don't add currently staged changes\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.amend.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after amend\" in the Amend dialog."
           },
           "gitGraphPlus.defaults.checkout.dirty": {
             "type": "string",
@@ -932,7 +1187,8 @@
               "stash",
               "discard"
             ],
-            "default": "keep"
+            "default": "keep",
+            "description": "Default handling of uncommitted changes preselected in the Checkout dialog."
           },
           "gitGraphPlus.defaults.checkoutRemote.dirty": {
             "type": "string",
@@ -941,35 +1197,43 @@
               "stash",
               "discard"
             ],
-            "default": "keep"
+            "default": "keep",
+            "description": "Default handling of uncommitted changes preselected in the Checkout Remote Branch dialog."
           },
           "gitGraphPlus.defaults.createBranch.checkout": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"checkout the new branch\" in the Create Branch dialog."
           },
           "gitGraphPlus.defaults.createBranch.publish": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"publish to remote\" in the Create Branch dialog."
           },
           "gitGraphPlus.defaults.createTag.push": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"push the tag to remote\" in the Create Tag dialog."
           },
           "gitGraphPlus.defaults.cherryPick.noCommit": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"don't commit, apply to the working tree only\" in the Cherry-pick dialog."
           },
           "gitGraphPlus.defaults.cherryPick.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after cherry-pick\" in the Cherry-pick dialog."
           },
           "gitGraphPlus.defaults.revert.noCommit": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"don't commit, apply to the working tree only\" in the Revert dialog."
           },
           "gitGraphPlus.defaults.revert.pushAfter": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"push after revert\" in the Revert dialog."
           },
           "gitGraphPlus.defaults.reset.mode": {
             "type": "string",
@@ -978,31 +1242,38 @@
               "mixed",
               "hard"
             ],
-            "default": "mixed"
+            "default": "mixed",
+            "description": "Default reset mode preselected in the Reset dialog."
           },
           "gitGraphPlus.defaults.stashSave.includeUntracked": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Default state of \"include untracked files\" in the Stash dialog."
           },
           "gitGraphPlus.defaults.stashSave.keepIndex": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"keep the index (staged changes)\" in the Stash dialog."
           },
           "gitGraphPlus.defaults.deleteBranch.force": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"force delete\" in the Delete Branch dialog."
           },
           "gitGraphPlus.defaults.deleteBranch.deleteRemote": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the remote-tracking branch\" in the Delete Branch dialog."
           },
           "gitGraphPlus.defaults.deleteTag.deleteRemote": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the tag on remote\" in the Delete Tag dialog."
           },
           "gitGraphPlus.defaults.removeWorktree.deleteBranch": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Default state of \"also delete the worktree's branch\" in the Remove Worktree dialog."
           }
         }
       }

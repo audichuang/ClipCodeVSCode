@@ -77,7 +77,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
       case 'commit': {
         const item = new vscode.TreeItem(firstLine(node.commit.message), vscode.TreeItemCollapsibleState.Collapsed);
         item.description = node.commit.hash.slice(0, 7);
-        item.tooltip = `${node.commit.hash}\n${node.commit.authorName ?? ''}\n${node.commit.commitDate?.toISOString() ?? ''}`;
+        item.tooltip = `${node.commit.hash}\n${node.commit.authorName ?? ''}\n${node.commit.commitDate?.toLocaleString() ?? ''}`;
         item.contextValue = 'commit';
         item.iconPath = new vscode.ThemeIcon('git-commit');
         return item;
@@ -90,8 +90,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<HistoryNode>
       }
       case 'file': {
         const f = node.node;
-        const item = new vscode.TreeItem(`[${f.changeType}] ${f.name}`, vscode.TreeItemCollapsibleState.None);
-        item.description = f.relPath;
+        const item = new vscode.TreeItem(f.name, vscode.TreeItemCollapsibleState.None);
+        item.description = `${f.changeType} ${f.relPath}`;
         item.resourceUri = vscode.Uri.file(f.change.uri.fsPath);
         item.contextValue = 'file';
         return item;

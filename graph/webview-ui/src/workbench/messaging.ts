@@ -30,14 +30,30 @@ function clearCommitTimer(): void {
   }
 }
 
+/* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+/** Persist the draft message via the webview's own state (survives the view
+ *  being hidden/remounted — see extension.ts retainContextWhenHidden). Call on
+ *  every message change; cheap, and setState is a plain object write. */
+export function saveDraft(message: string): void {
+  vscode.setState({ message });
+}
+/* SNIPCODE-HOOK end */
+
 /** Wire the extension -> webview message handler. Call once at boot. */
 export function listenForHostMessages(): void {
+  /* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
+  const saved = vscode.getState() as { message?: string } | undefined;
+  if (saved?.message) workbenchStore.message = saved.message;
+  /* SNIPCODE-HOOK end */
   window.addEventListener('message', (e) => {
     const msg = e.data;
     switch (msg?.type) {
       /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
       case 'workbenchCommitState':
         workbenchStore.stagedRepoCount = Number(msg.payload?.stagedRepoCount ?? 0);
+        /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
+        workbenchStore.amendTargetPushed = Boolean(msg.payload?.amendTargetPushed);
+        /* SNIPCODE-HOOK end */
         break;
       /* SNIPCODE-HOOK end */
       case 'workbenchCommitResult':
@@ -50,6 +66,13 @@ export function listenForHostMessages(): void {
           workbenchStore.committing = false;
         }
         break;
+      /* SNIPCODE-HOOK start: S13 Amend prefill */
+      case 'amendPrefill': {
+        const prefill = msg.payload?.message;
+        if (typeof prefill === 'string' && prefill.trim() !== '') workbenchStore.message = prefill;
+        break;
+      }
+      /* SNIPCODE-HOOK end */
     }
   });
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
@@ -71,3 +94,11 @@ export function postCommit(amend: boolean): void {
     payload: { message: workbenchStore.message, amend },
   });
 }
+
+/* SNIPCODE-HOOK start: S13 Amend prefill */
+/** Ask the host for HEAD's message of the single Amend target repo, so an
+ *  empty textarea gets filled instead of Amend silently doing nothing. */
+export function requestAmendPrefill(): void {
+  vscode.postMessage({ type: 'workbenchRequestAmendPrefill' });
+}
+/* SNIPCODE-HOOK end */

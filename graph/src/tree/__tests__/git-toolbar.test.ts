@@ -21,9 +21,12 @@ vi.mock('vscode', () => {
     description?: string;
     constructor(public label: unknown, public collapsibleState?: unknown) {}
   }
-  class ThemeIcon { constructor(public id: string) {} }
+  class ThemeIcon { constructor(public id: string, public color?: unknown) {} }
+  /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group icon/color */
+  class ThemeColor { constructor(public id: string) {} }
+  /* SNIPCODE-HOOK end */
   return {
-    EventEmitter, TreeItem, ThemeIcon,
+    EventEmitter, TreeItem, ThemeIcon, ThemeColor,
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
     ProgressLocation: { Notification: 15 },
@@ -36,6 +39,7 @@ vi.mock('vscode', () => {
       showWarningMessage: vi.fn(),
       setStatusBarMessage: vi.fn(),
       showTextDocument: vi.fn(),
+      showQuickPick: vi.fn(),
     },
     workspace: { workspaceFolders: [{ uri: { fsPath: '/ws' } }] },
     commands: {
@@ -64,7 +68,7 @@ import type { FileNode, RepoStatus } from '../build-change-tree';
 
 function mkSvc(over: Record<string, unknown> = {}) {
   return {
-    getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [] })),
+    getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [], conflict: [] })),
     branches: vi.fn(async () => [{ name: 'main', current: true }]),
     aheadBehind: vi.fn(async () => null),
     fetch: vi.fn(async () => ''),
@@ -74,6 +78,9 @@ function mkSvc(over: Record<string, unknown> = {}) {
     stagePaths: vi.fn(async () => {}),
     unstagePaths: vi.fn(async () => {}),
     commitIndex: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+    discardPaths: vi.fn(async () => {}),
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
     setExtraEnv: vi.fn(),
     setAuthRetryHandler: vi.fn(),
@@ -143,6 +150,118 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     await H.commands.get('snipcode.git.stage')!(aUnstaged, [aUnstaged]);
     expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
   });
+
+  /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
+  it('sameGroup drops a nested-repo (status N) node from a mixed selection', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const nested: FileNode = { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' };
+    const normal = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.stage')!(normal, [normal, nested]);
+
+    expect(a.stagePaths).toHaveBeenCalledWith([normal]);
+  });
+
+  it('sameGroup drops a lone nested-repo node (single inline click) — nothing is staged', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const nested: FileNode = { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' };
+    await H.commands.get('snipcode.git.stage')!(nested, undefined);
+
+    expect(a.stagePaths).not.toHaveBeenCalled();
+  });
+
+  it('stageAll never `git add`s a nested repo directory', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [], unstaged: [{ path: 'src/foo.ts', status: 'M' }, { path: 'vendor-lib', status: 'N' }], conflict: [],
+      })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    await H.commands.get('snipcode.git.stageAll')!();
+
+    expect(a.stagePaths).toHaveBeenCalledWith([{ path: 'src/foo.ts', status: 'M' }]);
+  });
+
+  it('stageRepo (repo-node inline Stage All) never `git add`s a nested repo directory', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    const repoNode = {
+      kind: 'repo', repoName: 'a', repoPath: '/a', branch: 'main', group: 'unstaged',
+      files: [
+        { kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' },
+        { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' },
+      ],
+    };
+    await H.commands.get('snipcode.git.stageRepo')!(repoNode);
+
+    expect(a.stagePaths).toHaveBeenCalledWith([{ kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' }]);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S4 Discard working-tree changes (file + repo layers) */
+  it('discard confirms via a modal warning before calling discardPaths', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+
+    const target = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.discard')!(target, [target]);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('a-worktree.ts'),
+      { modal: true },
+      '捨棄',
+    );
+    expect(a.discardPaths).toHaveBeenCalledWith([target]);
+  });
+
+  it('discard does nothing when the modal warning is dismissed', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined);
+
+    const target = file('/a', 'a-worktree.ts', 'unstaged');
+    await H.commands.get('snipcode.git.discard')!(target, [target]);
+
+    expect(a.discardPaths).not.toHaveBeenCalled();
+  });
+
+  it('discardRepo confirms once for the whole repo and filters out nested repo dirs', async () => {
+    const a = mkSvc();
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('捨棄' as never);
+
+    const repoNode = {
+      kind: 'repo', repoName: 'a', repoPath: '/a', branch: 'main', group: 'unstaged',
+      files: [
+        { kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' },
+        { kind: 'file', repoPath: '/a', path: 'vendor-lib', status: 'N', group: 'unstaged' },
+      ],
+    };
+    await H.commands.get('snipcode.git.discardRepo')!(repoNode);
+
+    expect(a.discardPaths).toHaveBeenCalledWith([{ kind: 'file', repoPath: '/a', path: 'src/foo.ts', status: 'M', group: 'unstaged' }]);
+  });
+  /* SNIPCODE-HOOK end */
 
   it('routes staged copies through Git change copy with the index side preserved', async () => {
     const a = mkSvc();
@@ -263,6 +382,45 @@ describe('ChangesWorkbench commit status guard', () => {
 });
 /* SNIPCODE-HOOK end */
 
+/* SNIPCODE-HOOK start: R3/S3 commit skips repos with unresolved conflicts */
+describe('ChangesWorkbench commit skips repos with conflicts (R3/S3)', () => {
+  it('skips a repo with unmerged files, warns via view.message, and still commits the rest', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }],
+      })),
+    });
+    const b = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'b.ts', status: 'M' }], unstaged: [], conflict: [] })),
+    });
+    setRepos(['/a', '/b'], { '/a': a, '/b': b });
+    const wb = new ChangesWorkbench();
+    const view = { message: undefined as string | undefined };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    const results = await wb.commit('fix', false);
+
+    expect(results).toEqual([{ repoName: 'b', ok: true }]);
+    expect(a.commitIndex).not.toHaveBeenCalled();
+    expect(b.commitIndex).toHaveBeenCalled();
+    expect(view.message).toContain('a');
+  });
+
+  it('throws when every checked repo has unresolved conflicts', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({
+        staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }],
+      })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+
+    await expect(wb.commit('fix', false)).rejects.toThrow(/沒有勾選要提交/);
+    expect(a.commitIndex).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */
+
 /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
 describe('ChangesWorkbench index document invalidation', () => {
   it('invalidates open index documents on a status refresh', async () => {
@@ -273,6 +431,131 @@ describe('ChangesWorkbench index document invalidation', () => {
     await wb.refresh();
 
     expect(invalidateIndexDocuments).toHaveBeenCalledTimes(1);
+  });
+
+  /* SNIPCODE-HOOK start: S12 show progress in the Changes view while refreshing */
+  it('shows progress scoped to the Changes view while refreshing (S12)', async () => {
+    const wb = new ChangesWorkbench();
+
+    await wb.refresh();
+
+    expect(vscode.window.withProgress).toHaveBeenCalledWith(
+      { location: { viewId: 'snipcode.changes' } },
+      expect.any(Function),
+    );
+  });
+
+  it('a repo whose status read fails ends up in the Repository Errors group, not silently dropped', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => { throw new Error('index.lock exists'); }),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+
+    await wb.refresh();
+
+    const groups = wb.tree.getChildren();
+    const errorGroup = groups.find((g) => g.kind === 'group' && g.group === 'error');
+    expect(errorGroup).toBeDefined();
+    if (errorGroup?.kind !== 'group') throw new Error('expected group node');
+    expect(errorGroup.repos[0]).toMatchObject({ repoName: 'a', error: 'index.lock exists' });
+  });
+  /* SNIPCODE-HOOK end */
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S P2 activity-bar badge = staged repo count */
+describe('ChangesWorkbench activity-bar badge (S P2)', () => {
+  it('sets the view badge to the staged repo count', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [] })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    const view = { badge: undefined as unknown };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    await wb.refresh();
+
+    expect(view.badge).toEqual({ value: 1, tooltip: '1 個 repo 待提交' });
+  });
+
+  it('clears the badge when nothing is staged', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    const view = { badge: { value: 3, tooltip: 'x' } as unknown };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    await wb.refresh();
+
+    expect(view.badge).toBeUndefined();
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+describe('ChangesWorkbench filterRepos sets snipcode.changes.filtered (S P2)', () => {
+  it('sets the context key true for a partial selection, false when cleared back to all', async () => {
+    setRepos(['/a', '/b'], { '/a': mkSvc(), '/b': mkSvc() });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+    ] as never);
+    await H.commands.get('snipcode.git.filterRepos')!();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', true);
+
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+      { label: 'b', description: '/b', repoPath: '/b', picked: true },
+    ] as never);
+    await H.commands.get('snipcode.git.filterRepos')!();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', false);
+  });
+
+  it('filterReposActive (the "active" icon variant) runs the same flow', async () => {
+    setRepos(['/a', '/b'], { '/a': mkSvc(), '/b': mkSvc() });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+    ] as never);
+
+    await H.commands.get('snipcode.git.filterReposActive')!();
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', true);
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
+describe('ChangesWorkbench openChange / openChangeNative (S9)', () => {
+  it('the inline command opens the plain file via vscode.open, not a diff', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    const node = file('/a', 'src/foo.ts', 'unstaged');
+
+    await H.commands.get('snipcode.git.openChange')!(node);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.open', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
+    );
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('git.openChange', expect.anything());
+  });
+
+  it('the "Open Changes (VS Code)" command still opens the native diff', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    const node = file('/a', 'src/foo.ts', 'unstaged');
+
+    await H.commands.get('snipcode.git.openChangeNative')!(node);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'git.openChange', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
+    );
   });
 });
 /* SNIPCODE-HOOK end */
@@ -362,7 +645,7 @@ describe('ChangesWorkbench fetchAll/pullAll/pushAll', () => {
 describe('Changes tree repo badges', () => {
   const status = (ahead?: number, behind?: number): RepoStatus[] => [{
     repoName: 'r', repoPath: '/r', branch: 'main', ahead, behind,
-    staged: [], unstaged: [{ path: 'f.ts', status: 'M' }],
+    staged: [], unstaged: [{ path: 'f.ts', status: 'M' }], conflict: [],
   }];
 
   async function repoDescription(ahead?: number, behind?: number): Promise<string | undefined> {
@@ -415,4 +698,165 @@ describe('Changes tree repo badges', () => {
     provider.notifyCommitSelectionChanged();
     expect(counts).toEqual([2]);
   });
+
+  /* SNIPCODE-HOOK start: R3/S3 Merge Conflicts group rendering */
+  it('renders a trailing Merge Conflicts group with a warning icon, and conflict files as file-conflict', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }] },
+    ]);
+    await provider.refresh();
+
+    const groups = provider.getChildren();
+    expect(groups).toHaveLength(3);
+    const conflictGroup = groups[2];
+    expect(provider.getTreeItem(conflictGroup).contextValue).toBe('group-conflict');
+    const icon = provider.getTreeItem(conflictGroup).iconPath as { id: string; color?: { id: string } };
+    expect(icon.id).toBe('warning');
+    expect(icon.color?.id).toBe('gitDecoration.conflictingResourceForeground');
+
+    const conflictRepo = provider.getChildren(conflictGroup)[0];
+    const conflictFile = provider.getChildren(conflictRepo)[0];
+    expect(provider.getTreeItem(conflictFile).contextValue).toBe('file-conflict');
+  });
+
+  it('omits the Merge Conflicts group when nothing is unmerged', async () => {
+    const provider = new ChangesTreeProvider(async () => status());
+    await provider.refresh();
+    expect(provider.getChildren()).toHaveLength(2);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: R4/S7 nested repo / untracked file rendering */
+  it('renders a nested repo (status N) with a repo icon and "(nested repo)" description', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'vendor-lib', status: 'N' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    const item = provider.getTreeItem(fileNode);
+    expect(item.description).toBe('(nested repo)');
+    expect((item.iconPath as { id: string }).id).toBe('repo');
+  });
+
+  it('marks an untracked file description with "untracked"', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'src/new.ts', status: 'U' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('src · untracked');
+  });
+
+  it('an untracked file at the repo root just says "untracked"', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], unstaged: [{ path: 'new.ts', status: 'U' }] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[1])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('untracked');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
+  it('renders a file resourceUri on the snipcode-change scheme carrying status+group, and a tooltip', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'src/foo.ts', status: 'M' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0]; // Staged group → repo
+    const fileNode = provider.getChildren(repoNode)[0];
+    const item = provider.getTreeItem(fileNode);
+
+    const uri = item.resourceUri as unknown as { scheme: string; query: string; fsPath: string };
+    expect(uri.scheme).toBe('snipcode-change');
+    expect(uri.query).toBe('status=M&group=staged');
+    expect(uri.fsPath).toBe('/r/src/foo.ts');
+    expect(item.tooltip).toBe('src/foo.ts\nModified (staged)');
+  });
+
+  it('tooltips a conflict file as unresolved', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [], unstaged: [], conflict: [{ path: 'both.ts', status: '!' }] },
+    ]);
+    await provider.refresh();
+    const conflictGroup = provider.getChildren()[2];
+    const repoNode = provider.getChildren(conflictGroup)[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).tooltip).toBe('both.ts\nConflicting (unresolved)');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S P2 rename description shows the old path */
+  it('shows the old path in a renamed file\'s description', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'src/new-name.ts', status: 'R', oldPath: 'src/old-name.ts' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('src ← src/old-name.ts');
+  });
+
+  it('a root-level rename shows just the old path (no leading dir)', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'new-name.ts', status: 'R', oldPath: 'old-name.ts' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('← old-name.ts');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S12 empty/error state */
+  it('collapses to an empty root (for viewsWelcome) when every group is empty', async () => {
+    const provider = new ChangesTreeProvider(async () => [repo({})]);
+    await provider.refresh();
+    expect(provider.getChildren()).toEqual([]);
+  });
+
+  it('sets snipcode.changes.hasRepos so viewsWelcome can tell "no repo" from "clean repo" apart', async () => {
+    const provider = new ChangesTreeProvider(async () => [repo({})]);
+    await provider.refresh();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.hasRepos', true);
+
+    const emptyProvider = new ChangesTreeProvider(async () => []);
+    await emptyProvider.refresh();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.hasRepos', false);
+  });
+
+  it('does not collapse the root when there is real content', async () => {
+    const provider = new ChangesTreeProvider(async () => status());
+    await provider.refresh();
+    expect(provider.getChildren()).toHaveLength(2);
+  });
+
+  it('renders a repo whose status failed to read as a warning node, not a silent drop', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { repoName: 'broken', repoPath: '/broken', branch: 'main', staged: [], unstaged: [], conflict: [], error: 'index.lock exists' },
+    ]);
+    await provider.refresh();
+    const groups = provider.getChildren();
+    // Staged/Unstaged stay in the tree (count 0, but the root isn't "every
+    // group empty" once the error group is non-zero) alongside Repository Errors.
+    const errorGroup = groups.find((g) => provider.getTreeItem(g).contextValue === 'group-error');
+    expect(errorGroup).toBeDefined();
+    const repoNode = provider.getChildren(errorGroup!)[0];
+    const item = provider.getTreeItem(repoNode);
+    expect(item.contextValue).toBe('repo-error');
+    expect(item.description).toBe('index.lock exists');
+    expect(item.collapsibleState).toBe(0); // None
+  });
+  /* SNIPCODE-HOOK end */
 });
+
+function repo(over: Partial<RepoStatus>): RepoStatus {
+  return { repoName: 'r', repoPath: '/r', branch: 'main', staged: [], unstaged: [], conflict: [], ...over };
+}
+
+function file(repoPath: string, path: string, group: 'staged' | 'unstaged'): FileNode {
+  return { kind: 'file', repoPath, path, status: 'M', group };
+}

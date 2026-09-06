@@ -90,7 +90,9 @@ describe('BranchesViewProvider', () => {
     const [item] = await p.getChildren();
     expect(item.contextValue).toBe('branch-current');
     expect(themeId(item)).toBe('check');
-    expect(item.description).toBe('current ↑2 ↓1');
+    /* SNIPCODE-HOOK start: S17/X5 unify ↓behind ↑ahead order with the Changes tree */
+    expect(item.description).toBe('current ↓1 ↑2');
+    /* SNIPCODE-HOOK end */
     expect(p.getCurrentItem()?.label).toBe('main');
     // setContext is pushed so the sidebar shows Push vs Publish correctly.
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'gitGraphPlus.currentBranchHasUpstream', true);
@@ -159,13 +161,22 @@ describe('TagsViewProvider', () => {
 });
 
 describe('StashesViewProvider', () => {
-  it('labels stashes by index and carries the message', async () => {
+  /* SNIPCODE-HOOK start: S P2 the message is the primary label, stash@{n} is secondary */
+  it('labels stashes by message, with stash@{n} as the secondary description', async () => {
     const stashList: StashEntry[] = [{ index: 0, message: 'WIP', date: '2024-01-01' }];
     const items = await new StashesViewProvider(mockSvc({ stashList })).getChildren();
-    expect(items[0].label).toBe('stash@{0}');
-    expect(items[0].description).toBe('WIP');
+    expect(items[0].label).toBe('WIP');
+    expect(items[0].description).toBe('stash@{0}');
     expect(items[0].command?.command).toBe('gitGraphPlus.showStashMenu');
   });
+
+  it('falls back to stash@{n} as the label when there is no message', async () => {
+    const stashList: StashEntry[] = [{ index: 1, message: '', date: '2024-01-01' }];
+    const items = await new StashesViewProvider(mockSvc({ stashList })).getChildren();
+    expect(items[0].label).toBe('stash@{1}');
+    expect(items[0].description).toBe('stash@{1}');
+  });
+  /* SNIPCODE-HOOK end */
 });
 
 describe('WorktreesViewProvider', () => {
