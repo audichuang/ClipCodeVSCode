@@ -218,6 +218,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Stage every file of one repo (the repo node under Unstaged). */
   private async stageRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B retain rename source path */
     /* SNIPCODE-HOOK start: R4/S7 never `git add` an unregistered nested repo dir */
     const files = node.files.filter(f => f.status !== 'N');
@@ -228,6 +231,9 @@ export class ChangesWorkbench implements vscode.Disposable {
   }
   /** Unstage every file of one repo (the repo node under Staged). */
   private async unstageRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: Batch B retain rename source path */
     if (node.files.length) await runExclusive(node.repoPath, () => this.svcFor(node.repoPath).unstagePaths(node.files));
     /* SNIPCODE-HOOK end */
@@ -252,6 +258,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Discard every unstaged file of one repo (the repo node under Unstaged). */
   private async discardRepo(node: RepoNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     const files = node.files.filter(f => f.status !== 'N');
     if (files.length === 0) return;
     const confirmed = await vscode.window.showWarningMessage(
@@ -267,6 +276,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Flatten any selected node(s) — file, repo, or group — to their file nodes. */
   private nodeFiles(node: ChangeTreeNode): FileNode[] {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return [];
+    /* SNIPCODE-HOOK end */
     if (node.kind === 'file') return [node];
     if (node.kind === 'repo') return node.files;
     return node.repos.flatMap(r => r.files); // group → every repo's files
@@ -351,12 +363,18 @@ export class ChangesWorkbench implements vscode.Disposable {
    *  see S9 in the sidebar audit). The native diff is still reachable via the
    *  "Open Changes (VS Code)" context-menu entry, openChangeNative below. */
   private async openChange(node: FileNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
     await vscode.commands.executeCommand('vscode.open', uri);
   }
 
   /** Right-click-only: VS Code's built-in diff view for this change. */
   private async openChangeNative(node: FileNode): Promise<void> {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
     await vscode.commands.executeCommand('git.openChange', uri);
   }
@@ -384,6 +402,9 @@ export class ChangesWorkbench implements vscode.Disposable {
 
   /** Drive the Diff editor tab from a clicked file node (tree command). */
   private showInDiffView(node: FileNode): void {
+    /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+    if (!node) return;
+    /* SNIPCODE-HOOK end */
     this.diffPanel?.show(node.repoPath, node.path);
   }
 
@@ -468,6 +489,9 @@ export class ChangesWorkbench implements vscode.Disposable {
       (Array.isArray(ns) && ns.length ? (ns as T[]) : [n as T]);
     /* SNIPCODE-HOOK start: Batch B constrain mixed tree selections */
     const sameGroup = (n: unknown, ns: unknown): FileNode[] => {
+      /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
+      if (!n) return [];
+      /* SNIPCODE-HOOK end */
       const clicked = n as FileNode;
       const all = sel<FileNode>(n, ns);
       const kept = all.filter(item =>
