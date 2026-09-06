@@ -418,6 +418,23 @@ describe('CommitDetails — file tree & diff', () => {
     await waitFor(() => container.querySelector('.diff-toolbar'));
   });
 
+  /* SNIPCODE-HOOK start: X3 — getFileDiff must carry oldPath for a rename/copy so
+     the host can resolve the pre-rename blob (mirrors PrView.svelte's openDiff). */
+  it('clicking a renamed file posts getFileDiff with oldPath', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', [{ path: 'new.ts', status: 'R', oldPath: 'old.ts' } as { path: string; status: string; oldPath?: string }]);
+    const changesTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /change/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(changesTab);
+    await waitFor(() => container.querySelector('.file-item'));
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('.file-item')!);
+    const msg = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'getFileDiff'
+    );
+    expect(msg?.data.payload).toMatchObject({ hash: 'h1', file: 'new.ts', oldPath: 'old.ts' });
+  });
+  /* SNIPCODE-HOOK end */
+
   it('clicking a file twice deselects it', async () => {
     const { container } = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
     deliverCommitDiff('h1', [{ path: 'a.ts', status: 'M' }]);
