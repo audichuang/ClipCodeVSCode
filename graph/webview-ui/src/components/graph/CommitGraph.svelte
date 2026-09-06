@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { commitStore } from '../../lib/stores/commits.svelte';
   import { branchStore } from '../../lib/stores/branches.svelte';
   import { uiStore } from '../../lib/stores/ui.svelte';
@@ -475,6 +475,19 @@
       index: startIndex + i,
     }))
   );
+
+  /* SNIPCODE-HOOK start: M13 — roving tabindex. Every row previously carried
+     tabindex=0, so Tab from outside the graph had to walk hundreds of rows
+     before reaching anything else. Only one row is ever tabbable: the
+     selected one, or (nothing selected, or the selection scrolled out of the
+     virtualized window and has no DOM node to focus) the first rendered row. */
+  const rovingTabTargetHash = $derived.by(() => {
+    const primary = uiStore.selectedCommitHash
+      ?? (uiStore.selectedCommitHashes.length > 0 ? uiStore.selectedCommitHashes[uiStore.selectedCommitHashes.length - 1] : null);
+    if (primary && visibleCommits.some(vc => vc.commit.hash === primary)) return primary;
+    return visibleCommits[0]?.commit.hash ?? null;
+  });
+  /* SNIPCODE-HOOK end */
 
   // Precompute path Y-bounds once per paths change so scroll-time filtering is O(1) per path
   // instead of iterating each path's points on every scroll event.
@@ -1437,6 +1450,20 @@
     }
   });
 
+  /* SNIPCODE-HOOK start: M13 — move DOM focus to match the newly selected row
+     after keyboard navigation. Without this, focus stays on the previously
+     selected row, which just dropped to tabindex=-1 (roving tabindex) — the
+     browser doesn't blur it automatically, so a subsequent Tab press would
+     leave the grid from an arbitrary stale position instead of the row the
+     user is now actually looking at. */
+  async function focusSelectedRow() {
+    await tick();
+    const hash = uiStore.selectedCommitHash;
+    if (!hash || !container) return;
+    const el = container.querySelector<HTMLElement>(`.commit-row[data-commit-hash="${CSS.escape(hash)}"]`);
+    el?.focus();
+  }
+  /* SNIPCODE-HOOK end */
 
   function handleGraphNavKey(e: KeyboardEvent) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -1648,7 +1675,7 @@
             onclick={(e) => handleRowClick(commit, e)}
             oncontextmenu={(e) => { if (commit.hash === 'UNCOMMITTED') onUncommittedContextMenu(e); else onCommitContextMenu(e, commit); }}
             role="row"
-            tabindex={0}
+            tabindex={commit.hash === rovingTabTargetHash ? 0 : -1}
             onkeydown={(e) => {
               if (e.key !== 'Enter') return;
               if (commit.hash === 'UNCOMMITTED') {
@@ -2326,8 +2353,15 @@
     outline: 1px solid var(--vscode-focusBorder, #007fd4);
     outline-offset: -1px;
   }
-  /* No focus ring on click/keyboard focus (selection is shown by the row background). */
-  .commit-row:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — roving tabindex means the focused row and the
+     selected row can differ while arrowing through the list before Enter/click
+     commits a selection, so keyboard users need a real focus indicator instead
+     of relying on the (possibly stale) selection background. */
+  .commit-row:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
 
   .commit-row:not(.other-branch) .commit-subject {
     font-weight: normal;
@@ -2445,8 +2479,14 @@
       inset 0 -1px 0 var(--vscode-focusBorder, #007fd4),
       inset -1px 0 0 var(--vscode-focusBorder, #007fd4);
   }
-  /* No focus ring on click/keyboard focus. */
-  .meta-row:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — mirrors .commit-row:focus-visible above so the
+     pinned overlay stays visually consistent, even though this row is not
+     currently a keyboard focus target itself (tabindex is always -1 here). */
+  .meta-row:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: G6 — mirrors .commit-row.head-row for the pinned
      overlay (horizontal-scroll mode) so the HEAD marker isn't message-side only. */
@@ -2640,9 +2680,16 @@
     background: var(--badge-color);
   }
 
-  /* No focus ring on click/keyboard focus. Otherwise clicking a badge and then
-     pressing Esc flips it into :focus-visible, drawing an unwanted outline. */
-  .ref-badge:focus-visible { outline: none; }
+  /* SNIPCODE-HOOK start: M13 — was unconditionally outline:none (clicking a
+     badge then pressing Esc used to flip it into :focus-visible and draw the
+     browser's default ring). Now that a real, theme-matched focus ring is a
+     deliberate part of keyboard-accessibility (see .commit-row:focus-visible),
+     that same case is no longer unwanted — it's consistent feedback. */
+  .ref-badge:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* Fixed-color refs: tag/worktree 20%, stash 28% (via inline --fixed-tint). */
   .ref-badge.badge-fixed {
