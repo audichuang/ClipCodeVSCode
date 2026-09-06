@@ -890,14 +890,12 @@
           action: () => { squashChain = chain; },
         });
         const head = chain[chain.length - 1].hash;
-        // BranchInfo.hash is the abbreviated object name; commitMap is keyed by
-        // the full hash. Resolve each local branch tip to its full hash so the
-        // first-parent walk can start, falling back to the abbreviated value
-        // (no match) when the tip is outside the loaded commit range.
-        const fullByAbbrev = new Map(commitStore.commits.map(c => [c.abbreviatedHash, c.hash]));
+        // BranchInfo.hash is the full object name (X6: git-service.ts requests
+        // `%(objectname)`, not `:short`), same as commitMap's keys, so branch
+        // tips need no abbreviated->full resolution before the first-parent walk.
         const localBranchTips = branchStore.localBranches.map(b => ({
           name: b.name,
-          hash: fullByAbbrev.get(b.hash) ?? b.hash,
+          hash: b.hash,
         }));
         const candidates = chainBranches(
           head,
