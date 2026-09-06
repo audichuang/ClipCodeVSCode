@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/svelte';
 import Diff from '../Diff.svelte';
 import { diffStore } from '../diff-store.svelte';
 import { i18n } from '../../lib/i18n/index.svelte';
+import * as vscodeApiModule from '../../lib/vscode-api';
 import type { DiffData } from '../../lib/types';
 
 // A small complete hunk so FileDiffView renders a stageable block arrow.
@@ -104,7 +105,13 @@ describe('Diff.svelte unified view', () => {
 
   it('staging a block in the staged section posts side:staged', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff());
-    const { container } = render(Diff);
+    /* SNIPCODE-HOOK start: D5 default is now inline — opt into SBS explicitly */
+    // .sbs-block-stage-btn only exists in side-by-side mode; D5 made inline
+    // the default, so this test (about block-level staging, not about which
+    // mode is default) must switch modes itself rather than rely on it.
+    const { container, getByText } = render(Diff);
+    await fireEvent.click(getByText('Side by Side'));
+    /* SNIPCODE-HOOK end */
     // Sections render in order [Staged, Unstaged]; the first section is Staged.
     const stagedSection = container.querySelectorAll('.diff-section')[0];
     const arrow = stagedSection.querySelector('.sbs-block-stage-btn');
@@ -118,7 +125,10 @@ describe('Diff.svelte unified view', () => {
 
   it('staging a block in the unstaged section posts side:unstaged', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', textDiff(), textDiff());
-    const { container } = render(Diff);
+    /* SNIPCODE-HOOK start: D5 default is now inline — opt into SBS explicitly */
+    const { container, getByText } = render(Diff);
+    await fireEvent.click(getByText('Side by Side'));
+    /* SNIPCODE-HOOK end */
     // Second section is Unstaged.
     const unstagedSection = container.querySelectorAll('.diff-section')[1];
     const arrow = unstagedSection.querySelector('.sbs-block-stage-btn');
@@ -128,4 +138,42 @@ describe('Diff.svelte unified view', () => {
     const stageMsg = posted.find((d: any) => d.type === 'diffStageLines');
     expect(stageMsg.payload.side).toBe('unstaged');
   });
+
+  /* SNIPCODE-HOOK start: D5 default inline + remember choice */
+  it('defaults to Inline (SBS is the least capable mode and must not be the silent default)', () => {
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.diff-hunk-header')).toBeTruthy(); // inline-only element
+    expect(container.querySelector('.sbs-block-stage-btn')).toBeNull();
+  });
+
+  it('persists the mode via getVsCodeApi().setState when switched', async () => {
+    // The shared test stub's setState/getState don't round-trip (they're a
+    // fixed no-op object — see __tests__/setup.ts), so persistence-across-
+    // remount is verified at the call-site level instead: switching modes
+    // must call setState with the new value merged over any prior state.
+    const setState = vi.fn();
+    const getState = vi.fn(() => ({ someOtherKey: 1 }));
+    vi.spyOn(vscodeApiModule, 'getVsCodeApi').mockReturnValue({ postMessage: vi.fn(), getState, setState });
+
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null);
+    const { getByText } = render(Diff);
+    await fireEvent.click(getByText('Side by Side'));
+
+    expect(setState).toHaveBeenCalledWith({ someOtherKey: 1, diffMode: 'side-by-side' });
+    vi.restoreAllMocks();
+  });
+
+  it('initializes mode from a previously persisted webview state', () => {
+    vi.spyOn(vscodeApiModule, 'getVsCodeApi').mockReturnValue({
+      postMessage: vi.fn(), setState: vi.fn(), getState: () => ({ diffMode: 'side-by-side' }),
+    });
+
+    diffStore.setDiffs('/r', 'src/a.ts', textDiff(), null);
+    const { container } = render(Diff);
+    expect(container.querySelector('.sbs-block-stage-btn')).toBeTruthy();
+    expect(container.querySelector('.diff-hunk-header')).toBeNull();
+    vi.restoreAllMocks();
+  });
+  /* SNIPCODE-HOOK end */
 });
