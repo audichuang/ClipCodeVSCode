@@ -725,4 +725,8 @@ export const zh: Record<string, string> = {
   'toolbar.prDesc': 'PR（Ctrl+4）',
   'search.noResultsLoaded': '已加载的 {count} 个提交中无结果',
   'search.hashNotLoaded': '已找到 — 尚未加载的范围内',
+  'details.treeView': '树状',
+  'details.flatView': '平铺',
+  'details.expandAll': '全部展开',
+  'details.collapseAll': '全部折叠',
 };

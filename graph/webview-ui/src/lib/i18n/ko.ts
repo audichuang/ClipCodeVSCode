@@ -725,4 +725,8 @@ export const ko: Record<string, string> = {
   'toolbar.prDesc': 'PR (Ctrl+4)',
   'search.noResultsLoaded': '불러온 {count}개 커밋 중 결과 없음',
   'search.hashNotLoaded': '찾음 — 아직 불러오지 않은 범위',
+  'details.treeView': '트리',
+  'details.flatView': '평면',
+  'details.expandAll': '모두 펼치기',
+  'details.collapseAll': '모두 접기',
 };

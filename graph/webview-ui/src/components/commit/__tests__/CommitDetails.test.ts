@@ -1340,3 +1340,62 @@ describe('CommitDetails — reverse changes (committed view)', () => {
     expect(msg!.payload).toMatchObject({ commit: 'h1', file: 'src/a.ts', hunkIndex: 0, lineIndices: [1, 2] });
   });
 });
+
+/* SNIPCODE-HOOK start: M12 — Changes tree small toolbar (Tree/Flat + Expand/Collapse all) */
+describe('CommitDetails — M12 files toolbar (tree/flat, expand/collapse all)', () => {
+  async function openChanges(files: Array<{ path: string; status: string }>) {
+    const r = render(CommitDetails, { commit: commit({ hash: 'h1' }) });
+    deliverCommitDiff('h1', files);
+    const changesTab = Array.from(r.container.querySelectorAll<HTMLButtonElement>('.top-tab'))
+      .find(t => /change/i.test(t.textContent ?? ''))!;
+    await fireEvent.click(changesTab);
+    await waitFor(() => r.container.querySelector('.files-toolbar'));
+    return r;
+  }
+
+  it('defaults to Tree view with directory grouping', async () => {
+    const { container } = await openChanges([
+      { path: 'src/a.ts', status: 'M' },
+      { path: 'src/b.ts', status: 'M' },
+    ]);
+    await waitFor(() => container.querySelector('.dir-item'));
+    expect(container.querySelector('.files-view-btn.active')?.textContent?.toLowerCase()).toContain('tree');
+  });
+
+  it('Flat view lists full paths with no directory nodes', async () => {
+    const { container } = await openChanges([
+      { path: 'src/a.ts', status: 'M' },
+      { path: 'src/b.ts', status: 'M' },
+    ]);
+    await waitFor(() => container.querySelector('.dir-item'));
+    const flatBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.files-view-btn'))
+      .find(b => /flat/i.test(b.textContent ?? ''))!;
+    await fireEvent.click(flatBtn);
+    await waitFor(() => {
+      expect(container.querySelector('.dir-item')).toBeNull();
+      const names = Array.from(container.querySelectorAll('.file-name')).map(el => el.textContent);
+      expect(names).toEqual(['src/a.ts', 'src/b.ts']);
+    });
+  });
+
+  it('Collapse all hides file rows, Expand all brings them back', async () => {
+    const { container } = await openChanges([{ path: 'dir/a.ts', status: 'M' }]);
+    await waitFor(() => container.querySelector('.file-item'));
+    const collapseBtn = container.querySelector<HTMLButtonElement>('.files-toolbar-actions button:nth-child(2)')!;
+    await fireEvent.click(collapseBtn);
+    await waitFor(() => expect(container.querySelector('.file-item')).toBeNull());
+    const expandBtn = container.querySelector<HTMLButtonElement>('.files-toolbar-actions button:nth-child(1)')!;
+    await fireEvent.click(expandBtn);
+    await waitFor(() => expect(container.querySelector('.file-item')).not.toBeNull());
+  });
+
+  it('Expand/Collapse all are disabled in Flat view (no directories to toggle)', async () => {
+    const { container } = await openChanges([{ path: 'dir/a.ts', status: 'M' }]);
+    const flatBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.files-view-btn'))
+      .find(b => /flat/i.test(b.textContent ?? ''))!;
+    await fireEvent.click(flatBtn);
+    const actionBtns = container.querySelectorAll<HTMLButtonElement>('.files-toolbar-actions button');
+    actionBtns.forEach(b => expect(b.disabled).toBe(true));
+  });
+});
+/* SNIPCODE-HOOK end */
