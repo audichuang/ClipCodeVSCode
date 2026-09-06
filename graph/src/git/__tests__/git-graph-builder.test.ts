@@ -463,3 +463,41 @@ describe('buildFullGraph branch color override', () => {
     expect(full.paths.some(p => p.colorOverride === '#00FF00')).toBe(true);
   });
 });
+
+/* SNIPCODE-HOOK start: G1 — stable per-branch color */
+describe('buildFullGraph stable per-branch color (G1)', () => {
+  it('the same branch name gets the same palette color across two unrelated logs', () => {
+    const logA = [
+      makeCommit('m1', ['baseA'], [{ type: 'branch', name: 'main' }]),
+      makeCommit('baseA', []),
+    ];
+    // Unrelated surrounding branch ('other', a different preferred slot) so the
+    // free-mask fallback never has to kick in for 'main' here either — this
+    // isolates "does the SAME name land on the SAME slot across two graphs".
+    const logB = [
+      makeCommit('x1', ['baseB1'], [{ type: 'branch', name: 'other' }]),
+      makeCommit('m2', ['baseB2'], [{ type: 'branch', name: 'main' }]),
+      makeCommit('baseB1', []),
+      makeCommit('baseB2', []),
+    ];
+    const graphA = buildFullGraph(logA);
+    const graphB = buildFullGraph(logB);
+    expect(graphA.dots[0].color).toBe(graphB.dots[1].color);
+  });
+
+  it('two simultaneously visible rails whose names hash to the same slot still get different colors', () => {
+    // 'main' and 'develop' land on the same preferred palette slot (both hash
+    // to 1 with the djb2-ish function this module uses) — pickColor's
+    // free-mask fallback must still keep two rails visible at once distinct
+    // instead of both claiming the same lane color.
+    const commits = [
+      makeCommit('m1', ['base1'], [{ type: 'branch', name: 'main' }]),
+      makeCommit('d1', ['base2'], [{ type: 'branch', name: 'develop' }]),
+      makeCommit('base1', []),
+      makeCommit('base2', []),
+    ];
+    const graph = buildFullGraph(commits);
+    expect(graph.dots[0].color).not.toBe(graph.dots[1].color);
+  });
+});
+/* SNIPCODE-HOOK end */
