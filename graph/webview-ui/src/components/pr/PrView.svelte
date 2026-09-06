@@ -559,6 +559,21 @@
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: PR tab (P6) dir/base path split — mirrors
+     FileDiffView.svelte's .diff-dir/.diff-base split (dimmed directory
+     prefix, bold filename) instead of a single flat path with a trailing
+     ellipsis that hides the filename first at narrow widths. */
+  function fileDir(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx === -1 ? '' : path.substring(0, idx + 1);
+  }
+
+  function fileBaseName(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx === -1 ? path : path.substring(idx + 1);
+  }
+  /* SNIPCODE-HOOK end */
+
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = event.data;
@@ -809,7 +824,12 @@
               {@const s = fileStats(file)}
               <button class="pr-file-row" onclick={() => scrollToFile(file)}>
                 <span class="file-status" style="color: {statusColor(file.status)}" use:tooltip={statusLabel(file.status)}>{file.status}</span>
-                <span class="pr-file-path">{file.path}</span>
+                <!-- SNIPCODE-HOOK start: PR tab (P6) dir/base path split + rename
+                     old -> new. No whitespace between the dir/base spans (all on
+                     one line, nothing between tags) so "src/" + "b.ts" reads as
+                     "src/b.ts" in textContent, not "src/ b.ts". -->
+                <span class="pr-file-path" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>{#if file.oldPath}<span class="pr-rename-old">{file.oldPath}</span>{' → '}{/if}{#if fileDir(file.path)}<span class="pr-dir">{fileDir(file.path)}</span>{/if}<span class="pr-base">{fileBaseName(file.path)}</span></span>
+                <!-- SNIPCODE-HOOK end -->
                 <!-- SNIPCODE-HOOK: PR tab (P4/X2) per-file +/- stats -->
                 <span class="pr-file-stats">
                   {#if s}<span class="pr-stat-add">+{s.add}</span><span class="pr-stat-del">−{s.del}</span>{:else}<span class="pr-stat-bin">{t('pr.statsBinary')}</span>{/if}
@@ -1310,13 +1330,45 @@
     font-family: var(--vscode-editor-font-family, monospace);
   }
 
+  /* SNIPCODE-HOOK start: PR tab (P6) dir/base path split — copies
+     FileDiffView.svelte's three .diff-file-name/.diff-dir/.diff-base rules:
+     the directory prefix truncates first (dimmed, shrinks), the filename
+     itself never truncates (bold, fixed). A flat path + trailing ellipsis
+     hid the filename first at a narrow column width — the opposite of what a
+     reviewer needs to identify a changed file. */
   .pr-file-path {
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: baseline;
+    gap: 0;
   }
+
+  .pr-dir {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.55;
+    font-weight: normal;
+  }
+
+  .pr-base {
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  .pr-rename-old {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: PR tab (P4/X2) per-file +/- stats */
   .pr-file-stats {
