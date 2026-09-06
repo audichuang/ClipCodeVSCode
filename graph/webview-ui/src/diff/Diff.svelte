@@ -123,7 +123,16 @@
     </div>
     <div class="sections">
       <!-- SNIPCODE-HOOK start: Batch B image component identity -->
-      {#each sections as section (`${store.repoPath}\u0000${store.generation}\u0000${section.side}`)}
+      <!-- SNIPCODE-HOOK start: D7 stop remounting the section on every stage.
+           `generation` used to be part of the key, so EVERY stage/unstage
+           (which bumps it) tore down and rebuilt the whole FileDiffView -
+           highlight cache cleared, scroll position lost, brief flash of
+           plain text. repoPath+side is a stable identity for "this section",
+           so it now updates via props instead of remounting; ImageDiff still
+           gets fresh image data via the separate imageGeneration prop below,
+           which its own $effect keys off directly. -->
+      {#each sections as section (`${store.repoPath}\u0000${section.side}`)}
+      <!-- SNIPCODE-HOOK end -->
         <section class="diff-section">
           <!-- A row, not one button: the open-diff action must not toggle collapse
                (and a button can't nest inside a button). -->

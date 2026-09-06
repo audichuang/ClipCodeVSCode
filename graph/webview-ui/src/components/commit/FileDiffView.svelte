@@ -300,9 +300,13 @@
   // diff starts collapsed even if the previous one was expanded.
   $effect(() => {
     diff;
-    /* SNIPCODE-HOOK start: Batch C reset reused diff-view highlight state. */
-    highlightedLines = new Map();
-    /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: D7 stop clobbering the highlight cache on every diff
+       change. The old eager reset cleared it synchronously the instant `diff`
+       changed (e.g. every stage/unstage re-push), so every unchanged line
+       flashed plain (unhighlighted) text until the async highlight pass below
+       finished. The highlighting $effect now owns `highlightedLines` fully —
+       it reuses cache entries whose content-addressed key still matches and
+       only recomputes the rest, so there's no reason to blank it here. */
     showFullDiff = false;
     lineSel = null;
   });
@@ -433,6 +437,13 @@
 
   const MAX_HIGHLIGHT_LINES = 5000;
 
+  /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+  // Theme the currently-cached HTML was rendered under. A cache entry is only
+  // reusable when the theme hasn't changed since — reusing dark-plus HTML
+  // under a light theme would render wrong-colored tokens.
+  let lastHighlightTheme: 'dark-plus' | 'light-plus' | undefined;
+  /* SNIPCODE-HOOK end */
+
   // Tracks the VS Code color theme so highlighting re-runs (with the matching
   // light/dark token colours) when the user switches themes mid-session.
   let shikiTheme = $state<'dark-plus' | 'light-plus'>(activeShikiTheme());
@@ -484,18 +495,26 @@
         const ready = await ensureLanguage(h, lang);
         if (cancelled || diff !== target) return;
         if (!ready) { highlightedLines = new Map(); return; }
+        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+        // Reuse cache entries whose content-addressed key is unchanged (same
+        // file+hunkStart+lineIndex+content — see highlightKey) so an unrelated
+        // hunk's stage/unstage doesn't force every OTHER line to re-highlight
+        // (and doesn't flash plain text for them either, since D7 also stopped
+        // eagerly clearing highlightedLines on diff change).
+        const reusable = theme === lastHighlightTheme ? highlightedLines : undefined;
         const newMap = new Map<string, string>();
         const flat: Array<{ key: string; content: string }> = [];
         for (const hunk of visibleHunks) {
           for (let i = 0; i < hunk.lines.length; i++) {
             /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
-            flat.push({
-              key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content),
-              content: hunk.lines[i].content,
-            });
+            const key = highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content);
+            const cached = reusable?.get(key);
+            if (cached !== undefined) { newMap.set(key, cached); continue; }
+            flat.push({ key, content: hunk.lines[i].content });
             /* SNIPCODE-HOOK end */
           }
         }
+        /* SNIPCODE-HOOK end */
         for (let i = 0; i < flat.length; i += CHUNK_SIZE) {
           if (cancelled || diff !== target) return;
           const end = Math.min(i + CHUNK_SIZE, flat.length);
@@ -518,6 +537,9 @@
         }
         if (cancelled || diff !== target) return;
         highlightedLines = newMap;
+        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
+        lastHighlightTheme = theme;
+        /* SNIPCODE-HOOK end */
       })
       .catch(() => {});
     return () => { cancelled = true; };
