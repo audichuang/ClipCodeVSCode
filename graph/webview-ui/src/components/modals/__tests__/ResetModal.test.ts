@@ -22,7 +22,7 @@ describe('ResetModal', () => {
     const onConfirm = vi.fn();
     const onClose = vi.fn();
     const { container } = render(ResetModal, { ...baseProps, onConfirm, onClose });
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.primary')!);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.danger-btn')!);
     expect(onConfirm).toHaveBeenCalledWith('mixed');
     expect(onClose).toHaveBeenCalled();
   });
@@ -30,14 +30,14 @@ describe('ResetModal', () => {
   it('respects defaultMode prop (soft)', async () => {
     const onConfirm = vi.fn();
     const { container } = render(ResetModal, { ...baseProps, onConfirm, defaultMode: 'soft' });
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.primary')!);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.danger-btn')!);
     expect(onConfirm).toHaveBeenCalledWith('soft');
   });
 
   it('respects defaultMode prop (hard)', async () => {
     const onConfirm = vi.fn();
     const { container } = render(ResetModal, { ...baseProps, onConfirm, defaultMode: 'hard' });
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.primary')!);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.danger-btn')!);
     expect(onConfirm).toHaveBeenCalledWith('hard');
   });
 
@@ -48,7 +48,7 @@ describe('ResetModal', () => {
     const opts = container.querySelectorAll<HTMLButtonElement>('.color-select-option');
     const hardOpt = Array.from(opts).find(o => o.querySelector('.flag-badge')?.textContent === '--hard')!;
     await fireEvent.click(hardOpt);
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.primary')!);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.danger-btn')!);
     expect(onConfirm).toHaveBeenCalledWith('hard');
   });
 
@@ -90,7 +90,27 @@ describe('ResetModal', () => {
     defaultsStore.current.reset = { mode: 'hard' };
     const onConfirm = vi.fn();
     const { container } = render(ResetModal, { ...baseProps, onConfirm });
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.primary')!);
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('button.danger-btn')!);
     expect(onConfirm).toHaveBeenCalledWith('hard');
   });
 });
+
+/* SNIPCODE-HOOK start: R2 — Reset (can be --hard) is destructive, so its
+   confirm button must be .danger-btn (not .primary) and Enter on the dialog
+   (Modal's fallback-Enter only targets button.primary) must not reset. */
+describe('ResetModal — R2 Enter/focus guard', () => {
+  it('does not focus the confirm button on mount', () => {
+    const { container } = render(ResetModal, baseProps);
+    const confirmBtn = container.querySelector<HTMLButtonElement>('button.danger-btn')!;
+    expect(document.activeElement).not.toBe(confirmBtn);
+  });
+
+  it('Enter on the dialog does not trigger onConfirm', async () => {
+    const onConfirm = vi.fn();
+    const { container } = render(ResetModal, { ...baseProps, onConfirm });
+    const dialog = container.querySelector<HTMLDivElement>('.modal')!;
+    await fireEvent.keyDown(dialog, { key: 'Enter' });
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+/* SNIPCODE-HOOK end */

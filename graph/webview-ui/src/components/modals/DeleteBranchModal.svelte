@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Modal from '../common/Modal.svelte';
   import { t } from '../../lib/i18n/index.svelte';
   import { branchStore } from '../../lib/stores/branches.svelte';
@@ -14,7 +13,6 @@
   let { branchName, onClose, onDelete }: Props = $props();
   let force = $state(defaultsStore.current.deleteBranch.force);
   let deleteRemote = $state(defaultsStore.current.deleteBranch.deleteRemote);
-  let deleteBtn: HTMLButtonElement | undefined = $state();
 
   const linkedWorktree = $derived(branchStore.worktrees.find(w => !w.isMain && w.branch === branchName));
   const hasRemote = $derived((() => {
@@ -28,8 +26,6 @@
       branchStore.branches.some(b => b.remote && b.name === `${r.name}/${branchName}`)
     );
   })());
-
-  onMount(() => { deleteBtn?.focus(); });
 </script>
 
 <Modal title={t('deleteBranch.title')} {onClose}>
@@ -61,7 +57,9 @@
   {/if}
   <div class="form-actions">
     <button onclick={onClose}>{t('common.cancel')}</button>
-    <button class="danger-btn" bind:this={deleteBtn} onclick={() => onDelete(force, linkedWorktree?.path, hasRemote && deleteRemote)}>{t('sidebar.delete')}</button>
+    <!-- SNIPCODE-HOOK start: R2 — destructive modal must not pre-focus its danger button (Enter-to-delete guard) -->
+    <button class="danger-btn" onclick={() => onDelete(force, linkedWorktree?.path, hasRemote && deleteRemote)}>{t('sidebar.delete')}</button>
+    <!-- SNIPCODE-HOOK end -->
   </div>
 </Modal>
 
