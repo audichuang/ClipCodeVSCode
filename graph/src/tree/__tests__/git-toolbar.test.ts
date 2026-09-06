@@ -39,6 +39,7 @@ vi.mock('vscode', () => {
       showWarningMessage: vi.fn(),
       setStatusBarMessage: vi.fn(),
       showTextDocument: vi.fn(),
+      showQuickPick: vi.fn(),
     },
     workspace: { workspaceFolders: [{ uri: { fsPath: '/ws' } }] },
     commands: {
@@ -463,6 +464,71 @@ describe('ChangesWorkbench index document invalidation', () => {
 });
 /* SNIPCODE-HOOK end */
 
+/* SNIPCODE-HOOK start: S P2 activity-bar badge = staged repo count */
+describe('ChangesWorkbench activity-bar badge (S P2)', () => {
+  it('sets the view badge to the staged repo count', async () => {
+    const a = mkSvc({
+      getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a.ts', status: 'M' }], unstaged: [], conflict: [] })),
+    });
+    setRepos(['/a'], { '/a': a });
+    const wb = new ChangesWorkbench();
+    const view = { badge: undefined as unknown };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    await wb.refresh();
+
+    expect(view.badge).toEqual({ value: 1, tooltip: '1 個 repo 待提交' });
+  });
+
+  it('clears the badge when nothing is staged', async () => {
+    setRepos([], {});
+    const wb = new ChangesWorkbench();
+    const view = { badge: { value: 3, tooltip: 'x' } as unknown };
+    wb.setView(view as unknown as import('vscode').TreeView<unknown>);
+
+    await wb.refresh();
+
+    expect(view.badge).toBeUndefined();
+  });
+});
+/* SNIPCODE-HOOK end */
+
+/* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+describe('ChangesWorkbench filterRepos sets snipcode.changes.filtered (S P2)', () => {
+  it('sets the context key true for a partial selection, false when cleared back to all', async () => {
+    setRepos(['/a', '/b'], { '/a': mkSvc(), '/b': mkSvc() });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+    ] as never);
+    await H.commands.get('snipcode.git.filterRepos')!();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', true);
+
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+      { label: 'b', description: '/b', repoPath: '/b', picked: true },
+    ] as never);
+    await H.commands.get('snipcode.git.filterRepos')!();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', false);
+  });
+
+  it('filterReposActive (the "active" icon variant) runs the same flow', async () => {
+    setRepos(['/a', '/b'], { '/a': mkSvc(), '/b': mkSvc() });
+    const wb = new ChangesWorkbench();
+    wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce([
+      { label: 'a', description: '/a', repoPath: '/a', picked: true },
+    ] as never);
+
+    await H.commands.get('snipcode.git.filterReposActive')!();
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'snipcode.changes.filtered', true);
+  });
+});
+/* SNIPCODE-HOOK end */
+
 /* SNIPCODE-HOOK start: S9 inline "Open in Editor" opens the plain file, not a diff */
 describe('ChangesWorkbench openChange / openChangeNative (S9)', () => {
   it('the inline command opens the plain file via vscode.open, not a diff', async () => {
@@ -720,6 +786,28 @@ describe('Changes tree repo badges', () => {
     const repoNode = provider.getChildren(conflictGroup)[0];
     const fileNode = provider.getChildren(repoNode)[0];
     expect(provider.getTreeItem(fileNode).tooltip).toBe('both.ts\nConflicting (unresolved)');
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: S P2 rename description shows the old path */
+  it('shows the old path in a renamed file\'s description', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'src/new-name.ts', status: 'R', oldPath: 'src/old-name.ts' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('src ← src/old-name.ts');
+  });
+
+  it('a root-level rename shows just the old path (no leading dir)', async () => {
+    const provider = new ChangesTreeProvider(async () => [
+      { ...status()[0], staged: [{ path: 'new-name.ts', status: 'R', oldPath: 'old-name.ts' }], unstaged: [] },
+    ]);
+    await provider.refresh();
+    const repoNode = provider.getChildren(provider.getChildren()[0])[0];
+    const fileNode = provider.getChildren(repoNode)[0];
+    expect(provider.getTreeItem(fileNode).description).toBe('← old-name.ts');
   });
   /* SNIPCODE-HOOK end */
 

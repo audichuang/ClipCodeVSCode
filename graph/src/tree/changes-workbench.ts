@@ -142,6 +142,12 @@ export class ChangesWorkbench implements vscode.Disposable {
     await vscode.window.withProgress({ location: { viewId: 'snipcode.changes' } }, () => this.tree.refresh());
     /* SNIPCODE-HOOK end */
     this.diffPanel?.invalidateIndexDocuments();
+    /* SNIPCODE-HOOK start: S P2 activity-bar badge = staged repo count */
+    if (this.view) {
+      const count = this.tree.getStagedRepoCount();
+      this.view.badge = count > 0 ? { value: count, tooltip: `${count} 個 repo 待提交` } : undefined;
+    }
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
 
@@ -497,6 +503,9 @@ export class ChangesWorkbench implements vscode.Disposable {
         ? `已篩選 ${this.repoFilter.size} / ${all.length} 個 repo`
         : undefined;
     }
+    /* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+    void vscode.commands.executeCommand('setContext', 'snipcode.changes.filtered', this.repoFilter !== null);
+    /* SNIPCODE-HOOK end */
     await this.refresh();
   }
 
@@ -554,6 +563,9 @@ export class ChangesWorkbench implements vscode.Disposable {
     reg('snipcode.git.showDiff', (n) => this.showInDiffView(n as FileNode));
     reg('snipcode.git.copyAsClipCode', (n, ns) => this.copyAsClipCode(sel<ChangeTreeNode>(n, ns)));
     reg('snipcode.git.filterRepos', () => this.filterRepos());
+    /* SNIPCODE-HOOK start: S P2 filter enabled state drives the title-bar icon */
+    reg('snipcode.git.filterReposActive', () => this.filterRepos());
+    /* SNIPCODE-HOOK end */
   }
 
   dispose(): void {
