@@ -28,8 +28,12 @@ graph/*.mjs
 graph/*.mts
 graph/*.json
 graph/*.yml
+graph/*.xml
 graph/.gitignore
 graph/.vscodeignore
 graph/CLAUDE.md
 graph/dist/**
 **/*.map
+.vscode/**
+AGENTS.md
+CLAUDE.md
