@@ -1,7 +1,7 @@
 // SNIPCODE-HOOK: whole-file — unit tests for the Snipcode Git toolbar's
 // all-repo fetch/pull/push (continue-on-failure + aggregated report) and the
 // Changes tree's `branch ↓behind ↑ahead` repo badges.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const H = vi.hoisted(() => ({
   repos: [] as Array<{ path: string; name?: string }>,
@@ -66,7 +66,7 @@ vi.mock('../../utils/config', () => ({ readTimeoutMs: () => 30_000 }));
 import * as vscode from 'vscode';
 import { ChangesWorkbench } from '../changes-workbench';
 import { ChangesTreeProvider } from '../changes-tree';
-import type { FileNode, RepoStatus } from '../build-change-tree';
+import type { FileNode, RepoNode, RepoStatus } from '../build-change-tree';
 
 function mkSvc(over: Record<string, unknown> = {}) {
   return {
@@ -958,3 +958,120 @@ function repo(over: Partial<RepoStatus>): RepoStatus {
 function file(repoPath: string, path: string, group: 'staged' | 'unstaged'): FileNode {
   return { kind: 'file', repoPath, path, status: 'M', group };
 }
+
+/* SNIPCODE-HOOK start: startup — bounded concurrent status read + progressive tree paint */
+describe('ChangesWorkbench loadStatus fan-out', () => {
+  const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+  const unstagedRepoPaths = (wb: ChangesWorkbench): string[] =>
+    wb.tree.getChildren(wb.tree.getChildren()[1]).map(node => (node as RepoNode).repoPath);
+
+  it('reads at most 8 repos at once and keeps discovery order whatever the completion order', async () => {
+    const N = 12;
+    let inflight = 0;
+    let maxInflight = 0;
+    const release: Array<() => void> = [];
+    const svcs: Record<string, ReturnType<typeof mkSvc>> = {};
+    for (let i = 0; i < N; i++) {
+      svcs[`/r${String(i).padStart(2, '0')}`] = mkSvc({
+        getUncommittedDiff: vi.fn(() => new Promise(resolve => {
+          inflight++;
+          maxInflight = Math.max(maxInflight, inflight);
+          release.push(() => { inflight--; resolve({ staged: [], unstaged: [{ path: `f${i}.ts`, status: 'M' }], conflict: [] }); });
+        })),
+      });
+    }
+    const order = Object.keys(svcs);
+    setRepos(order, svcs);
+    const wb = new ChangesWorkbench();
+    const refreshing = wb.tree.refresh();
+    await flush();
+    expect(maxInflight).toBe(8); // STATUS_CONCURRENCY: neither serial nor all 12
+    // Release newest-first so completion order is the reverse of discovery order.
+    while (release.length) { release.pop()!(); await flush(); }
+    await refreshing;
+    expect(maxInflight).toBe(8);
+    expect(unstagedRepoPaths(wb)).toEqual(order);
+  });
+
+  it('strict read (commit): the first unreadable checked repo rejects the call and stops new reads', async () => {
+    const started: string[] = [];
+    const svcs: Record<string, ReturnType<typeof mkSvc>> = {};
+    for (let i = 0; i < 10; i++) {
+      const path = `/r${i}`;
+      svcs[path] = mkSvc({
+        getUncommittedDiff: vi.fn(() => {
+          started.push(path);
+          if (i === 0) return Promise.reject(new Error('index.lock'));
+          return new Promise(resolve => setTimeout(() => resolve({ staged: [], unstaged: [], conflict: [] }), 0));
+        }),
+      });
+    }
+    setRepos(Object.keys(svcs), svcs);
+    await expect(new ChangesWorkbench().commit('fix', false)).rejects.toThrow('r0: index.lock');
+    await flush();
+    expect(started).toHaveLength(8); // the pool's first window only — r8/r9 never started
+  });
+});
+
+describe('ChangesTreeProvider progressive paint', () => {
+  const repo = (path: string): RepoStatus => ({
+    repoName: path.slice(1), repoPath: path, branch: 'main',
+    staged: [], unstaged: [{ path: 'f.ts', status: 'M' }], conflict: [],
+  });
+  const unstagedRepoPaths = (provider: ChangesTreeProvider): string[] =>
+    provider.getChildren(provider.getChildren()[1]).map(node => (node as RepoNode).repoPath);
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('paints the repos that have answered (one throttled paint per burst), then the full set', async () => {
+    let finish!: (all: RepoStatus[]) => void;
+    const provider = new ChangesTreeProvider((onPartial) => new Promise(resolve => {
+      onPartial?.([repo('/a')]);
+      onPartial?.([repo('/a'), repo('/b')]);
+      finish = resolve;
+    }));
+    const paints: string[][] = [];
+    provider.onDidChangeTreeData(() => paints.push(unstagedRepoPaths(provider)));
+    const refreshing = provider.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(paints).toEqual([]); // trailing throttle: nothing painted yet
+    await vi.advanceTimersByTimeAsync(50);
+    expect(paints).toEqual([['/a', '/b']]); // two completions, one paint
+    finish([repo('/a'), repo('/b'), repo('/c')]);
+    await refreshing;
+    expect(paints).toEqual([['/a', '/b'], ['/a', '/b', '/c']]);
+  });
+
+  it('a partial that has nothing to show stays an empty root (no "Staged 0 / Unstaged 0" flash)', async () => {
+    let finish!: (all: RepoStatus[]) => void;
+    const clean: RepoStatus = { ...repo('/clean'), unstaged: [] };
+    const provider = new ChangesTreeProvider((onPartial) => new Promise(resolve => { onPartial?.([clean]); finish = resolve; }));
+    const paints: number[] = [];
+    provider.onDidChangeTreeData(() => paints.push(provider.getChildren().length));
+    const refreshing = provider.refresh();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(paints).toEqual([0]);
+    finish([clean, repo('/dirty')]);
+    await refreshing;
+    expect(paints).toEqual([0, 2]);
+  });
+
+  it('a superseded refresh never paints its partials, even after its timer fires', async () => {
+    let finishOld!: (all: RepoStatus[]) => void;
+    const loads: Array<(onPartial?: (partial: RepoStatus[]) => void) => Promise<RepoStatus[]>> = [
+      (onPartial) => new Promise(resolve => { onPartial?.([repo('/stale')]); finishOld = resolve; }),
+      async () => [repo('/fresh')],
+    ];
+    const provider = new ChangesTreeProvider((onPartial) => loads.shift()!(onPartial));
+    const paints: string[][] = [];
+    provider.onDidChangeTreeData(() => paints.push(unstagedRepoPaths(provider)));
+    const older = provider.refresh();
+    await provider.refresh(); // newer wins
+    await vi.advanceTimersByTimeAsync(50); // the stale partial's timer fires — must be a no-op
+    finishOld([repo('/stale')]);
+    await older;
+    expect(paints).toEqual([['/fresh']]);
+  });
+});
+/* SNIPCODE-HOOK end */

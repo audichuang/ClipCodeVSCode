@@ -10,9 +10,19 @@ import { changeUri, STATUS_LABEL } from './change-decorations';
 
 export type ChangeTreeNode = GroupNode | RepoNode | FileNode;
 
+/* SNIPCODE-HOOK start: progressive first paint */
+/** Trailing throttle for partial repaints while a multi-repo status read is in
+ *  flight. Long enough that the fast repos of a pool land in one paint, short
+ *  enough that a slow one does not delay showing the rest. */
+const PARTIAL_PAINT_MS = 50;
+/* SNIPCODE-HOOK end */
+
 /** Loads per-repo staged/unstaged status for the tree. Injected by the host so
  *  the provider stays free of git plumbing. */
-export type LoadStatus = () => Promise<RepoStatus[]>;
+/* SNIPCODE-HOOK start: progressive first paint — `onPartial` receives the repos
+   that have answered so far, in discovery order, as each one lands */
+export type LoadStatus = (onPartial?: (partial: RepoStatus[]) => void) => Promise<RepoStatus[]>;
+/* SNIPCODE-HOOK end */
 
 /**
  * TreeDataProvider for the Snipcode Git commit workbench. Paints the IntelliJ
@@ -44,7 +54,29 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   async refresh(): Promise<void> {
     /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
     const ticket = this.refreshSequence.issue();
-    const repos = await this.loadStatus();
+    /* SNIPCODE-HOOK start: progressive first paint
+       Paint the repos that have answered instead of a blank view until the last
+       one does (25 repos, one on a slow disk: the other 24 used to wait for it).
+       Trailing-throttled so a burst of completions costs one repaint, and gated
+       on the ticket so a superseded refresh cannot repaint stale partials. The
+       same empty→[] collapse as the final paint keeps "Staged 0 / Unstaged 0"
+       rows from flashing before the first dirty repo arrives. */
+    let partialTimer: ReturnType<typeof setTimeout> | undefined;
+    let latestPartial: RepoStatus[] | undefined;
+    const paintPartial = (partial: RepoStatus[]) => {
+      latestPartial = partial;
+      if (partialTimer) return;
+      partialTimer = setTimeout(() => {
+        partialTimer = undefined;
+        if (!this.refreshSequence.isCurrent(ticket) || !latestPartial) return;
+        const partialGroups = buildChangeTree(latestPartial);
+        this.groups = partialGroups.every((g) => g.count === 0) ? [] : partialGroups;
+        this._onDidChangeTreeData.fire();
+      }, PARTIAL_PAINT_MS);
+    };
+    const repos = await this.loadStatus(paintPartial);
+    if (partialTimer) { clearTimeout(partialTimer); partialTimer = undefined; }
+    /* SNIPCODE-HOOK end */
     if (!this.refreshSequence.isCurrent(ticket)) return;
     const groups = buildChangeTree(repos);
     /* SNIPCODE-HOOK end */
@@ -53,6 +85,10 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     // from "repo(s), but nothing to commit" (both otherwise render as an empty
     // root — see the `groups.every` below).
     void vscode.commands.executeCommand('setContext', 'snipcode.changes.hasRepos', repos.length > 0);
+    // `loaded` gates BOTH welcome texts (package.json viewsWelcome): until the
+    // first load finishes, `hasRepos` is unset and the view showed "No git
+    // repository found" for the whole multi-second load of a 25-repo workspace.
+    void vscode.commands.executeCommand('setContext', 'snipcode.changes.loaded', true);
     // A totally clean workspace (or no repos at all) would otherwise paint a
     // permanent "Staged 0 / Unstaged 0" — collapse to an empty root instead so
     // the "No changes" / "No git repository" welcome content can show through.
