@@ -1,0 +1,24 @@
+{
+  "repo": "/tmp/snipcode-live-qa/rename-repro-rjDkZY",
+  "stagedNode": {
+    "path": "new.ts",
+    "status": "R",
+    "oldPath": "old.ts"
+  },
+  "unstagedNode": {
+    "path": "new.ts",
+    "status": "M"
+  },
+  "viaStaged": {
+    "file": "new.ts",
+    "oldPath": "old.ts",
+    "hunks": 0,
+    "similarity": 100
+  },
+  "viaUnstaged": {
+    "file": "new.ts",
+    "oldPath": null,
+    "hunks": 1,
+    "similarity": null
+  }
+}

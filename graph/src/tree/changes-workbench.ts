@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { GitService } from '../git/git-service';
+import { GitService, type StatusChange } from '../git/git-service';
 /* SNIPCODE-HOOK start: Batch D retain disambiguated repo names */
 import { RepoDiscoveryService, type RepoInfo } from '../services/repo-discovery';
 /* SNIPCODE-HOOK end */
@@ -510,13 +510,29 @@ export class ChangesWorkbench implements vscode.Disposable {
     await vscode.commands.executeCommand('vscode.open', uri);
   }
 
+  /** Read uncommitted status (staged/unstaged/conflict) for a repo. */
+  async uncommittedStatus(repoPath: string): Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }> {
+    return this.svcFor(repoPath).getUncommittedDiff();
+  }
+
+  /** Check if a repo has a HEAD commit (false for unborn branch / empty repo). */
+  async hasHead(repoPath: string): Promise<boolean> {
+    return this.svcFor(repoPath).hasHead();
+  }
+
   /** Right-click-only: VS Code's built-in diff view for this change. */
   private async openChangeNative(node: FileNode): Promise<void> {
     /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
     if (!node) return;
     /* SNIPCODE-HOOK end */
-    const uri = vscode.Uri.file(path.join(node.repoPath, node.path));
-    await vscode.commands.executeCommand('git.openChange', uri);
+    await this.openNativeDiff(node);
+  }
+
+  /** Open native diff for a file node using Snipcode's own content provider. */
+  async openNativeDiff(node: FileNode, line?: number): Promise<void> {
+    if (!this.diffPanel) return;
+    const side = node.group === 'staged' ? 'staged' : 'unstaged';
+    await this.diffPanel.openNativeDiff(node.repoPath, node.path, side, line);
   }
   /* SNIPCODE-HOOK end */
 
@@ -545,10 +561,15 @@ export class ChangesWorkbench implements vscode.Disposable {
   }
 
   /** Drive the Diff editor tab from a clicked file node (tree command). */
-  private showInDiffView(node: FileNode): void {
+  private async showInDiffView(node: FileNode): Promise<void> {
     /* SNIPCODE-HOOK start: S10 Command Palette guard — no node arg outside the tree */
     if (!node) return;
     /* SNIPCODE-HOOK end */
+    const defaultViewer = vscode.workspace.getConfiguration('snipcode.changes').get<string>('defaultDiffViewer', 'tab');
+    if (defaultViewer === 'native') {
+      await this.openNativeDiff(node);
+      return;
+    }
     /* SNIPCODE-HOOK start: live-QA-2 the clicked node's oldPath is deliberately
        NOT forwarded: it belongs to one side, and the Diff tab shows both. */
     this.diffPanel?.show(node.repoPath, node.path);

@@ -92,8 +92,17 @@ export function listenForHostMessages(): void {
         diffStore.operationId = null;
         /* SNIPCODE-HOOK end */
         break;
+      case 'requestJumpToSource':
+        jumpHandler?.();
+        break;
     }
   });
+}
+
+let jumpHandler: (() => void) | undefined;
+export function registerJumpHandler(fn: () => void): () => void {
+  jumpHandler = fn;
+  return () => { if (jumpHandler === fn) jumpHandler = undefined; };
 }
 
 function diffFor(side: DiffSide) {
@@ -128,6 +137,20 @@ export function postOpenSide(side: DiffSide): void {
   vscode.postMessage({
     type: 'diffOpenSide',
     payload: { repoPath: diffStore.repoPath, file: diffStore.file, side },
+  });
+}
+
+/** Ask the host to jump to native diff editor at a specific line on a side. */
+export function postJumpToEditor(side: DiffSide = 'unstaged', line?: number): void {
+  vscode.postMessage({
+    type: 'diffJumpToEditor',
+    payload: {
+      repoPath: diffStore.repoPath,
+      file: diffStore.file,
+      generation: diffStore.generation,
+      side,
+      line,
+    },
   });
 }
 

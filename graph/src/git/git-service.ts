@@ -57,7 +57,7 @@ interface ExecOptions {
 
 /* SNIPCODE-HOOK start: Batch B rename staging paths */
 type ChangePath = string | { path: string; oldPath?: string };
-type StatusChange = { path: string; status: string; oldPath?: string };
+export type StatusChange = { path: string; status: string; oldPath?: string };
 /* SNIPCODE-HOOK end */
 
 /**
@@ -2568,6 +2568,32 @@ export class GitService {
     await this.exec(['add', '--', ...paths]);
   }
 
+  /** Check if the repository has a HEAD commit (false for unborn branch / empty repo).
+   *  Only recognizes explicit missing-HEAD outputs as unborn; operational errors rethrow. */
+  async hasHead(): Promise<boolean> {
+    try {
+      await this.exec(['rev-parse', '--verify', 'HEAD'], { silent: true });
+      return true;
+    } catch (err: unknown) {
+      if (this.isMissingHeadError(err)) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  private isMissingHeadError(err: unknown): boolean {
+    if (!err) return false;
+    const msg = (err instanceof Error ? err.message : String(err)) || '';
+    const missingHeadPatterns = [
+      /Needed a single revision/i,
+      /ambiguous argument.*HEAD/i,
+      /unknown revision or path not in the working tree/i,
+      /bad revision 'HEAD'/i,
+    ];
+    return missingHeadPatterns.some((pattern) => pattern.test(msg));
+  }
+
   /**
    * Remove the given repo-relative paths from the index, keeping working-tree
    * changes. With a HEAD this is `git reset -q HEAD -- <paths>`; under an unborn
@@ -2578,9 +2604,7 @@ export class GitService {
     const paths = this.expandChangePaths(changes);
     if (paths.length === 0) return;
     for (const p of paths) this.assertSafePath(p, 'reset');
-    const hasHead = await this.exec(['rev-parse', '--verify', 'HEAD'], { silent: true })
-      .then(() => true)
-      .catch(() => false);
+    const hasHead = await this.hasHead();
     if (hasHead) {
       await this.exec(['reset', '--quiet', 'HEAD', '--', ...paths]);
     } else {

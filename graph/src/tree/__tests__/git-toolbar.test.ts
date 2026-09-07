@@ -590,17 +590,16 @@ describe('ChangesWorkbench openChange / openChangeNative (S9)', () => {
     expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('git.openChange', expect.anything());
   });
 
-  it('the "Open Changes (VS Code)" command still opens the native diff', async () => {
-    setRepos([], {});
+  it('the "Open Changes (VS Code)" command routes to openNativeDiff', async () => {
     const wb = new ChangesWorkbench();
+    const openNativeDiff = vi.fn();
+    wb.setDiffPanel({ openNativeDiff } as never);
     wb.registerCommands({ subscriptions: [] } as unknown as import('vscode').ExtensionContext);
     const node = file('/a', 'src/foo.ts', 'unstaged');
 
     await H.commands.get('snipcode.git.openChangeNative')!(node);
 
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
-      'git.openChange', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
-    );
+    expect(openNativeDiff).toHaveBeenCalledWith('/a', 'src/foo.ts', 'unstaged', undefined);
   });
 });
 /* SNIPCODE-HOOK end */

@@ -351,6 +351,11 @@
         "category": "%category.snipcodeGit%"
       },
       {
+        "command": "snipcode.diff.jumpToSource",
+        "title": "%cmd.snipcode.diff.jumpToSource.title%",
+        "category": "%category.snipcodeGit%"
+      },
+      {
         "command": "snipcode.git.openChange",
         "title": "%cmd.snipcode.git.openChange.title%",
         "category": "%category.snipcodeGit%",
@@ -396,6 +401,13 @@
         "title": "%cmd.snipcode.git.recentOpenGraph.title%",
         "category": "%category.snipcodeGit%",
         "icon": "$(git-branch)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "snipcode.diff.jumpToSource",
+        "key": "F4",
+        "when": "activeWebviewPanelId == 'snipcode.diffPanel'"
       }
     ],
     "viewsContainers": {
@@ -934,6 +946,15 @@
             "type": "string",
             "default": "",
             "description": "%configuration.clipcode.preText.description%"
+          },
+          "snipcode.changes.defaultDiffViewer": {
+            "type": "string",
+            "enum": [
+              "tab",
+              "native"
+            ],
+            "default": "tab",
+            "description": "%configuration.snipcode.changes.defaultDiffViewer.description%"
           },
           "clipcode.postText": {
             "type": "string",

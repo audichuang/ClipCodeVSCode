@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
+import { existsSync } from 'fs';
 /* SNIPCODE-HOOK start: Batch D bound working-tree image reads */
 import { open } from 'fs/promises';
 /* SNIPCODE-HOOK end */
@@ -88,15 +89,20 @@ export class DiffPanel {
       /* SNIPCODE-HOOK end */
       async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
         const { repoPath, file, ref } = JSON.parse(uri.query);
+        if (ref === 'empty') return '';
         /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
         if (ref === '') panel.indexContentUris.set(uri.query, uri);
         /* SNIPCODE-HOOK end */
-        // Absent at the ref (e.g. a new file at HEAD) → empty side, whole file
+        if (ref === 'HEAD') {
+          const hasHead = await workbench.hasHead(String(repoPath)).catch(() => true);
+          if (!hasHead) return '';
+        }
+        // Absent at the ref (e.g. a new file at HEAD, or brand-new repo with no HEAD) → empty side, whole file
         // reads as added.
         /* SNIPCODE-HOOK start: Batch B surface git content failures */
         return workbench.fileAtRef(String(repoPath), String(ref), String(file)).catch(err => {
           const message = err instanceof Error ? err.message : String(err);
-          if (/does not exist|exists on disk, but not in|path .* not in/i.test(message)) return '';
+          if (/does not exist|exists on disk, but not in|path .* not in|unknown revision|bad revision|does not have any commits yet|invalid object name|ambiguous argument/i.test(message)) return '';
           throw err;
         });
         /* SNIPCODE-HOOK end */
@@ -120,6 +126,7 @@ export class DiffPanel {
   /* SNIPCODE-HOOK end */
 
   show(repoPath: string, file: string, operationId?: string, reveal = true): void {
+    this.nativeOpenSeq++;
     const ticket = this.seq.issue();
     /* SNIPCODE-HOOK start: loading state only on navigation */
     // A same-file refresh (post-stage / post-error) keeps the current body
@@ -252,15 +259,13 @@ export class DiffPanel {
       if (msg?.type === 'diffOpenSide') {
         const { repoPath, file, side } = msg.payload ?? {};
         if (!this.isCurrentTarget(repoPath, file)) { return; }
-        const fileUri = vscode.Uri.file(path.join(String(repoPath), String(file)));
-        /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */
-        const refUri = (ref: string) => this.contentUri(String(repoPath), String(file), ref);
-        /* SNIPCODE-HOOK end */
-        if (side === 'staged') {
-          await vscode.commands.executeCommand('vscode.diff', refUri('HEAD'), refUri(''), `${file} (Staged)`);
-        } else {
-          await vscode.commands.executeCommand('vscode.diff', refUri(''), fileUri, `${file} (Working Tree)`);
-        }
+        await this.openNativeDiff(String(repoPath), String(file), side === 'staged' ? 'staged' : 'unstaged');
+        return;
+      }
+      if (msg?.type === 'diffJumpToEditor') {
+        const { repoPath, file, generation, side, line } = msg.payload ?? {};
+        if (!this.isCurrentTarget(repoPath, file) || this.current?.generation !== generation) { return; }
+        await this.openNativeDiff(String(repoPath), String(file), side === 'staged' ? 'staged' : 'unstaged', typeof line === 'number' ? line : undefined);
         return;
       }
       /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage. */
@@ -336,6 +341,7 @@ export class DiffPanel {
     });
 
     panel.onDidDispose(() => {
+      this.nativeOpenSeq++;
       this.panel = undefined;
       this.current = undefined;
       this.ready = false;
@@ -474,6 +480,90 @@ export class DiffPanel {
   }
   /* SNIPCODE-HOOK end */
 
+  private nativeOpenSeq = 0;
+
+  /** Open full file diff in VS Code native editor using our own content provider.
+   *  For unstaged: left is Index, right is Working Tree (editable). If deleted, right is virtual empty doc.
+   *  For staged: left is HEAD (or empty for unborn repos), right is Index (read-only virtual docs).
+   *  Host resolves oldPath independently per side from git status. */
+  public async openNativeDiff(
+    repoPath: string,
+    file: string,
+    side: 'staged' | 'unstaged' | 'conflict' = 'unstaged',
+    line?: number,
+  ): Promise<void> {
+    const token = ++this.nativeOpenSeq;
+    const targetRepo = repoPath;
+    const targetFile = file;
+    const diskPath = path.join(repoPath, file);
+
+    const statusData = await this.workbench.uncommittedStatus(repoPath);
+    if (token !== this.nativeOpenSeq) return;
+
+    let effectiveSide = side === 'staged' ? 'staged' : 'unstaged';
+    const inUnstaged = statusData.unstaged.some(e => e.path === file);
+    const inStaged = statusData.staged.some(e => e.path === file);
+
+    // If unstaged was requested, but this file is only staged (e.g. staged deletion
+    // or staged modification with clean working tree):
+    // Fall back to staged comparison so the user sees the actual change.
+    if (effectiveSide === 'unstaged' && !inUnstaged && inStaged) {
+      effectiveSide = 'staged';
+    }
+
+    const isStaged = effectiveSide === 'staged';
+    const entries = isStaged ? statusData.staged : statusData.unstaged;
+    const entry = entries.find(e => e.path === file);
+    const oldPath = entry?.oldPath;
+    const status = entry?.status;
+    const isDeleted = status === 'D';
+
+    const hasHead = isStaged ? await this.workbench.hasHead(repoPath) : true;
+    if (token !== this.nativeOpenSeq) return;
+
+    const leftFile = oldPath ?? file;
+    const leftRef = (isStaged && hasHead) ? 'HEAD' : (isStaged ? 'empty' : '');
+    const leftUri = this.contentUri(repoPath, leftFile, leftRef);
+
+    let rightUri: vscode.Uri;
+    if (isStaged) {
+      rightUri = this.contentUri(repoPath, file, '');
+    } else if (isDeleted) {
+      rightUri = this.contentUri(repoPath, file, 'empty');
+    } else {
+      rightUri = vscode.Uri.file(diskPath);
+    }
+
+    const title = `${file} (${isStaged ? 'Staged' : 'Working Tree'})`;
+
+    let showOptions: vscode.TextDocumentShowOptions | undefined;
+    if (typeof line === 'number' && Number.isInteger(line) && line > 0) {
+      let targetLine = line;
+      if (!isStaged && !isDeleted) {
+        try {
+          const doc = await vscode.workspace.openTextDocument(rightUri);
+          if (token !== this.nativeOpenSeq) return;
+          targetLine = Math.min(Math.max(1, line), doc.lineCount);
+        } catch {
+          // ignore doc open failure, keep targetLine
+        }
+      }
+      showOptions = {
+        selection: new vscode.Range(targetLine - 1, 0, targetLine - 1, 0),
+        preserveFocus: false,
+      };
+    }
+
+    if (token !== this.nativeOpenSeq) return;
+
+    await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title, showOptions);
+  }
+
+  public jumpCurrentToSource(): void {
+    if (!this.panel || !this.current) return;
+    this.panel.webview.postMessage({ type: 'requestJumpToSource' });
+  }
+
   private getHtml(webview: vscode.Webview, assetRoot: vscode.Uri): string {
     const workerUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'highlight-worker.js'));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.js'));
@@ -504,6 +594,7 @@ export class DiffPanel {
   }
 
   dispose(): void {
+    this.nativeOpenSeq++;
     this.contentProvider?.dispose();
     this.contentProvider = undefined;
     /* SNIPCODE-HOOK start: Batch D invalidate index virtual documents */

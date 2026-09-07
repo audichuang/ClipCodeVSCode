@@ -1,0 +1,9 @@
+    ✔ copies real files, clears them, restores them byte-identical (103ms)
+    ✔ activates and registers commands (graph + existing clipcode)
+    ✔ opens the graph and completes the webview boot handshake (315ms)
+    ✔ END-TO-END copies full source at commit B (MODIFIED/DELETED/MOVED/NEW) (202ms)
+    ✔ END-TO-END copies WORKING-TREE source for the UNCOMMITTED view
+    ✔ best-effort lifecycle: re-running open does not throw
+    ✔ toggle command is registered and does not throw with no editor
+  7 passing (696ms)
+Exit code:   0

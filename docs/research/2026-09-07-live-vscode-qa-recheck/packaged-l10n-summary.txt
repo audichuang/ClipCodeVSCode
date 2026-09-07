@@ -1,0 +1,5 @@
+QA_HOST_CONFLICT_MESSAGE 無法提交：beta 有未解決的衝突。請先解決衝突並暫存檔案。
+QA_PACKAGED_VERSION 0.3.42
+QA_LANGUAGE zh-tw
+QA_PACKAGED_GRAPH_L10N_PASS
+Exit code:   0

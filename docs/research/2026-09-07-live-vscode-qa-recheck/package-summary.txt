@@ -1,0 +1,1 @@
+ DONE  Packaged: /tmp/snipcode-live-qa/clipcode-vscode-0.3.42-44ac056-verified.vsix (73 files, 1.33 MB)

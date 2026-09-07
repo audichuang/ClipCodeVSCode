@@ -2,7 +2,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { diffStore, type DiffSide } from './diff-store.svelte';
-  import { postStageHunk, postStageLines, postOpenSide } from './messaging';
+  import { postStageHunk, postStageLines, postOpenSide, postJumpToEditor, registerJumpHandler } from './messaging';
   import { t } from '../lib/i18n/index.svelte';
   import { getVsCodeApi } from '../lib/vscode-api';
   import FileDiffView from '../components/commit/FileDiffView.svelte';
@@ -69,12 +69,14 @@
   // Per-side collapse; reset when the shown file changes. Keyed on repo + path so
   // the same relative path in a different repo doesn't inherit the prior collapse.
   let collapsed = $state<{ staged: boolean; unstaged: boolean }>({ staged: false, unstaged: false });
+  let lastSelectedLine = $state<{ side: DiffSide; line: number } | null>(null);
   let lastKey = '';
   $effect(() => {
     const key = `${store.repoPath}\u0000${store.file}`;
     if (key !== lastKey) {
       lastKey = key;
       collapsed = { staged: false, unstaged: false };
+      lastSelectedLine = null;
       /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
       resetHunkNav();
       /* SNIPCODE-HOOK end */
@@ -123,14 +125,46 @@
     currentHunkEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
+  function resolveJumpTarget(): { side: DiffSide; line?: number } {
+    // 1. Explicit line selection (tracks the last side and line clicked by user)
+    if (lastSelectedLine && lastSelectedLine.line > 0) {
+      return { side: lastSelectedLine.side, line: lastSelectedLine.line };
+    }
+    // 2. Active keyboard hunk
+    if (currentHunkEl) {
+      const hunkSide = currentHunkEl.dataset.side as DiffSide | undefined;
+      const start = Number(currentHunkEl.dataset.newStart);
+      if (hunkSide && !Number.isNaN(start) && start > 0) {
+        return { side: hunkSide, line: start };
+      }
+    }
+    // 3. Fall back to unstaged hunk if available
+    if (store.unstagedDiff && store.unstagedDiff.hunks.length > 0) {
+      return { side: 'unstaged', line: store.unstagedDiff.hunks[0]?.newStart ?? 1 };
+    }
+    // 4. Staged-only fallback
+    if (store.stagedDiff && store.stagedDiff.hunks.length > 0) {
+      return { side: 'staged', line: store.stagedDiff.hunks[0]?.newStart ?? 1 };
+    }
+    return { side: 'unstaged', line: 1 };
+  }
+
   onMount(() => {
+    const unregister = registerJumpHandler(() => {
+      const target = resolveJumpTarget();
+      postJumpToEditor(target.side, target.line);
+    });
+
     const onKeydown = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === 'ArrowDown') { e.preventDefault(); jumpHunk(1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); jumpHunk(-1); }
     };
     window.addEventListener('keydown', onKeydown);
-    return () => window.removeEventListener('keydown', onKeydown);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeydown);
+    };
   });
   /* SNIPCODE-HOOK end */
 
@@ -312,6 +346,13 @@
               stageBusy={store.busy}
               imageRepoPath={store.repoPath}
               imageGeneration={store.generation}
+              onSelectedLineChange={(l) => {
+                if (typeof l === 'number' && l > 0) {
+                  lastSelectedLine = { side: section.side, line: l };
+                } else if (lastSelectedLine?.side === section.side) {
+                  lastSelectedLine = null;
+                }
+              }}
               onStageHunk={({ hunkIndex }) => postStageHunk(section.side, hunkIndex)}
               onStageLines={({ hunkIndex, lineIndices }) => postStageLines(section.side, hunkIndex, lineIndices)}
             />
@@ -339,106 +380,104 @@
   }
   /* SNIPCODE-HOOK start: ui/diff IntelliJ-style toolbar and controls */
   .mode-bar {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    height: 38px; padding: 0 12px;
-    background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.08)));
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, rgba(128,128,128,0.2)));
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    height: 32px; padding: 0 10px;
+    background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background, #1e1e1e));
+    border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.15));
     font-family: var(--vscode-font-family); flex-shrink: 0;
     box-sizing: border-box;
   }
   /* SNIPCODE-HOOK start: D6/X2 file header — dir/base */
   .mode-bar-file {
     flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
-    font-size: var(--vscode-font-size, 13px);
-    display: flex; align-items: baseline; gap: 0;
+    font-size: var(--vscode-font-size, 12px);
+    display: flex; align-items: baseline; gap: 2px;
   }
-  .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.65; color: var(--vscode-descriptionForeground); }
+  .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .file-base { flex-shrink: 0; font-weight: 600; color: var(--vscode-foreground); }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify */
-  .file-old-path { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; text-decoration: line-through; }
-  .file-rename-arrow { flex-shrink: 0; opacity: 0.55; padding: 0 4px; }
+  .file-old-path { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.45; text-decoration: line-through; }
+  .file-rename-arrow { flex-shrink: 0; opacity: 0.45; padding: 0 3px; }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
   .hunk-nav {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
   }
   .hunk-nav-group {
     display: inline-flex;
     align-items: center;
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-    border-radius: 4px;
-    background: var(--vscode-editor-background, rgba(0, 0, 0, 0.15));
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
+    border-radius: 3px;
+    background: transparent;
     overflow: hidden;
   }
   .hunk-nav-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 22px; padding: 0; border-radius: 0;
+    width: 22px; height: 20px; padding: 0; border-radius: 0;
     background: transparent; border: none; cursor: pointer;
     color: var(--vscode-foreground, #ccc);
     transition: background-color 0.1s, color 0.1s;
   }
   .hunk-nav-btn:first-child {
-    border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
   }
   .hunk-nav-btn:hover:not(:disabled) {
-    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.12));
     color: var(--vscode-foreground);
   }
   .hunk-nav-btn:active:not(:disabled) {
-    background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.25));
+    background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.2));
   }
   .hunk-nav-btn:disabled {
-    opacity: 0.35; cursor: default;
+    opacity: 0.3; cursor: default;
   }
-  .hunk-nav-btn .codicon { font-size: 14px; }
+  .hunk-nav-btn .codicon { font-size: 13px; }
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: ui/diff D11b change count */
   .hunk-count {
     align-self: center;
     display: inline-flex; align-items: center; justify-content: center;
-    padding: 0 8px; height: 22px; min-width: 36px; text-align: center;
+    padding: 0 6px; height: 20px; min-width: 32px; text-align: center;
     font-size: 11px; font-variant-numeric: tabular-nums;
-    border-radius: 11px;
-    background: var(--vscode-badge-background, rgba(128, 128, 128, 0.15));
-    color: var(--vscode-badge-foreground, var(--vscode-foreground));
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
+    border-radius: 10px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
     box-sizing: border-box;
   }
-  .hunk-count-current { font-weight: 700; }
+  .hunk-count-current { font-weight: 600; color: var(--vscode-foreground); }
   /* SNIPCODE-HOOK end */
 
   .mode-bar-divider {
-    width: 1px; height: 16px;
-    background: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    width: 1px; height: 14px;
+    background: var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
     flex-shrink: 0;
   }
 
   .diff-mode-toggle {
-    display: inline-flex; align-items: center; gap: 2px;
-    background: var(--vscode-input-background, rgba(0, 0, 0, 0.2));
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-    border-radius: 4px; padding: 2px;
+    display: inline-flex; align-items: center; gap: 1px;
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
+    border-radius: 3px; padding: 1px;
     box-sizing: border-box; flex-shrink: 0;
   }
   .diff-mode-toggle button {
-    height: 20px; padding: 0 9px; font-size: 11px; font-weight: 500; border-radius: 3px;
+    height: 18px; padding: 0 7px; font-size: 11px; font-weight: 500; border-radius: 2px;
     background: transparent; color: var(--vscode-descriptionForeground); border: none; cursor: pointer;
-    line-height: 20px; transition: color 0.1s, background-color 0.1s;
+    line-height: 18px; transition: color 0.1s, background-color 0.1s;
   }
   .diff-mode-toggle button:hover {
     color: var(--vscode-foreground);
-    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.08));
   }
   .diff-mode-toggle button.active {
-    background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.25));
+    background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
     color: var(--vscode-foreground);
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   }
 
   /* The panel owns the scroll; each FileDiffView is `stacked` (flex:none, its own
@@ -450,55 +489,54 @@
   .diff-section { display: flex; flex-direction: column; }
   .section-header {
     display: flex; align-items: center;
-    background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.06));
-    border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
+    background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.04));
+    border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.12));
     position: sticky; top: 0; z-index: 3;
-    min-height: 28px;
+    min-height: 25px;
   }
   .section-toggle {
     flex: 1; display: flex; align-items: center; gap: 6px;
-    padding: 3px 12px; border: none; cursor: pointer; text-align: left;
+    padding: 2px 10px; border: none; cursor: pointer; text-align: left;
     background: transparent;
     color: var(--vscode-foreground); font-family: var(--vscode-font-family);
   }
   .section-toggle:hover {
-    background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06));
+    background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.04));
   }
   .section-open-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px; margin-right: 8px;
+    width: 22px; height: 22px; margin-right: 6px;
     border: none; border-radius: 3px; cursor: pointer; background: transparent;
     color: var(--vscode-descriptionForeground);
     transition: background-color 0.1s, color 0.1s;
   }
   .section-open-btn:hover {
-    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.12));
     color: var(--vscode-foreground);
   }
   .side-badge {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 4px;
-    background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
-    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    font-size: 11px; font-weight: 600; padding: 0 4px; border-radius: 2px;
+    background: transparent;
   }
   /* SNIPCODE-HOOK start: D6/X2 badge icon + status letter + stats, tinted per side */
   .side-badge .codicon { font-size: 11px; }
-  /* Distinct tint per side (on top of the shared icon) so Staged/Unstaged
-     don't read as the same badge at a glance. */
-  .side-badge.staged { background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, var(--vscode-badge-background)); }
-  .side-badge.unstaged { background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #63b0f4) 25%, var(--vscode-badge-background)); }
+  .side-badge.staged { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); }
+  .side-badge.unstaged { color: var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff); }
   .side-status {
     font-weight: 700;
-    opacity: 0.95;
+    opacity: 0.85;
+    font-size: 10px;
   }
   .side-stats {
-    display: inline-flex; gap: 6px; margin-left: 2px; padding: 1px 6px;
-    font-size: 11px; font-weight: 700; border-radius: 3px;
-    background: var(--vscode-editor-background, transparent);
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    display: inline-flex; gap: 4px; margin-left: 4px; padding: 0;
+    font-size: 11px; font-weight: 600;
+    background: transparent;
+    border: none;
+    font-variant-numeric: tabular-nums;
   }
-  .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); }
-  .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); opacity: 0.9; }
+  .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); opacity: 0.9; }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 

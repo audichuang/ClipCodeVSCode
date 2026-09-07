@@ -1,0 +1,11 @@
+{
+  "discoveredRepos": 25,
+  "checked": 24,
+  "changed": [],
+  "notCompared": [
+    {
+      "repo": "/Users/audi/GoogleDrive/cat/\u524d\u5f8c\u7aef\u898f\u683c\u66f8\u751f\u6210\u5de5\u4f5c\u6d41\u7a0b",
+      "reason": "baseline has no HEAD"
+    }
+  ]
+}

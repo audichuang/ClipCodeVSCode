@@ -60,7 +60,24 @@ export function makeVscodeModule(
       workspaceFolders,
       onDidChangeConfiguration: () => ({ dispose() {} }),
       fs: { writeFile: vi.fn(async () => {}) },
+      openTextDocument: vi.fn(async (_uri: unknown) => ({ lineCount: 100 })),
       registerTextDocumentContentProvider: vi.fn(() => ({ dispose() {} })),
+    },
+    Range: class Range {
+      readonly start: { line: number; character: number };
+      readonly end: { line: number; character: number };
+      constructor(a: any, b: any, c?: any, d?: any) {
+        if (typeof a === 'number' && typeof b === 'number' && typeof c === 'number' && typeof d === 'number') {
+          this.start = { line: a, character: b };
+          this.end = { line: c, character: d };
+        } else {
+          this.start = a;
+          this.end = b;
+        }
+      }
+    },
+    Position: class Position {
+      constructor(public line: number, public character: number) {}
     },
     commands: { executeCommand: vi.fn() },
     l10n: { t: (k: string) => k },
@@ -68,7 +85,12 @@ export function makeVscodeModule(
     Uri: {
       joinPath: () => ({}),
       file: (p: string) => ({ fsPath: p, with(o: object) { return { ...this, ...o }; } }),
-      parse: () => ({ with: () => ({}) }),
+      parse: (s: string) => {
+        const qIdx = s.indexOf('?');
+        const query = qIdx !== -1 ? decodeURIComponent(s.slice(qIdx + 1)) : '';
+        const scheme = s.slice(0, s.indexOf(':'));
+        return { scheme, query, with(o: object) { return { ...this, ...o }; } };
+      },
     },
     ViewColumn: { One: 1 },
   };
