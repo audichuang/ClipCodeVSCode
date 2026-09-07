@@ -3,6 +3,12 @@ import type { Range } from './word-diff';
 
 let highlighter: HighlighterCore | null = null;
 let loadingPromise: Promise<HighlighterCore> | null = null;
+/* SNIPCODE-HOOK start: perf — bounded engine-startup retry */
+let warnedEngineFailure = false;
+let engineFailures = 0;
+/** Transient failures get a couple of retries; permanent ones must not. */
+const MAX_ENGINE_ATTEMPTS = 2;
+/* SNIPCODE-HOOK end */
 
 const LANG_MAP: Record<string, string> = {
   js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
@@ -78,9 +84,24 @@ export async function getHighlighter(): Promise<HighlighterCore> {
 
   loadingPromise = (async () => {
     const { createHighlighterCore } = await import('shiki');
-    const { createJavaScriptRegexEngine } = await import('shiki/engine/javascript');
+    /* SNIPCODE-HOOK start: perf — oniguruma WASM instead of the pure-JS regex
+       engine. Measured on this repo's own git-service.ts with the real per-line
+       call path: 50 rendered lines 340ms -> 94ms, 3000 lines 1315ms -> 537ms.
+       Engine construction goes 3ms -> 29ms, paid once per webview and dwarfed
+       by the first file's tokenising either way.
 
-    const engine = createJavaScriptRegexEngine();
+       `shiki/wasm` re-exports @shikijs/engine-oniguruma/wasm-inlined, so the
+       466KB binary is embedded in the bundle: no runtime fetch, and therefore
+       no `connect-src` relaxation. Compiling it DOES need `wasm-unsafe-eval`
+       in the host CSP — added in MainPanel and DiffPanel only, the two panels
+       that load a shiki-carrying bundle (workbench.js has no shiki at all, so
+       the commit box and the recent-commits sidebar stay strict). Without that
+       directive `createOnigurumaEngine` rejects and getHighlighter() throws,
+       which the callers already treat as "render unhighlighted". */
+    const { createOnigurumaEngine } = await import('shiki/engine/oniguruma');
+
+    const engine = await createOnigurumaEngine(import('shiki/wasm'));
+    /* SNIPCODE-HOOK end */
 
     // Both VS Code themes are loaded so we can match the editor's light/dark
     // appearance (see activeShikiTheme). Grammars start empty and load lazily.
@@ -95,7 +116,44 @@ export async function getHighlighter(): Promise<HighlighterCore> {
 
     highlighter = h;
     return h;
-  })();
+  })()
+    /* SNIPCODE-HOOK start: perf — engine startup can fail now that it compiles
+       WebAssembly, and the two obvious handling choices are both wrong:
+
+       - Caching the rejection in `loadingPromise` forever means ONE failure
+         disables highlighting for the life of the webview, even when the cause
+         was a transient first-load hiccup.
+       - Clearing it unconditionally means a PERMANENT failure retries on every
+         single diff open — one doomed WASM compile per click, forever.
+
+       So the failure KIND decides. A host CSP without 'wasm-unsafe-eval'
+       refuses compilation as a `WebAssembly.CompileError` (verified in headless
+       Chrome: `CompileError: ... violates the following Content Security policy
+       directive`), which is also the shape of corrupt wasm bytes — no retry can
+       ever help either, so that rejection stays cached. Anything else gets a
+       bounded retry and is then cached too.
+
+       The warning is the only breadcrumb in any case: every caller treats a
+       throw as "render this diff unhighlighted" and shows nothing. */
+    .catch((error: unknown) => {
+      engineFailures += 1;
+      const permanent =
+        typeof WebAssembly !== 'undefined' &&
+        typeof WebAssembly.CompileError === 'function' &&
+        error instanceof WebAssembly.CompileError;
+      if (!permanent && engineFailures < MAX_ENGINE_ATTEMPTS) {
+        loadingPromise = null; // let the next diff open try again
+      }
+      if (!warnedEngineFailure) {
+        warnedEngineFailure = true;
+        console.warn(
+          `[snipcode] syntax highlighting is off — the Shiki engine failed to start${permanent ? ' (not retryable)' : ''}:`,
+          error,
+        );
+      }
+      throw error;
+    });
+    /* SNIPCODE-HOOK end */
 
   return loadingPromise;
 }

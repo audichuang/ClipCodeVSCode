@@ -530,6 +530,17 @@
                 : highlightLineSync(h, flat[j].content, lang, theme),
             );
           }
+          /* SNIPCODE-HOOK start: perf — publish each chunk instead of only the
+             whole pass. `highlightedLines` used to be assigned once, after the
+             final chunk, so the yields kept input alive but the diff stayed
+             PLAIN until every rendered line was tokenised: measured 341ms for a
+             50-line diff and 1315ms at the MAX_RENDER_LINES cap on the old JS
+             regex engine. Publishing per chunk lights the first screen after
+             one chunk (~250 lines) while the tail fills in behind it. A fresh
+             Map per publish is required — a plain Map mutated in place is not
+             reactive in Svelte 5, only the reassignment is. */
+          highlightedLines = new Map(newMap);
+          /* SNIPCODE-HOOK end */
           /* SNIPCODE-HOOK start: Batch C yield to paint/input between chunks. */
           // Defer to the next task so user interaction (scroll, switch file)
           // can interrupt mid-highlight without paying for the whole pass.

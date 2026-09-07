@@ -96,7 +96,13 @@ describe('FileDiffView lifecycle', () => {
     expect(view.container.querySelector('.line-content')?.textContent).toBe('new source');
   });
 
-  it('yields to the next task before highlighting a second chunk', async () => {
+  // Pins BOTH halves of the chunking contract at one task boundary: the first
+  // chunk is already on screen, and the 251st line is not — so the pass really
+  // yielded rather than running straight through. This used to assert 0, which
+  // pinned the old "assign highlightedLines once, after the final chunk"
+  // behaviour: the yields kept input alive but the diff stayed plain for the
+  // whole pass (measured 341ms for 50 lines, 1315ms at MAX_RENDER_LINES).
+  it('publishes the first chunk, then yields before highlighting the second', async () => {
     const view = render(FileDiffView, { diff: manyLineDiff(251) });
 
     const highlightedAtNextTask = await new Promise<number>(resolve => {
@@ -105,7 +111,7 @@ describe('FileDiffView lifecycle', () => {
       }, 0);
     });
 
-    expect(highlightedAtNextTask).toBe(0);
+    expect(highlightedAtNextTask).toBe(250);
   });
 
   /* SNIPCODE-HOOK start: D7 incremental highlight cache */
