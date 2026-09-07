@@ -473,12 +473,12 @@
       {
         "view": "snipcode.changes",
         "contents": "%viewsWelcome.1.contents%",
-        "when": "snipcode.changes.hasRepos"
+        "when": "snipcode.changes.loaded && snipcode.changes.hasRepos"
       },
       {
         "view": "snipcode.changes",
         "contents": "%viewsWelcome.2.contents%",
-        "when": "!snipcode.changes.hasRepos"
+        "when": "snipcode.changes.loaded && !snipcode.changes.hasRepos"
       }
     ],
     "menus": {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execSync } from 'child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
@@ -293,5 +293,36 @@ describe('RepoDiscoveryService', () => {
       expect(second).not.toBe(first);
       expect(second.length).toBe(first.length);
     });
+
+    /* SNIPCODE-HOOK start: concurrent identical calls share one walk */
+    // activate() fires three identical discoveries in one tick; before the
+    // in-flight share each ran the full readdir + spawn walk (3× the cost).
+    it('concurrent identical calls share one in-flight walk and every onProgress still fires', async () => {
+      initRepo(root);
+      const exec = vi.spyOn(RepoDiscoveryService as unknown as { execGit: (...args: unknown[]) => Promise<string> }, 'execGit');
+      const progress: number[] = [];
+      const [a, b, c] = await Promise.all([
+        RepoDiscoveryService.discoverRepos([root], () => progress.push(1)),
+        RepoDiscoveryService.discoverRepos([root], () => progress.push(2)),
+        RepoDiscoveryService.discoverRepos([root]),
+      ]);
+      expect(b).toBe(a);
+      expect(c).toBe(a);
+      expect(a.map(r => r.path)).toEqual([root]);
+      const subcommands = exec.mock.calls.map(call => (call[0] as string[])[0]);
+      expect(subcommands.filter(sub => sub === 'rev-parse')).toHaveLength(1);
+      expect(subcommands.filter(sub => sub === 'submodule')).toHaveLength(1);
+      expect(progress.sort()).toEqual([1, 2]);
+      exec.mockRestore();
+    });
+
+    it('clearCache during a walk makes the next call start its own walk instead of joining the stale one', async () => {
+      initRepo(root);
+      const first = RepoDiscoveryService.discoverRepos([root]);
+      RepoDiscoveryService.clearCache();
+      const second = RepoDiscoveryService.discoverRepos([root]);
+      expect(await second).not.toBe(await first);
+    });
+    /* SNIPCODE-HOOK end */
   });
 });
