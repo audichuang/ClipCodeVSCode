@@ -1279,7 +1279,13 @@ describe('CommitDetails — large diff render cap', () => {
   it('caps rendered lines and shows the banner when over the cap', async () => {
     const { container } = await selectFileWithDiff(bigDiff('huge.ts', MAX_RENDER_LINES + 500));
     await waitFor(() => container.querySelector('.diff-truncated-banner'));
-    expect(container.querySelectorAll('.diff-content .diff-line').length).toBe(MAX_RENDER_LINES);
+    /* SNIPCODE-HOOK start: perf — rows reveal in steps, so wait for the cap.
+       The default 1s is not enough here: at the cap this is 15 reveal steps,
+       each its own task, and each tokenises its 200 lines before publishing. */
+    await waitFor(() => {
+      expect(container.querySelectorAll('.diff-content .diff-line').length).toBe(MAX_RENDER_LINES);
+    }, { timeout: 15000 });
+    /* SNIPCODE-HOOK end */
   });
 
   it('renders every line after clicking "show full diff"', async () => {

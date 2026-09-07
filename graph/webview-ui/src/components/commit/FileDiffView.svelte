@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { DiffData } from '../../lib/types';
-  import { onMount } from 'svelte';
+  /* SNIPCODE-HOOK start: perf — progressive reveal (untrack: the paint pass writes paintBudget) */
+  import { onMount, untrack } from 'svelte';
+  /* SNIPCODE-HOOK end */
   import { t } from '../../lib/i18n/index.svelte';
   import { detectLanguage, highlightLineSync, highlightLineWithRanges, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
   /* SNIPCODE-HOOK (B-2d): intraline word-level diff. */
@@ -312,6 +314,14 @@
     showFullDiff = false;
     lineSel = null;
     /* SNIPCODE-HOOK end */
+    /* SNIPCODE-HOOK start: perf — the progressive reveal restarts for a NEW FILE
+       only. A same-file re-push (every stage/unstage) keeps its rows: collapsing
+       the budget there would blank the diff for a frame — the flash D7 removed. */
+    if (diff && diff.file !== paintFile) {
+      paintFile = diff.file;
+      paintBudget = firstStep();
+    }
+    /* SNIPCODE-HOOK end */
   });
 
   /* SNIPCODE-HOOK start: PR tab inline diff (Task D1) — `internalMode` is the
@@ -354,6 +364,48 @@
     return out;
   });
 
+  /* SNIPCODE-HOOK start: perf — reveal rows in steps, first screen first.
+     Measured on the production bundle (480-line java diff, 40 hunks, headless
+     Chrome, real time): opening a file was ONE ~130ms task — Svelte building
+     all 480 rows (48ms) and then, still before the browser got a frame, the
+     grammar load plus the first 250-line highlight chunk (~65ms). The first
+     paint arrived at ~140ms, already coloured: nothing was slow per se, the
+     task was shaped wrong. Now every hunk CONTAINER still renders in the first
+     flush (Diff.svelte counts `.diff-hunk` right after the DOM patch for its
+     N/M hunk counter, so it must never see a partial list), but only the first
+     `firstStep()` rows are built and tokenised before the first frame; the tail
+     fills in STEP rows per task behind it, each step highlighted BEFORE it is
+     revealed so a row mounts coloured exactly once. Reveal order is document
+     order — the same order the highlight pass runs — so the two share the one
+     loop in the paint pass below. `renderHunks` keeps meaning "what this diff
+     shows" (truncation, isHunkComplete, block arrows); `paintHunks` is only
+     "what is on screen right now". */
+  // .diff-line is min-height 20px; this only sizes the first step, never layout.
+  const ROW_PX = 20;
+  const STEP = 200;
+  // One viewport of rows plus slack, so the first frame is a full screen on a
+  // tall monitor too. Clamped: a hidden/zero-height webview must still reveal.
+  function firstStep(): number {
+    const rows = typeof window !== 'undefined' ? Math.ceil((window.innerHeight || 0) / ROW_PX) : 0;
+    return Math.min(240, Math.max(60, rows + 20));
+  }
+  let paintBudget = $state(firstStep());
+  // Deliberately the INITIAL file (untrack silences state_referenced_locally):
+  // the per-diff reset effect above compares against it to spot a file change.
+  let paintFile = untrack(() => diff?.file);
+  const paintHunks = $derived.by(() => {
+    let left = paintBudget;
+    return renderHunks.map(hunk => {
+      // Fully revealed → same object, so Svelte sees no change for that hunk.
+      if (left >= hunk.lines.length) { left -= hunk.lines.length; return hunk; }
+      // slice(0, n) keeps line indices, so lineSel / highlight keys line up.
+      const shown = { ...hunk, lines: left > 0 ? hunk.lines.slice(0, left) : [] };
+      left = 0;
+      return shown;
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: Batch C align replacement rows side-by-side. */
   type DiffLine = DiffData['hunks'][number]['lines'][number];
   interface SbsLine { line: DiffLine; index: number }
@@ -391,7 +443,9 @@
     return rows;
   }
 
-  const sbsRows = $derived(renderHunks.map(hunk => pairSideBySideRows(hunk.lines)));
+  /* SNIPCODE-HOOK start: perf — rows follow the reveal, not the full render set */
+  const sbsRows = $derived(paintHunks.map(hunk => pairSideBySideRows(hunk.lines)));
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: contiguous change blocks per hunk. Each run of adjacent
@@ -463,101 +517,99 @@
     return () => window.removeEventListener('keydown', onKeydown);
   });
 
+  /* SNIPCODE-HOOK start: perf — the paint pass: one loop that highlights AND
+     reveals, first screen first (see paintHunks above for the measurements).
+     Per step: tokenise the next lines, then publish `highlightedLines` and
+     raise `paintBudget` in the same synchronous stretch, so Svelte mounts the
+     new rows already coloured in one flush — no plain→coloured double render,
+     and no plain flash. Step 1 covers exactly the rows the first flush mounted
+     plain (firstStep()); with a warm engine that is all microtasks, so the
+     very first frame is coloured. Later steps yield a task between them so
+     paint and input run while the tail fills in.
+     Restructured from the Batch C / D7 chunked pass: the D7 content-addressed
+     cache is unchanged (a same-file re-push reuses every untouched line, no
+     flash), but `lastHighlightTheme` is now recorded on the FIRST publish —
+     a pass cancelled mid-way (fast file switch, theme flip) used to throw the
+     whole cache away on restart because it was only set after the last chunk.
+     The no-grammar / CSP-refused / over-cap paths used to return early; they
+     must still run the loop, or the tail of the diff never reveals. */
   $effect(() => {
     if (!diff || diff.isBinary) return;
-    const lang = detectLanguage(diff.file);
-    if (!lang) {
-      highlightedLines = new Map();
-      return;
-    }
-    const totalLines = diff.hunks.reduce((s, h) => s + h.lines.length, 0);
-    if (totalLines > MAX_HIGHLIGHT_LINES) {
-      highlightedLines = new Map();
-      return;
-    }
     const target = diff;
-    // Only highlight what's actually rendered (renderHunks is capped at
-    // MAX_RENDER_LINES); the tail beyond that was being tokenized but never
-    // shown. Toggling showFullDiff changes renderHunks and re-runs this effect,
-    // so the revealed lines get highlighted then.
+    const lang = detectLanguage(diff.file);
+    const totalLines = diff.hunks.reduce((s, h) => s + h.lines.length, 0);
+    const wantHighlight = !!lang && totalLines <= MAX_HIGHLIGHT_LINES;
+    // Only what's actually rendered (renderHunks is capped at MAX_RENDER_LINES).
+    // Toggling showFullDiff changes renderHunks and re-runs this effect, so the
+    // newly rendered tail is revealed and highlighted then — in steps too.
     const visibleHunks = renderHunks;
     const theme = shikiTheme; // capture so a theme switch invalidates the pass
-    /* SNIPCODE-HOOK start: Batch C task-yielded highlighting. */
-    // Yield to the event loop between chunks so a multi-thousand-line diff
-    // doesn't freeze the panel. Each batch processes CHUNK_SIZE lines then
-    // hands control back via a task so paint and input can run.
-    /* SNIPCODE-HOOK end */
-    const CHUNK_SIZE = 250;
     let cancelled = false;
-    getHighlighter()
-      .then(async h => {
-        if (cancelled || diff !== target) return;
-        // Grammars load on demand; bail out to plain escaping if this language
-        // has no Shiki grammar (highlightLineSync would fall back anyway, but
-        // skipping the loop avoids a pointless full pass over the diff).
-        const ready = await ensureLanguage(h, lang);
-        if (cancelled || diff !== target) return;
-        if (!ready) { highlightedLines = new Map(); return; }
-        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
-        // Reuse cache entries whose content-addressed key is unchanged (same
-        // file+hunkStart+lineIndex+content — see highlightKey) so an unrelated
-        // hunk's stage/unstage doesn't force every OTHER line to re-highlight
-        // (and doesn't flash plain text for them either, since D7 also stopped
-        // eagerly clearing highlightedLines on diff change).
-        const reusable = theme === lastHighlightTheme ? highlightedLines : undefined;
-        const newMap = new Map<string, string>();
-        const flat: Array<{ key: string; content: string }> = [];
-        for (const hunk of visibleHunks) {
-          for (let i = 0; i < hunk.lines.length; i++) {
-            /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
-            const key = highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content);
+    const stale = () => cancelled || diff !== target;
+    const yieldTask = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+    (async () => {
+      let h: Awaited<ReturnType<typeof getHighlighter>> | null = null;
+      let ready = false;
+      if (wantHighlight) {
+        // Grammars load on demand; a language without a Shiki grammar (or an
+        // engine the host CSP refused) reveals plain text instead.
+        try {
+          h = await getHighlighter();
+          if (stale()) return;
+          ready = await ensureLanguage(h, lang);
+        } catch {
+          ready = false;
+        }
+        if (stale()) return;
+      }
+      // D7: reuse cache entries whose content-addressed key is unchanged (same
+      // file+hunkStart+lineIndex+content — see highlightKey) so an unrelated
+      // hunk's stage/unstage doesn't re-highlight — or flash — every OTHER line.
+      const reusable = ready && theme === lastHighlightTheme ? highlightedLines : undefined;
+      const newMap = new Map<string, string>();
+      const flat: Array<{ key: string; content: string }> = [];
+      for (const hunk of visibleHunks) {
+        for (let i = 0; i < hunk.lines.length; i++) {
+          flat.push({ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content });
+        }
+      }
+      let pos = 0;
+      let first = true;
+      do {
+        const end = Math.min(flat.length, pos + (first ? firstStep() : STEP));
+        if (ready && h) {
+          for (let j = pos; j < end; j++) {
+            const { key, content } = flat[j];
             const cached = reusable?.get(key);
             if (cached !== undefined) { newMap.set(key, cached); continue; }
-            flat.push({ key, content: hunk.lines[i].content });
-            /* SNIPCODE-HOOK end */
-          }
-        }
-        /* SNIPCODE-HOOK end */
-        for (let i = 0; i < flat.length; i += CHUNK_SIZE) {
-          if (cancelled || diff !== target) return;
-          const end = Math.min(i + CHUNK_SIZE, flat.length);
-          for (let j = i; j < end; j++) {
-            const wd = wordDiffByKey.get(flat[j].key);
+            const wd = wordDiffByKey.get(key);
             newMap.set(
-              flat[j].key,
+              key,
               wd
-                ? highlightLineWithRanges(h, flat[j].content, lang, wd.ranges, wd.kind, theme)
-                : highlightLineSync(h, flat[j].content, lang, theme),
+                ? highlightLineWithRanges(h, content, lang, wd.ranges, wd.kind, theme)
+                : highlightLineSync(h, content, lang, theme),
             );
           }
-          /* SNIPCODE-HOOK start: perf — publish each chunk instead of only the
-             whole pass. `highlightedLines` used to be assigned once, after the
-             final chunk, so the yields kept input alive but the diff stayed
-             PLAIN until every rendered line was tokenised: measured 341ms for a
-             50-line diff and 1315ms at the MAX_RENDER_LINES cap on the old JS
-             regex engine. Publishing per chunk lights the first screen after
-             one chunk (~250 lines) while the tail fills in behind it. A fresh
-             Map per publish is required — a plain Map mutated in place is not
-             reactive in Svelte 5, only the reassignment is. */
+          // A fresh Map per publish is required — a plain Map mutated in place
+          // is not reactive in Svelte 5, only the reassignment is.
           highlightedLines = new Map(newMap);
-          /* SNIPCODE-HOOK end */
-          /* SNIPCODE-HOOK start: Batch C yield to paint/input between chunks. */
-          // Defer to the next task so user interaction (scroll, switch file)
-          // can interrupt mid-highlight without paying for the whole pass.
-          if (end < flat.length) {
-            await new Promise<void>(resolve => setTimeout(resolve, 0));
-          }
-          /* SNIPCODE-HOOK end */
+          lastHighlightTheme = theme;
+        } else if (first) {
+          highlightedLines = new Map();
         }
-        if (cancelled || diff !== target) return;
-        highlightedLines = newMap;
-        /* SNIPCODE-HOOK start: D7 incremental highlight cache */
-        lastHighlightTheme = theme;
-        /* SNIPCODE-HOOK end */
-      })
-      .catch(() => {});
+        // Never shrink: a same-file re-push already shows every row.
+        if (end > untrack(() => paintBudget)) paintBudget = end;
+        pos = end;
+        first = false;
+        if (pos < flat.length) {
+          await yieldTask();
+          if (stale()) return;
+        }
+      } while (pos < flat.length);
+    })().catch(() => {});
     return () => { cancelled = true; };
   });
+  /* SNIPCODE-HOOK end */
 
   function getHighlighted(hunkStart: number, lineIdx: number, content: string): string {
     /* SNIPCODE-HOOK start: Batch C file/content highlight identity. */
@@ -669,7 +721,8 @@
     <!-- SNIPCODE-HOOK end -->
     {:else if mode === 'inline'}
       <div class="diff-content">
-        {#each renderHunks as hunk, hunkIdx}
+        <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
+        {#each paintHunks as hunk, hunkIdx}
           <div class="diff-hunk" class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
             <div class="diff-hunk-header">
               <div class="hunk-header-inner">
@@ -742,7 +795,8 @@
       <div class="diff-sbs">
         <div class="sbs-pane sbs-left" bind:this={sbsLeftEl} onscroll={handleSbsScroll}>
           <div class="sbs-inner">
-            {#each renderHunks as hunk, hunkIdx}
+            <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
+            {#each paintHunks as hunk, hunkIdx}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
@@ -802,7 +856,8 @@
         </div>
         <div class="sbs-pane sbs-right" bind:this={sbsRightEl} onscroll={handleSbsScroll}>
           <div class="sbs-inner">
-            {#each renderHunks as hunk, hunkIdx}
+            <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
+            {#each paintHunks as hunk, hunkIdx}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
