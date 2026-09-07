@@ -7,6 +7,9 @@ const highlighterState = vi.hoisted(() => ({
   calls: 0,
   delayFromCall: Number.POSITIVE_INFINITY,
   pending: [] as Array<(value: unknown) => void>,
+  /* SNIPCODE-HOOK start: perf — progressive reveal: '' = "no grammar" path */
+  lang: 'typescript',
+  /* SNIPCODE-HOOK end */
 }));
 
 vi.mock('../../../lib/utils/highlighter', () => {
@@ -19,7 +22,7 @@ vi.mock('../../../lib/utils/highlighter', () => {
     `<span data-highlighted="true">${escapeHtml(content)}</span>`;
   return {
     activeShikiTheme: () => 'dark-plus',
-    detectLanguage: () => 'typescript',
+    detectLanguage: () => highlighterState.lang,
     ensureLanguage: () => Promise.resolve(true),
     escapeHtml,
     getHighlighter: () => {
@@ -71,10 +74,35 @@ function manyLineDiff(count: number): DiffData {
   };
 }
 
+/* SNIPCODE-HOOK start: perf — progressive reveal (first screen first). */
+// `count` lines spread over hunks of 10, so the reveal crosses hunk boundaries.
+function manyHunkDiff(count: number): DiffData {
+  const hunks: DiffData['hunks'] = [];
+  for (let start = 0; start < count; start += 10) {
+    const n = Math.min(10, count - start);
+    hunks.push({
+      header: `@@ -${start + 1},${n} +${start + 1},${n} @@`,
+      oldStart: start + 1,
+      oldLines: n,
+      newStart: start + 1,
+      newLines: n,
+      lines: Array.from({ length: n }, (_, i) => ({
+        type: 'context' as const,
+        content: `const value${start + i} = ${start + i};`,
+        oldLineNumber: start + i + 1,
+        newLineNumber: start + i + 1,
+      })),
+    });
+  }
+  return { file: 'src/large.ts', isBinary: false, isImage: false, hunks };
+}
+/* SNIPCODE-HOOK end */
+
 beforeEach(() => {
   highlighterState.calls = 0;
   highlighterState.delayFromCall = Number.POSITIVE_INFINITY;
   highlighterState.pending.length = 0;
+  highlighterState.lang = 'typescript';
 });
 
 afterEach(() => {
@@ -96,23 +124,68 @@ describe('FileDiffView lifecycle', () => {
     expect(view.container.querySelector('.line-content')?.textContent).toBe('new source');
   });
 
-  // Pins BOTH halves of the chunking contract at one task boundary: the first
-  // chunk is already on screen, and the 251st line is not — so the pass really
-  // yielded rather than running straight through. This used to assert 0, which
-  // pinned the old "assign highlightedLines once, after the final chunk"
-  // behaviour: the yields kept input alive but the diff stayed plain for the
-  // whole pass (measured 341ms for 50 lines, 1315ms at MAX_RENDER_LINES).
-  it('publishes the first chunk, then yields before highlighting the second', async () => {
-    const view = render(FileDiffView, { diff: manyLineDiff(251) });
+  /* SNIPCODE-HOOK start: perf — progressive reveal (first screen first). */
+  // Pins the paint pass at its task boundaries. Synchronously after mount only
+  // the first step of rows exists (one viewport + slack, plain until the
+  // highlighter's microtasks land); every hunk CONTAINER is there from the
+  // start, because Diff.svelte counts `.diff-hunk` right after the DOM patch.
+  // Within the mount task (microtasks) the first step is coloured — and ONLY
+  // the first step exists: the pass yielded before revealing more. The next
+  // task reveals the second step, already coloured, and the tail follows.
+  // Asserts relationships, not the step constants: firstStep() is
+  // viewport-derived (happy-dom reports innerHeight 768 → 60 rows).
+  it('reveals a first screen of rows synchronously, then fills the rest in later tasks', async () => {
+    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    const rows = () => view.container.querySelectorAll('.diff-line').length;
+    const lit = () => view.container.querySelectorAll('[data-highlighted]').length;
+    const task = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-    const highlightedAtNextTask = await new Promise<number>(resolve => {
-      setTimeout(() => {
-        resolve(view.container.querySelectorAll('[data-highlighted]').length);
-      }, 0);
+    const firstStep = rows();
+    expect(firstStep).toBeGreaterThan(0);
+    expect(firstStep).toBeLessThan(500);
+    expect(view.container.querySelectorAll('.diff-hunk').length).toBe(50);
+
+    // This timer was queued before the pass's own yield, so it observes the
+    // state at the end of the mount task: step 1 coloured, nothing more shown.
+    await task();
+    expect(lit()).toBe(firstStep);
+    expect(rows()).toBe(firstStep);
+
+    await task();
+    expect(rows()).toBeGreaterThan(firstStep);
+    expect(rows()).toBeLessThan(500);
+    expect(lit()).toBe(rows());
+
+    await waitFor(() => {
+      expect(rows()).toBe(500);
+      expect(lit()).toBe(500);
     });
-
-    expect(highlightedAtNextTask).toBe(250);
   });
+
+  // A grammar-less file must still reveal its whole tail — the pass used to
+  // return early there, which was harmless when nothing waited on it.
+  it('reveals every row of a file it cannot highlight', async () => {
+    highlighterState.lang = '';
+    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('.diff-line').length).toBe(500);
+    });
+    expect(view.container.querySelectorAll('[data-highlighted]').length).toBe(0);
+  });
+
+  // A same-file re-push (stage/unstage) must not collapse the reveal back to
+  // the first step: that would blank the rows below the fold for a frame.
+  it('keeps every revealed row across a same-file re-push', async () => {
+    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    await waitFor(() => expect(view.container.querySelectorAll('.diff-line').length).toBe(500));
+
+    const next = manyHunkDiff(500);
+    next.hunks[0].lines[0] = { ...next.hunks[0].lines[0], content: 'changed' };
+    await view.rerender({ diff: next });
+
+    expect(view.container.querySelectorAll('.diff-line').length).toBe(500);
+  });
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: D7 incremental highlight cache */
   it('does not blank an unchanged line back to plain text when the diff prop changes (no flash)', async () => {
