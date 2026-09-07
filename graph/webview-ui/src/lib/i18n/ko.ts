@@ -72,6 +72,17 @@ export const ko: Record<string, string> = {
   'workbench.amend': 'Amend',
   'workbench.amendTitle': '이전 커밋 수정 (단일 저장소만 해당; 메시지가 비어 있으면 이전 메시지를 먼저 가져옵니다)',
   'workbench.amendPushedWarning': '이 커밋은 이미 원격에 push되었습니다. amend하면 이미 push된 히스토리가 재작성됩니다.',
+  /* SNIPCODE-HOOK start: compact sidebar commit graph */
+  'recent.repoPicker': '저장소',
+  'recent.refresh': '최근 커밋 새로 고침',
+  'recent.openFullGraph': '전체 Git Graph 열기',
+  'recent.loading': '최근 커밋 로드 중…',
+  'recent.noCommits': 'HEAD에 커밋이 없습니다',
+  'recent.headScope': 'HEAD 기록',
+  'recent.headMarker': 'HEAD',
+  'recent.aheadBehind': '↑{ahead} ↓{behind}',
+  'recent.changes': '스테이징 {staged} · 미스테이징 {unstaged} · 충돌 {conflicts}',
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   // Create branch modal
