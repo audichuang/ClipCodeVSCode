@@ -5,6 +5,13 @@
   import { getVsCodeApi } from '../lib/vscode-api';
   import { i18n, t } from '../lib/i18n/index.svelte';
   import { DEFAULT_GRAPH_COLORS, resolveGraphColor } from '../lib/utils/graph-color';
+  import { formatCommitDate, formatRelativeTime } from '../lib/utils/format-date';
+  import { statusColor, statusLabel } from '../lib/utils/file-status';
+  import { computeNavigationTarget, computeScrollTop } from '../lib/graph-navigation';
+  // components/common only — it imports svelte + lib/actions/tooltip and nothing
+  // else, so it cannot drag Shiki into the workbench bundle (which has no
+  // 'wasm-unsafe-eval' CSP and would fail silently).
+  import ContextMenu from '../components/common/ContextMenu.svelte';
 
   // Mirrors lib/types.ts Ref: a remote branch keeps the remote in its own
   // field, so `origin/develop` arrives as { name: 'develop', remote: 'origin' }
@@ -13,7 +20,17 @@
   interface CommitRef { type: string; name: string; remote?: string; }
   const refName = (ref: CommitRef) =>
     ref.type === 'remote-branch' && ref.remote ? `${ref.remote}/${ref.name}` : ref.name;
-  interface Commit { hash: string; abbreviatedHash: string; subject: string; refs: CommitRef[]; }
+  // Mirrors git/types.ts Commit for the fields this view renders. `log()`
+  // already ships author/body on every row, so the details panel needs no
+  // extra round-trip for the message — only for the file list.
+  interface Person { name?: string; email?: string; date?: string; }
+  interface Commit {
+    hash: string; abbreviatedHash: string; subject: string; refs: CommitRef[];
+    // All already on the host's payload (`log()` formats %P, %b, %cn/%ce/%cI) —
+    // they were simply never declared here, so the panel could not show them.
+    body?: string; author?: Person; committer?: Person; parents?: string[];
+  }
+  interface CommitFile { path: string; status: string; oldPath?: string; }
   interface Point { x: number; y: number; }
   interface GraphPath { points: Point[]; color: number; colorOverride?: string; }
   interface GraphLink { start: Point; control: Point; end: Point; color: number; colorOverride?: string; }
@@ -28,6 +45,22 @@
   const vscode = getVsCodeApi();
   let recent = $state<State | null>(null);
   let loading = $state(true);
+  // Selection is keyed by hash, not by index: the 180ms-debounced refresh
+  // replaces `recent` wholesale, and an index would silently point at another
+  // commit as soon as a new one lands on HEAD.
+  let selectedHash = $state<string | null>(null);
+  let files = $state<CommitFile[] | null>(null);
+  let filesError = $state<string | null>(null);
+  // Plain locals, not $state: only the retry arithmetic reads them.
+  let filesRequestedAt = 0;
+  // A dropped reply is only recoverable by asking again on the next state, but
+  // state arrives on every 180ms-debounced tree change — without this floor a
+  // slow merge query would be re-issued faster than it can finish.
+  const FILES_RETRY_MS = 1000;
+  const selectedCommit = $derived(recent?.commits.find(commit => commit.hash === selectedHash));
+  interface MenuEntry { label: string; icon?: string; action: () => void; separator?: boolean; }
+  let menu = $state<{ x: number; y: number; items: MenuEntry[] } | null>(null);
+  let listEl = $state<HTMLDivElement | undefined>();
 
   // Geometry copied from VS Code's own Source Control Graph so this view reads as
   // a native SCM view rather than a shrunken copy of our full-page graph:
@@ -132,20 +165,217 @@
     return out;
   }
 
-  // Clicking a row opens the full graph rather than selecting that exact commit:
-  // the graph webview has no host-driven selection entry point today (App.svelte
-  // only ever calls `uiStore.selectCommit(null)`), so hash-precise reveal would
-  // need a new message plus boot-handshake replay in MainPanel. Deliberately
-  // deferred — the coarse jump is still the "I want the real graph" gesture.
   function isHead(commit: Commit): boolean { return commit.refs.some(ref => ref.type === 'head'); }
   function request(type: string, payload?: unknown): void { vscode.postMessage({ type, payload }); }
 
+  // Clicking a row selects it and loads its file list into the panel below —
+  // it does NOT open the full graph. Only the explicit Open Full Graph title
+  // action replaces the editor (graph/AGENTS.md). Clicking the selected row
+  // again collapses the panel, giving the list all its height back.
+  // Every commit-scoped request names the repo the row came from. The host
+  // drops it when that is no longer the active repo — the active repo switches
+  // synchronously while this view still shows the old one, and two repos
+  // sharing a commit would otherwise open the wrong repository's file.
+  function requestFiles(hash: string): void {
+    filesRequestedAt = Date.now();
+    request('recentCommitsSelectCommit', { hash, repoPath: recent?.repoPath });
+  }
+
+  function openCommit(commit: Commit): void {
+    if (selectedHash === commit.hash) return;
+    selectedHash = commit.hash;
+    files = null;
+    filesError = null;
+    requestFiles(commit.hash);
+  }
+
+  // Clicking the selected row again collapses the panel; keyboard stepping must
+  // NOT toggle, so it goes through openCommit directly.
+  function selectCommit(commit: Commit): void {
+    if (selectedHash === commit.hash) { closeDetails(); return; }
+    openCommit(commit);
+  }
+
+  function closeDetails(): void {
+    selectedHash = null;
+    files = null;
+    filesError = null;
+  }
+
+  function openFile(file: CommitFile): void {
+    if (!selectedHash) return;
+    request('recentCommitsOpenFile', {
+      hash: selectedHash, path: file.path, oldPath: file.oldPath, repoPath: recent?.repoPath,
+    });
+  }
+
+  function onRowKey(event: KeyboardEvent, commit: Commit): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    selectCommit(commit);
+  }
+
+  /**
+   * ↑/↓ step the selection, Ctrl/Cmd follows the first parent / newest child —
+   * the same `graph-navigation` helpers the full graph uses, so the two
+   * surfaces move through history identically. Scanning a list of commits is
+   * this view's main job; doing it with 30 mouse clicks is not scanning.
+   */
+  function onListKey(event: KeyboardEvent): void {
+    // The open menu owns the keyboard (its own window listener closes it on
+    // Escape); stepping the selection underneath it would be a second action.
+    if (menu || !recent) return;
+    const dir = event.key === 'ArrowDown' ? 'down' : event.key === 'ArrowUp' ? 'up' : null;
+    if (!dir) return;
+    event.preventDefault();
+    const rows = recent.commits.map(commit => ({ hash: commit.hash, parents: commit.parents ?? [] }));
+    const target = computeNavigationTarget(rows, selectedHash, dir, event.ctrlKey || event.metaKey);
+    const commit = target ? recent.commits.find(c => c.hash === target) : undefined;
+    if (!commit) return;
+    openCommit(commit);
+    revealRow(commit.hash);
+  }
+
+  function revealRow(hash: string): void {
+    if (!listEl || !recent) return;
+    const index = recent.commits.findIndex(commit => commit.hash === hash);
+    if (index < 0) return;
+    // Returns null when the row is already comfortably visible.
+    const top = computeScrollTop(index, ROW_H, listEl.scrollTop, listEl.clientHeight, 'edge', 1);
+    if (top !== null) listEl.scrollTop = top;
+    // Roving tabindex: focus has to travel with the selection or the next key
+    // press lands on the old row (or outside the list entirely).
+    queueMicrotask(() => listEl?.querySelector<HTMLElement>(`[data-hash="${hash}"]`)?.focus());
+  }
+
+  function copyText(text: string): void {
+    request('recentCommitsCopy', { text, repoPath: recent?.repoPath });
+  }
+
+  const fullMessage = (commit: Commit) =>
+    commit.body?.trim() ? `${commit.subject}\n\n${commit.body.trim()}` : commit.subject;
+
+  const SEPARATOR: MenuEntry = { label: '', action: () => {}, separator: true };
+
+  /** Native's commit menu is Open Changes + Copy Commit ID/Message; the SHA
+   *  variants match the full graph's own menu, and Copy Full Source is the
+   *  reason this extension exists — the sidebar was the one surface without it. */
+  function commitMenu(event: MouseEvent, commit: Commit): void {
+    // Without this the webview shows VS Code's own (inert) context menu.
+    event.preventDefault();
+    openCommit(commit);
+    menu = {
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: t('recent.openChanges'), icon: 'diff-multiple',
+          action: () => request('recentCommitsOpenChanges', {
+            hash: commit.hash, subject: commit.subject, repoPath: recent?.repoPath,
+          }),
+        },
+        SEPARATOR,
+        { label: t('graph.copySHA'), icon: 'copy', action: () => copyText(commit.hash) },
+        { label: t('graph.copyShortSHA'), icon: 'copy', action: () => copyText(commit.abbreviatedHash) },
+        { label: t('graph.copyCommitInfo'), icon: 'copy', action: () => copyText(`${commit.abbreviatedHash} - ${commit.subject}`) },
+        { label: t('recent.copyMessage'), icon: 'copy', action: () => copyText(fullMessage(commit)) },
+        SEPARATOR,
+        {
+          label: t('recent.copyFullSource'), icon: 'copy',
+          action: () => request('recentCommitsCopyFullSource', { hash: commit.hash, repoPath: recent?.repoPath }),
+        },
+      ],
+    };
+  }
+
+  function fileMenu(event: MouseEvent, file: CommitFile): void {
+    event.preventDefault();
+    menu = {
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        { label: t('recent.openDiff'), icon: 'diff-single', action: () => openFile(file) },
+        { label: t('recent.openFile'), icon: 'go-to-file', action: () => openWorkingFile(file) },
+        SEPARATOR,
+        { label: t('recent.copyPath'), icon: 'copy', action: () => copyText(file.path) },
+        {
+          label: t('recent.copyFullSource'), icon: 'copy',
+          action: () => request('recentCommitsCopyFullSource', {
+            hash: selectedHash, path: file.path, repoPath: recent?.repoPath,
+          }),
+        },
+      ],
+    };
+  }
+
+  const parentLoaded = (hash: string) => Boolean(recent?.commits.some(commit => commit.hash === hash));
+
+  /** A parent already on screen is a local selection — no round-trip. One that
+   *  isn't loaded stays disabled rather than silently doing nothing. */
+  function goToParent(hash: string): void {
+    const commit = recent?.commits.find(c => c.hash === hash);
+    if (!commit) return;
+    openCommit(commit);
+    revealRow(hash);
+  }
+
+  /** Only worth a line when it differs: on rebased or cherry-picked history the
+   *  committer is who to ask, and on ordinary commits it is pure noise. */
+  function committerDiffers(commit: Commit): boolean {
+    if (!commit.committer?.name) return false;
+    return commit.committer.name !== commit.author?.name
+      || commit.committer.email !== commit.author?.email;
+  }
+
+  /** The working-tree file, not a diff — native's only inline action here. */
+  function openWorkingFile(file: CommitFile): void {
+    request('recentCommitsOpenWorkingFile', { path: file.path, repoPath: recent?.repoPath });
+  }
+
+  // Full message + who/when for the row tooltip. The compact row can only show
+  // the subject, so everything the details panel would show is reachable on
+  // hover without selecting first.
+  function rowTooltip(commit: Commit): string {
+    const lines = [commit.subject];
+    const body = commit.body?.trim();
+    if (body) lines.push('', body);
+    const when = commit.author?.date
+      ? `${formatRelativeTime(commit.author.date, recent?.locale)} (${formatCommitDate(commit.author.date)})`
+      : '';
+    const meta = [commit.author?.name, when, commit.abbreviatedHash].filter(Boolean).join(' · ');
+    if (meta) lines.push('', meta);
+    return lines.join('\n');
+  }
+
+  const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+  const dirName = (p: string) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+  const fileTooltip = (file: CommitFile) =>
+    `${statusLabel(file.status) || file.status} — ${file.oldPath ? `${file.oldPath} → ` : ''}${file.path}`;
+
   onMount(() => {
     const receive = (event: MessageEvent) => {
+      if (event.data?.type === 'recentCommitsCommitFiles') {
+        const payload = event.data.payload as { hash: string; files: CommitFile[]; error?: string };
+        // A late reply for a commit the user has moved off must not repaint the
+        // panel; the host guards the same way, this covers the repo-switch race.
+        if (payload.hash !== selectedHash) return;
+        files = payload.files ?? [];
+        filesError = payload.error ?? null;
+        return;
+      }
       if (event.data?.type !== 'recentCommitsState') return;
       recent = event.data.payload as State;
       loading = false;
       if (recent.locale) i18n.setLocale(recent.locale);
+      // The selected commit can vanish (repo switch, branch checkout, amend).
+      // Commit contents are immutable, so a still-present selection keeps the
+      // file list it already has instead of re-fetching on every refresh.
+      if (selectedHash && !recent.commits.some(commit => commit.hash === selectedHash)) { closeDetails(); return; }
+      // The host drops a file-list reply issued while the view was hidden, and
+      // nothing else would ever ask again — the panel would sit on "Loading…"
+      // for as long as the commit stays selected. A state message only arrives
+      // while the view IS visible, so re-asking here is the recovery.
+      if (selectedHash && files === null && Date.now() - filesRequestedAt >= FILES_RETRY_MS) requestFiles(selectedHash);
     };
     window.addEventListener('message', receive);
     request('recentCommitsReady');
@@ -166,7 +396,15 @@
       {#if recent.tracking}<span>{t('recent.aheadBehind', { ahead: recent.ahead, behind: recent.behind })}</span>{/if}
       <span>{recent.staged || recent.unstaged || recent.conflicts ? t('recent.changes', { staged: recent.staged, unstaged: recent.unstaged, conflicts: recent.conflicts }) : t('file.noChanges')}</span>
     </div>
-    <div class="commit-list">
+    <!-- Tree semantics, like native's Source Control Graph: the list owns the
+         arrow keys, each row is a selectable item with a roving tabindex. -->
+    <div
+      class="commit-list"
+      role="tree"
+      tabindex="-1"
+      bind:this={listEl}
+      onkeydown={onListKey}
+    >
       <div class="graph-layer" aria-hidden="true">
         <svg width={laneWidth(recent.graph)} height={recent.commits.length * ROW_H + ROW_H} viewBox={`0 0 ${laneWidth(recent.graph)} ${recent.commits.length * ROW_H + ROW_H}`}>
           {#each recent.graph.paths as graphPath}<polyline class="rail" points={points(graphPath.points, recent.graph)} style={`--c: ${laneColor(graphPath.color, graphPath.colorOverride)}`} fill="none" stroke-width="2" />{/each}
@@ -180,18 +418,23 @@
           {/each}
         </svg>
       </div>
-      {#each recent.commits as commit (commit.hash)}
-        <!-- Not activatable: graph/AGENTS.md states this view's ordinary
-             interactions stay in the sidebar and only the explicit Open Full
-             Graph action opens the editor panel. That action is a view-title
-             command; a sidebar row that yanks you to an editor tab on click is
-             not how VS Code sidebars behave either. The tooltip still carries
-             the full subject and the hash. -->
+      {#each recent.commits as commit, index (commit.hash)}
+        <!-- Selecting stays in the sidebar: the row opens the details panel
+             below, never an editor tab. Only the Open Full Graph title action
+             replaces the editor (graph/AGENTS.md). -->
         <div
           class="commit-row"
           class:head-row={isHead(commit)}
+          class:selected={commit.hash === selectedHash}
+          data-hash={commit.hash}
+          role="treeitem"
+          aria-selected={commit.hash === selectedHash}
+          tabindex={(selectedHash ? commit.hash === selectedHash : index === 0) ? 0 : -1}
           style:padding-left={`${laneWidth(recent.graph)}px`}
-          title={`${commit.subject}\n${commit.abbreviatedHash}`}
+          title={rowTooltip(commit)}
+          onclick={() => selectCommit(commit)}
+          onkeydown={(event) => onRowKey(event, commit)}
+          oncontextmenu={(event) => commitMenu(event, commit)}
         >
           <span class="commit-subject" class:current={isHead(commit)}>{commit.subject}</span>
           <span class="label-container">
@@ -206,6 +449,100 @@
         </div>
       {/each}
     </div>
+    <!-- Sibling of `.commit-list`, never inside it: the graph SVG is absolutely
+         positioned at `y = row * 22`, so anything injected between rows would
+         throw every dot off its row. -->
+    {#if selectedCommit}
+      <div class="details">
+        <div class="details-head">
+          <span class="hash" title={selectedCommit.hash}>{selectedCommit.abbreviatedHash}</span>
+          <button
+            class="icon-btn"
+            title={t('recent.openChanges')}
+            aria-label={t('recent.openChanges')}
+            onclick={() => request('recentCommitsOpenChanges', {
+              hash: selectedHash, subject: selectedCommit.subject, repoPath: recent?.repoPath,
+            })}
+          ><i class="codicon codicon-diff-multiple"></i></button>
+          <button
+            class="icon-btn"
+            title={t('recent.closeDetails')}
+            aria-label={t('recent.closeDetails')}
+            onclick={closeDetails}
+          ><i class="codicon codicon-close"></i></button>
+        </div>
+        <div class="details-body">
+          <!-- Message block and file list scroll separately: with one scroller
+               a long message pushed the files — the reason the panel exists —
+               out of view entirely. -->
+          <div class="message-block">
+          <div class="commit-message">{selectedCommit.body?.trim() ? `${selectedCommit.subject}\n\n${selectedCommit.body.trim()}` : selectedCommit.subject}</div>
+          {#if selectedCommit.author?.name || selectedCommit.author?.date}
+            <div class="commit-meta" title={selectedCommit.author?.date ? formatCommitDate(selectedCommit.author.date) : (selectedCommit.author?.email ?? '')}>
+              {[
+                selectedCommit.author?.name,
+                selectedCommit.author?.date ? formatRelativeTime(selectedCommit.author.date, recent.locale) : '',
+              ].filter(Boolean).join(' · ')}
+            </div>
+          {/if}
+          {#if committerDiffers(selectedCommit)}
+            <div class="commit-meta" title={selectedCommit.committer?.email ?? ''}>
+              {t('recent.committer')} · {selectedCommit.committer?.name}
+            </div>
+          {/if}
+          {#if (selectedCommit.parents?.length ?? 0) > 0}
+            <div class="commit-parents">
+              <span class="parents-label">{t('recent.parents')}</span>
+              {#each selectedCommit.parents ?? [] as parent (parent)}
+                <button
+                  class="parent-link"
+                  title={parent}
+                  disabled={!parentLoaded(parent)}
+                  onclick={() => goToParent(parent)}
+                >{parent.substring(0, 7)}</button>
+              {/each}
+            </div>
+          {/if}
+          </div>
+          {#if filesError}
+            <div class="files-note error"><i class="codicon codicon-error"></i>{filesError}</div>
+          {:else if files === null}
+            <div class="files-note">{t('recent.loadingFiles')}</div>
+          {:else if files.length === 0}
+            <div class="files-note">{t('recent.noFiles')}</div>
+          {:else}
+            <div class="files">
+              {#each files as file (file.path)}
+                <!-- A div, not a button: the row carries its own inline action
+                     and a button inside a button is invalid markup. -->
+                <div
+                  class="file-row"
+                  role="button"
+                  tabindex="0"
+                  title={fileTooltip(file)}
+                  onclick={() => openFile(file)}
+                  onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openFile(file); } }}
+                  oncontextmenu={(event) => fileMenu(event, file)}
+                >
+                  <span class="file-status" style={`color: ${statusColor(file.status)}`}>{file.status}</span>
+                  <span class="file-name">{baseName(file.path)}</span>
+                  <span class="file-dir">{dirName(file.path)}</span>
+                  <button
+                    class="inline-action"
+                    title={t('recent.openFile')}
+                    aria-label={t('recent.openFile')}
+                    onclick={(event) => { event.stopPropagation(); openWorkingFile(file); }}
+                  ><i class="codicon codicon-go-to-file"></i></button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {/if}
+  {#if menu}
+    <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
   {/if}
 </div>
 
@@ -214,15 +551,23 @@
   .recent-commits { height: 100%; box-sizing: border-box; color: var(--vscode-foreground); font: var(--vscode-font-size, 13px) var(--vscode-font-family); padding: 4px 0 6px; display: flex; flex-direction: column; min-height: 0; }
   .summary { display: flex; gap: 6px; min-width: 0; align-items: baseline; justify-content: space-between; padding: 0 8px 4px; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .commit-list { position: relative; flex: 1; min-height: 0; overflow: auto; }
+  /* The list holds focus only to receive the arrow keys; the SELECTED ROW is
+     the visible focus, so the container must not draw a ring of its own. */
+  .commit-list:focus { outline: none; }
   .graph-layer { position: absolute; inset: 0 auto auto 0; pointer-events: none; }
 
   /* Native row semantics: full-width hover/selection band, no per-row border,
      no monospace hash column (that 42px was 16% of a 300px sidebar's usable
      width and the least identifying thing on the row). */
   .commit-row { position: relative; display: flex; align-items: center; gap: 4px; height: 22px; min-width: 0; padding-right: 8px; }
+  .commit-row { cursor: pointer; }
   .commit-row.head-row { background: var(--vscode-list-inactiveSelectionBackground); }
   /* Declared after .head-row so hovering the HEAD row still reacts. */
   .commit-row:hover { background: var(--vscode-list-hoverBackground); }
+  /* Last, so a selected row keeps its band while the pointer is elsewhere and
+     while it is the HEAD row. */
+  .commit-row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .commit-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   .commit-subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .commit-subject.current { font-weight: var(--vscode-font-weight-semibold, 600); }
 
@@ -235,6 +580,64 @@
   .label .count { font-size: 12px; padding: 0 2px 0 4px; }
   .label .codicon { color: inherit; font-size: 12px; padding: 3px; }
   .label .description { font-size: 12px; padding-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; }
+
+  /* Details panel: a bounded second pane, so the commit list keeps at least
+     half the view. `flex: 0 0 auto` + max-height, never a fixed height — a
+     one-file commit should not reserve the space a forty-file one needs. */
+  .details { flex: 0 0 auto; max-height: 45%; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); }
+  .details-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 8px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+  .details-head .hash { flex: 0 0 auto; font-family: var(--vscode-editor-font-family, monospace); color: var(--vscode-foreground); }
+  .icon-btn { flex: 0 0 auto; display: flex; padding: 2px; border: none; border-radius: 4px; background: none; color: var(--vscode-icon-foreground); cursor: pointer; }
+  /* Whatever metadata is present, the actions still sit at the right edge. */
+  .icon-btn:first-of-type { margin-left: auto; }
+  .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .icon-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .icon-btn .codicon { font-size: 14px; }
+  .details-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0 8px 6px; }
+  /* Caps at just under half the panel so the file list always has room; both
+     halves keep their own scrollbar. */
+  .message-block { flex: 0 1 auto; min-height: 0; max-height: 48%; overflow: auto; }
+  .commit-message { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+  .commit-meta { margin: 2px 0 6px; color: var(--vscode-descriptionForeground); font-size: 11px; overflow-wrap: anywhere; }
+  .files { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
+  /* `overflow: hidden` is defensive, not a fix for an observed overflow: the
+     inline action is the one element that appears (on hover) with no layout
+     pass to absorb its 20px, and the only thing currently guaranteeing room is
+     `.file-name`'s 62% cap. Measured at 300px with a 32-char name and an empty
+     directory: rowScrollWidth === rowClientWidth, body/app scrollWidth
+     unchanged on reveal. Raise that cap and this line is what still holds. */
+  .file-row { display: flex; align-items: center; gap: 6px; height: 22px; min-width: 0; overflow: hidden; cursor: pointer; }
+  .file-row:hover { background: var(--vscode-list-hoverBackground); }
+  .file-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .file-status { flex: 0 0 12px; text-align: center; font-weight: var(--vscode-font-weight-semibold, 600); }
+  /* The name is what identifies the file, so the directory absorbs the shrink
+     first (`flex: 0 0 auto` + a cap on the name). Letting both shrink turned
+     `RecentCommits.svelte` into `RecentCommits.…` at 300px while a long
+     directory kept its pixels.
+     ponytail: 62% is a fixed cap, so a very long name still truncates while the
+     dir keeps its 38%; upgrade path is measuring the two text widths. */
+  .file-name { flex: 0 0 auto; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 11px; }
+  /* Inline action, native's pattern: absent until the row is hovered or holds
+     focus. It takes its 20px from the directory — the row's most disposable
+     column — rather than reserving them on every row forever. */
+  .inline-action { flex: 0 0 auto; display: none; padding: 2px; border: none; border-radius: 4px; background: none; color: var(--vscode-icon-foreground); cursor: pointer; }
+  .file-row:hover .inline-action,
+  .file-row:focus-within .inline-action { display: flex; }
+  .inline-action:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .inline-action .codicon { font-size: 14px; }
+
+  .commit-parents { display: flex; align-items: center; gap: 4px; margin: 2px 0 6px; font-size: 11px; }
+  .parents-label { color: var(--vscode-descriptionForeground); }
+  .parent-link { padding: 0 4px; border: none; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; cursor: pointer; }
+  .parent-link:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
+  /* A parent outside the loaded page can't be selected locally; the full hash
+     stays in the tooltip so it is still copyable. */
+  .parent-link:disabled { opacity: 0.5; cursor: default; }
+
+  .files-note { padding: 4px 0; color: var(--vscode-descriptionForeground); }
+  .files-note.error { color: var(--vscode-errorForeground); }
+  .files-note .codicon { margin-right: 5px; }
 
   .message { padding: 10px 8px; color: var(--vscode-descriptionForeground); }
   .message.error { color: var(--vscode-errorForeground); }

@@ -78,6 +78,17 @@ export const zh: Record<string, string> = {
   'recent.headScope': 'HEAD 历史',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': '已暂存 {staged} · 未暂存 {unstaged} · 冲突 {conflicts}',
+  'recent.openChanges': '打开所有更改',
+  'recent.closeDetails': '关闭详情',
+  'recent.loadingFiles': '正在加载更改…',
+  'recent.noFiles': '没有文件更改',
+  'recent.copyMessage': '复制提交信息',
+  'recent.copyFullSource': '复制完整源码',
+  'recent.copyPath': '复制路径',
+  'recent.openFile': '打开文件',
+  'recent.openDiff': '打开更改',
+  'recent.parents': '父提交',
+  'recent.committer': '提交者',
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 

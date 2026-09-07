@@ -32,3 +32,33 @@ export function formatCommitDate(iso: string): string {
 export function formatCommitDateLong(iso: string): string {
   return formatWithStyle(iso, { dateStyle: 'full', timeStyle: 'medium' });
 }
+
+/* SNIPCODE-HOOK start: relative time for the Recent Commits sidebar. "How old
+   is this commit" is the first question a compact list has to answer, and the
+   absolute format above cannot answer it without the reader doing arithmetic.
+   `Intl.RelativeTimeFormat` is the platform's own — no dictionary keys, every
+   locale for free — and it takes the WEBVIEW's locale (`i18n.locale`, e.g.
+   'zh-tw', which Intl normalizes to zh-TW) rather than the system's, so the
+   string matches the surrounding UI. */
+const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['year', 31_536_000_000],
+  ['month', 2_592_000_000],
+  ['week', 604_800_000],
+  ['day', 86_400_000],
+  ['hour', 3_600_000],
+  ['minute', 60_000],
+];
+
+export function formatRelativeTime(iso: string, locale?: string): string {
+  const date = new Date(iso);
+  // Same guard as formatWithStyle: the synthetic UNCOMMITTED row and many test
+  // fixtures carry an empty date, and Intl throws RangeError on those.
+  if (Number.isNaN(date.getTime())) return iso;
+  const deltaMs = date.getTime() - Date.now();
+  const format = new Intl.RelativeTimeFormat(locale || undefined, { numeric: 'auto' });
+  for (const [unit, unitMs] of RELATIVE_UNITS) {
+    if (Math.abs(deltaMs) >= unitMs) return format.format(Math.round(deltaMs / unitMs), unit);
+  }
+  return format.format(Math.round(deltaMs / 1000), 'second');
+}
+/* SNIPCODE-HOOK end */
