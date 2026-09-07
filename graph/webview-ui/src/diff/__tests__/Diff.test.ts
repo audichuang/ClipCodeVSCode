@@ -313,6 +313,40 @@ describe('Diff.svelte next/prev hunk navigation (D11)', () => {
     expect(hunks()[0].classList.contains('current-hunk')).toBe(true);
   });
 
+  /* SNIPCODE-HOOK start: ui/diff D11b change count */
+  it('counts the changes and tracks which one is current; Previous is disabled at the top', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
+    const { getByLabelText, container } = render(Diff);
+    await tick();
+    const count = () => container.querySelector('.hunk-count')!.textContent!.replace(/\s+/g, '');
+    const prev = () => getByLabelText('Previous change') as HTMLButtonElement;
+
+    // No jump made yet: the total is known, the position is not.
+    expect(count()).toBe('\u2013/2');
+    expect(prev().disabled).toBe(true);
+
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(count()).toBe('1/2');
+    expect(prev().disabled).toBe(true);
+
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(count()).toBe('2/2');
+    expect(prev().disabled).toBe(false);
+
+    await fireEvent.click(prev());
+    expect(count()).toBe('1/2');
+    expect(prev().disabled).toBe(true);
+  });
+
+  it('counts the hunks of BOTH sections, matching what the arrows navigate', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), textDiff());
+    const { container } = render(Diff);
+    await tick();
+    expect(container.querySelector('.hunk-count')!.textContent!.replace(/\s+/g, '')).toBe('\u2013/3');
+    expect(container.querySelectorAll('.diff-hunk').length).toBe(3);
+  });
+  /* SNIPCODE-HOOK end */
+
   it('Alt+ArrowDown / Alt+ArrowUp drive the same navigation as the buttons', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), null);
     const { container } = render(Diff);
