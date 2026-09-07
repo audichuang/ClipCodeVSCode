@@ -23,9 +23,10 @@ Second file of the same language: **36–39ms**. Plain DOM with no highlighting:
 warm-up, not throughput.
 
 **Where the tail goes:** 3000 lines fully painted is 1170ms with highlighting vs
-235ms DOM-only, i.e. ~80% tokenising. Per-line `codeToTokens` costs ~30% more
-than batching a hunk (490ms vs 340ms for 3000 lines, Node) — a real but
-non-blocking saving, since the tail streams in behind the first screen.
+235ms DOM-only, i.e. ~80% tokenising. Per-line `codeToTokens` costs ~33% more
+than tokenising in batches (257ms vs 193ms for 3000 lines on shiki 4.4.3, Node)
+— a real but non-blocking saving, since the tail streams in behind the first
+screen. Why it is not simply taken: see the `grammarState` note below.
 
 ## What changed
 
@@ -100,11 +101,88 @@ Also rejected, each for a reason rather than a preference:
   (measured: 30 → 4ms first batch with the spawn faked out), but `fs.realpath`
   changes path shape on Windows and macOS symlinked mounts, which is exactly the
   class of bug #30 was.
-- **Batching `codeToTokens` per hunk** — the 30% tail saving above is real and
-  would also fix multi-line constructs (block comments, template literals) that
-  per-line tokenising gets wrong, but it makes the content-addressed
-  `highlightKey` cache context-dependent. Worth doing on its own, not as part of
-  a first-paint change.
+## The package question, answered separately
+
+A second read-only pass asked whether a *different* package beats Shiki +
+oniguruma, with more bundle size explicitly acceptable. Answer: no — but the
+**version** was two majors behind.
+
+**Taken: `shiki 1.29.2 → 4.4.3`** (`graph/webview-ui/package.json`, one line;
+every symbol this repo uses type-checks unchanged). Measured here, 3000-line TS
+file, median of 3 on a fully warmed grammar:
+
+| | per line ×3000 | 50-line batches | whole file | cold first line |
+|---|---:|---:|---:|---:|
+| 1.29.2 | 482ms | 358ms | 372ms | 36.5ms |
+| **4.4.3** | **257ms** | **193ms** | **185ms** | 38.5ms |
+
+**1.9× on steady-state tokenising, and the first screen does not move** — cold
+compile is unchanged, which is the expected result, not a failed upgrade: the
+first-screen cost is grammar compile, and that is warm-up's job. `dist/graph-webview/diff.js`
+got **36KB smaller** (3,692,869 → 3,656,919 bytes); the wasm is still inlined
+(same `AGFzbQ` blob, no runtime fetch) and the CSP is unchanged.
+
+Token output was compared line by line across the two versions for eight
+languages: **typescript, markdown, python, java, kotlin, json bit-identical**;
+ruby and cpp differ because their upstream grammars were updated, and the
+differences are **improvements** — Ruby's `module Clip` / `class Payload` now
+get the type colour `#4EC9B0` instead of `#4FC1FF`, and C++ declarators that
+were previously left uncoloured (`kHeader`, `files_`, `done_`, template
+parameter `N`, `std::vector<T>`) now get `#9CDCFE` / `#4EC9B0`. Both match what
+VS Code's own editor shows. (Feeding TypeScript source to a ruby/cpp grammar,
+which is how a naive comparison ends up, reports thousands of "differences" and
+means nothing — the check above uses real Ruby and real C++.)
+
+**Deferred, not rejected: `grammarState` between lines.** Threading the grammar
+state from one line into the next is measured at **2.3–2.5×** on top of the
+upgrade (492 → 196ms per-line on 4.4.3; independently reproduced against raw
+`vscode-textmate`, 461 → 197ms), and it exists in the shiki version already
+installed. It also fixes a real defect: per-line stateless tokenising cannot see
+that a line is inside a block comment or a multi-line string. Two things have to
+be designed first, which is why it is not in this change:
+
+1. **A unified diff's lines are two interleaved streams.** State has to flow
+   along context+delete for the old side and context+add for the new side, and
+   reset at each hunk boundary (hunks skip lines). A single stream would let a
+   deleted `/*` comment out an added line. The 2.3× above was measured on 3000
+   lines of continuous text; a diff of many small hunks gets much less.
+2. **`highlightKey` stops being content-addressed.** `[file, hunkStart, lineIdx,
+   content]` assumes a line's HTML depends only on its own text; with state, the
+   line before it can change its colours without changing its content. The D7
+   reuse cache (which is what keeps a stage/unstage from re-highlighting and
+   flashing every other line) needs a new key.
+
+Rejected outright by that pass, with numbers, so none of it needs revisiting:
+`@shikijs/engine-javascript` + `@shikijs/langs-precompiled` (2.4× slower than
+oniguruma even with build-time precompilation, and 15% of markdown lines
+mis-tokenised); `vscode-textmate` + `vscode-oniguruma` by hand (461ms — slower
+than shiki 4, and you inherit theme/grammar/colorMap management);
+`@wooorm/starry-night` (is that, plus a Node-only resolver);
+`web-tree-sitter` (fastest raw parse at 25–42ms, but no theme mapping without
+hand-written `highlights.scm` per language, only 21 of 34 languages available,
+27MB of grammar wasm, and `rootNode.hasError === true` on a hunk fragment
+because it needs whole-file context); Monaco's tokeniser (either the same
+`vscode-textmate` path or Monarch's coarse token names); `lowlight` and
+`@git-diff-view/core` (both wrap highlight.js); and pre-serialising oniguruma's
+compiled regexes, which the API simply does not expose — compiled state lives in
+that page's wasm memory and cannot be exported, so **warm-up is the only lever
+on the first screen.**
+
+`highlight.js` (70ms) and `prismjs` (43ms) really are 6–7× faster than TextMate
+with no cold-compile at all, and would let `workbench.js` highlight too. They are
+not taken because they emit ~15 generic classes instead of TextMate scopes: the
+colours would visibly stop matching the editor next to them, and `dark-plus` has
+no meaning in that world. That is a product trade, not a performance one — worth
+re-opening only if someone decides matching the editor does not matter.
+
+**Word diff needs nothing.** 300 real replace-line pairs from this repo's own
+history: the current `computeWordDiff` is **2.70ms**, against `diff@9`
+`diffWords` 10.16ms, `fast-diff` 11.83ms, `diff-match-patch` 13.69ms, and
+`diff@9` `diffChars` 37.46ms. The current implementation is 3.7–14× faster than
+every candidate, and the character-level ones would need re-tokenising back to
+words to keep the current UX. Same for swapping the diff parser (`parse-diff` /
+`gitdiff-parser`): git round-trip is ~20ms, parsing is not the bottleneck, and
+this repo's parser carries Snipcode-specific label/rename/no-newline semantics.
 
 ## Paths with no remaining headroom
 
