@@ -238,16 +238,16 @@ export class RecentCommitsViewProvider implements vscode.WebviewViewProvider, vs
       const relPath = typeof message?.path === 'string' ? message.path : '';
       const fullPath = resolveRepoRelativePath(repoPath, relPath, 'recentOpenFile');
       const oldPath = typeof message?.oldPath === 'string' ? message.oldPath : undefined;
-      const { fallbackRef, perFile } = await service.resolveCommitFileBases(hash);
+      const { fallbackRef, fallbackLeftExists, emptyRef, perFile } = await service.resolveCommitFileBases(hash);
       // A merge's file may have come in from parent 2..N (first parent → empty
       // diff), and the parent that carries it may not know the rename, so the
       // left side takes BOTH its ref and its path from the same resolution.
-      const base = perFile.get(relPath) ?? { ref: fallbackRef, path: oldPath ?? relPath };
+      const base = perFile.get(relPath) ?? { ref: fallbackRef, path: oldPath ?? relPath, leftExists: fallbackLeftExists, rightExists: true };
       const leftPath = resolveRepoRelativePath(repoPath, base.path, 'recentOpenFile');
       await vscode.commands.executeCommand(
         'vscode.diff',
-        toGitUri(leftPath, base.ref),
-        toGitUri(fullPath, hash),
+        toGitUri(leftPath, base.leftExists ? base.ref : emptyRef),
+        toGitUri(fullPath, base.rightExists ? hash : emptyRef),
         `${path.basename(fullPath)} (${hash.substring(0, 7)})`,
       );
     } catch (err) {
@@ -276,9 +276,11 @@ export class RecentCommitsViewProvider implements vscode.WebviewViewProvider, vs
       const resources = files.map(file => {
         const fullPath = resolveRepoRelativePath(repoPath, file.path, 'recentOpenChanges');
         const base = bases.perFile.get(file.path)
-          ?? { ref: bases.fallbackRef, path: file.oldPath ?? file.path };
+          ?? { ref: bases.fallbackRef, path: file.oldPath ?? file.path, leftExists: bases.fallbackLeftExists, rightExists: true };
         const leftPath = resolveRepoRelativePath(repoPath, base.path, 'recentOpenChanges');
-        return [vscode.Uri.file(fullPath), toGitUri(leftPath, base.ref), toGitUri(fullPath, hash)];
+        const left = base.leftExists ? toGitUri(leftPath, base.ref) : undefined;
+        const right = base.rightExists ? toGitUri(fullPath, hash) : undefined;
+        return [vscode.Uri.file(fullPath), left, right];
       });
       // Native titles this editor with the commit's subject; a bare hash would
       // put the user right back to "which commit is this?".

@@ -14,6 +14,7 @@ describe('Workbench.svelte — Ctrl/Cmd+Enter commits from the textarea (S14)', 
     render(Workbench);
     const textarea = document.querySelector('textarea')!;
     workbenchStore.message = '修正 bug';
+    workbenchStore.commitScopeReady = true;
 
     await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
@@ -25,6 +26,7 @@ describe('Workbench.svelte — Ctrl/Cmd+Enter commits from the textarea (S14)', 
     render(Workbench);
     const textarea = document.querySelector('textarea')!;
     workbenchStore.message = '修正 bug';
+    workbenchStore.commitScopeReady = true;
 
     await fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
 
@@ -46,6 +48,7 @@ describe('Workbench.svelte — Ctrl/Cmd+Enter commits from the textarea (S14)', 
     render(Workbench);
     const textarea = document.querySelector('textarea')!;
     workbenchStore.message = '修正 bug';
+    workbenchStore.commitScopeReady = true;
 
     await fireEvent.keyDown(textarea, { key: 'Enter' });
 

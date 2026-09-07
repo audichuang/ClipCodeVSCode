@@ -34,6 +34,7 @@ export class CommitBoxViewProvider implements vscode.WebviewViewProvider {
         payload: {
           stagedRepoCount: this.workbench.tree.getStagedRepoCount(),
           stagedFileCount: this.workbench.tree.getStagedFileCount(),
+          commitScopeReady: this.workbench.isCommitScopeReady(),
           /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
           amendTargetPushed: this.workbench.tree.getAmendTargetPushed(),
           /* SNIPCODE-HOOK end */

@@ -116,5 +116,6 @@
   "remoteRemoved": "Remote '{0}' removed",
   "worktreeRemoved": "Worktree removed",
   "recentCurrentRepo": "current",
-  "recentSwitchRepo": "Switch Repository"
+  "recentSwitchRepo": "Switch Repository",
+  "Commit is unavailable while repositories are still loading": "Commit is unavailable while repositories are still loading"
 }

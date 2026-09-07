@@ -5,6 +5,7 @@ beforeEach(() => workbenchStore.reset());
 
 describe('CommitBoxStore', () => {
   it('canCommit requires a non-empty message and not committing', () => {
+    workbenchStore.commitScopeReady = true;
     expect(workbenchStore.canCommit).toBe(false);
     workbenchStore.message = '修正手續費';
     expect(workbenchStore.canCommit).toBe(true);
@@ -14,6 +15,7 @@ describe('CommitBoxStore', () => {
 
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
   it('canAmend requires exactly one checked repo with staged changes', () => {
+    workbenchStore.commitScopeReady = true;
     workbenchStore.message = '修正手續費';
     workbenchStore.stagedRepoCount = 2;
     expect(workbenchStore.canCommit).toBe(true);
@@ -26,6 +28,7 @@ describe('CommitBoxStore', () => {
 
   /* SNIPCODE-HOOK start: S13 Amend prefill */
   it('canAmend does not require a message (an empty one triggers prefill, not disabled)', () => {
+    workbenchStore.commitScopeReady = true;
     workbenchStore.message = '';
     workbenchStore.stagedRepoCount = 1;
     expect(workbenchStore.canCommit).toBe(false);

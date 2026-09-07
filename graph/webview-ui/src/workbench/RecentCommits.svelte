@@ -53,6 +53,7 @@
   let filesError = $state<string | null>(null);
   // Plain locals, not $state: only the retry arithmetic reads them.
   let filesRequestedAt = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   // A dropped reply is only recoverable by asking again on the next state, but
   // state arrives on every 180ms-debounced tree change — without this floor a
   // slow merge query would be re-issued faster than it can finish.
@@ -177,6 +178,7 @@
   // synchronously while this view still shows the old one, and two repos
   // sharing a commit would otherwise open the wrong repository's file.
   function requestFiles(hash: string): void {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = undefined; }
     filesRequestedAt = Date.now();
     request('recentCommitsSelectCommit', { hash, repoPath: recent?.repoPath });
   }
@@ -219,6 +221,7 @@
 
   function onRowKey(event: KeyboardEvent, commit: Commit): void {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target !== event.currentTarget) return;
     event.preventDefault();
     selectCommit(commit);
   }
@@ -381,11 +384,19 @@
       // nothing else would ever ask again — the panel would sit on "Loading…"
       // for as long as the commit stays selected. A state message only arrives
       // while the view IS visible, so re-asking here is the recovery.
-      if (selectedHash && files === null && Date.now() - filesRequestedAt >= FILES_RETRY_MS) requestFiles(selectedHash);
+      if (selectedHash && files === null) {
+        const retry = () => {
+          retryTimer = undefined;
+          if (selectedHash && files === null) requestFiles(selectedHash);
+        };
+        const wait = Math.max(0, FILES_RETRY_MS - (Date.now() - filesRequestedAt));
+        if (wait === 0) retry();
+        else { if (retryTimer) clearTimeout(retryTimer); retryTimer = setTimeout(retry, wait); }
+      }
     };
     window.addEventListener('message', receive);
     request('recentCommitsReady');
-    return () => window.removeEventListener('message', receive);
+    return () => { window.removeEventListener('message', receive); if (retryTimer) clearTimeout(retryTimer); };
   });
   /* SNIPCODE-HOOK end */
 </script>
@@ -398,6 +409,7 @@
   {:else if recent && recent.commits.length === 0}
     <div class="message"><strong>{recent.repoName}</strong><br />{t('recent.noCommits')}</div>
   {:else if recent}
+    <div class="repo-name" title={recent.repoPath}>{recent.repoName}</div>
     <div class="summary" title={recent.repoPath}>
       {#if recent.tracking}<span>{t('recent.aheadBehind', { ahead: recent.ahead, behind: recent.behind })}</span>{/if}
       <span>{recent.staged || recent.unstaged || recent.conflicts ? t('recent.changes', { staged: recent.staged, unstaged: recent.unstaged, conflicts: recent.conflicts }) : t('file.noChanges')}</span>
@@ -527,7 +539,7 @@
                   tabindex="0"
                   title={fileTooltip(file)}
                   onclick={() => openFile(file)}
-                  onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openFile(file); } }}
+                  onkeydown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openFile(file); } }}
                   oncontextmenu={(event) => fileMenu(event, file)}
                 >
                   <span class="file-status" style={`color: ${statusColor(file.status)}`}>{file.status}</span>
@@ -555,6 +567,7 @@
 <style>
   :global(html), :global(body), :global(#workbench-app) { height: 100%; margin: 0; }
   .recent-commits { height: 100%; box-sizing: border-box; color: var(--vscode-foreground); font: var(--vscode-font-size, 13px) var(--vscode-font-family); padding: 4px 0 6px; display: flex; flex-direction: column; min-height: 0; }
+  .repo-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px 2px; color: var(--vscode-foreground); font-size: 11px; font-weight: var(--vscode-font-weight-semibold, 600); }
   .summary { display: flex; gap: 6px; min-width: 0; align-items: baseline; justify-content: space-between; padding: 0 8px 4px; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .commit-list { position: relative; flex: 1; min-height: 0; overflow: auto; }
   /* The list holds focus only to receive the arrow keys; the SELECTED ROW is

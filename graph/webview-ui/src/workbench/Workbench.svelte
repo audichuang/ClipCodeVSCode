@@ -54,7 +54,7 @@
     onkeydown={onTextareaKeydown}
   ></textarea>
 
-  <p class="commit-scope">{t('workbench.commitScope', { repos: store.stagedRepoCount, files: store.stagedFileCount })}</p>
+  <p class="commit-scope">{store.commitScopeReady ? t('workbench.commitScope', { repos: store.stagedRepoCount, files: store.stagedFileCount }) : t('recent.loading')}</p>
 
   <div class="actions">
     <button class="btn primary" disabled={!store.canCommit} onclick={() => postCommit(false)}>

@@ -98,6 +98,8 @@ function setRepos(paths: string[], svcByPath: Record<string, ReturnType<typeof m
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Command tests assume a loaded tree; real loading guards have their own integration test.
+  vi.spyOn(ChangesTreeProvider.prototype, 'isCommitScopeReady').mockReturnValue(true);
   H.repos = [];
   H.svcs = new Map();
   /* SNIPCODE-HOOK start: Batch B command-selection routing regression */
@@ -1035,12 +1037,12 @@ describe('ChangesTreeProvider progressive paint', () => {
     provider.onDidChangeTreeData(() => paints.push(unstagedRepoPaths(provider)));
     const refreshing = provider.refresh();
     await vi.advanceTimersByTimeAsync(0);
-    expect(paints).toEqual([]); // trailing throttle: nothing painted yet
+    expect(paints).toEqual([[]]); // readiness change; partial rows still throttled
     await vi.advanceTimersByTimeAsync(50);
-    expect(paints).toEqual([['/a', '/b']]); // two completions, one paint
+    expect(paints).toEqual([[], ['/a', '/b']]); // two completions, one paint
     finish([repo('/a'), repo('/b'), repo('/c')]);
     await refreshing;
-    expect(paints).toEqual([['/a', '/b'], ['/a', '/b', '/c']]);
+    expect(paints).toEqual([[], ['/a', '/b'], ['/a', '/b', '/c']]);
   });
 
   it('a partial that has nothing to show stays an empty root (no "Staged 0 / Unstaged 0" flash)', async () => {
@@ -1051,10 +1053,10 @@ describe('ChangesTreeProvider progressive paint', () => {
     provider.onDidChangeTreeData(() => paints.push(provider.getChildren().length));
     const refreshing = provider.refresh();
     await vi.advanceTimersByTimeAsync(50);
-    expect(paints).toEqual([0]);
+    expect(paints).toEqual([0, 0]);
     finish([clean, repo('/dirty')]);
     await refreshing;
-    expect(paints).toEqual([0, 2]);
+    expect(paints).toEqual([0, 0, 2]);
   });
 
   it('a superseded refresh never paints its partials, even after its timer fires', async () => {
@@ -1071,7 +1073,7 @@ describe('ChangesTreeProvider progressive paint', () => {
     await vi.advanceTimersByTimeAsync(50); // the stale partial's timer fires — must be a no-op
     finishOld([repo('/stale')]);
     await older;
-    expect(paints).toEqual([['/fresh']]);
+    expect(paints).toEqual([[], [], ['/fresh']]);
   });
 });
 /* SNIPCODE-HOOK end */

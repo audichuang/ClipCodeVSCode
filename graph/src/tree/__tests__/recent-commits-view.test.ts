@@ -53,7 +53,7 @@ function service(over: Record<string, unknown> = {}): Record<string, any> {
     branches: vi.fn(async () => [{ name: 'main', current: true, ahead: 1, behind: 2, hash: 'h' }]),
     getUncommittedDiff: vi.fn(async () => ({ staged: [{ path: 'a', status: 'M' }], unstaged: [], conflict: [] })),
     // Default: an ordinary single-parent commit — no per-file overrides.
-    resolveCommitFileBases: vi.fn(async () => ({ fallbackRef: 'parentsha', perFile: new Map() })),
+    resolveCommitFileBases: vi.fn(async () => ({ fallbackRef: 'parentsha', fallbackLeftExists: true, emptyRef: 'emptytree', perFile: new Map() })),
     ...over,
   };
 }
@@ -232,8 +232,8 @@ describe('RecentCommitsViewProvider', () => {
   it('takes both the ref and the left path from the per-file merge resolution', async () => {
     const svc = service({
       resolveCommitFileBases: vi.fn(async () => ({
-        fallbackRef: 'firstparent',
-        perFile: new Map([['renamed.ts', { ref: 'secondparent', path: 'renamed.ts' }]]),
+        fallbackRef: 'firstparent', fallbackLeftExists: true, emptyRef: 'emptytree',
+        perFile: new Map([['renamed.ts', { ref: 'secondparent', path: 'renamed.ts', leftExists: true, rightExists: true }]]),
       })),
     });
     boot(svc);
@@ -384,4 +384,24 @@ describe('RecentCommitsViewProvider', () => {
     expect(H.commands[0]).toEqual(['vscode.open', expect.objectContaining({ fsPath: '/repo/src/a.ts' })]);
   });
   /* SNIPCODE-HOOK end */
+  it.each(['A', 'D'])('preserves missing %s sides in single and multi-diff', async status => {
+    const leftExists = status !== 'A'; const rightExists = status !== 'D';
+    boot(service({
+      showCommitFiles: vi.fn(async () => [{ path: 'file.txt', status }]),
+      resolveCommitFileBases: vi.fn(async () => ({
+        fallbackRef: 'parent', fallbackLeftExists: true, emptyRef: 'emptytree',
+        perFile: new Map([['file.txt', { ref: 'parent', path: 'file.txt', leftExists, rightExists }]]),
+      })),
+    }));
+    await H.handler!({ type: 'recentCommitsOpenFile', payload: { hash: 'abc1234', path: 'file.txt', ...FOR_REPO } });
+    const diff = H.commands[0] as any[];
+    expect(diff[1].scheme).toBe('git'); expect(diff[2].scheme).toBe('git');
+    expect(JSON.parse(diff[1].query).ref).toBe(leftExists ? 'parent' : 'emptytree');
+    expect(JSON.parse(diff[2].query).ref).toBe(rightExists ? 'abc1234' : 'emptytree');
+    await H.handler!({ type: 'recentCommitsOpenChanges', payload: { hash: 'abc1234', ...FOR_REPO } });
+    const tuple = (H.commands[1] as any[])[2][0];
+    expect(tuple).toHaveLength(3);
+    expect(Boolean(tuple[1])).toBe(leftExists); expect(Boolean(tuple[2])).toBe(rightExists);
+  });
+
 });

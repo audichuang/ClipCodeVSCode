@@ -118,6 +118,7 @@
     currentHunkEl?.classList.remove('current-hunk');
     currentHunk = next;
     currentHunkEl = hunks[next];
+    if (!currentHunkEl) { resetHunkNav(); return; }
     currentHunkEl.classList.add('current-hunk');
     currentHunkEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
@@ -145,6 +146,7 @@
      degrades into a coloured scrollbar. A useful one needs the file's total line
      count from the host to map changes onto file-line space. */
   let hunkTotal = $state(0);
+  let lastRenderedHunkTotal = -1;
 
   $effect(() => {
     // Everything that changes WHICH hunks are rendered. Read them so the effect
@@ -152,7 +154,12 @@
     // arrows will actually find.
     void store.file; void mode; void store.stagedDiff; void store.unstagedDiff;
     void collapsed.staged; void collapsed.unstaged;
-    hunkTotal = hunkEls().length;
+    const total = hunkEls().length;
+    hunkTotal = total;
+    if (total !== lastRenderedHunkTotal || currentHunk >= total || (currentHunkEl && !sectionsEl?.contains(currentHunkEl))) {
+      lastRenderedHunkTotal = total;
+      resetHunkNav();
+    }
   });
   /* SNIPCODE-HOOK end */
 
@@ -398,11 +405,11 @@
     font-size: 11px; font-variant-numeric: tabular-nums;
     border-radius: 11px;
     background: var(--vscode-badge-background, rgba(128, 128, 128, 0.15));
-    color: var(--vscode-descriptionForeground);
+    color: var(--vscode-badge-foreground, var(--vscode-foreground));
     border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
     box-sizing: border-box;
   }
-  .hunk-count-current { font-weight: 700; color: var(--vscode-foreground); }
+  .hunk-count-current { font-weight: 700; }
   /* SNIPCODE-HOOK end */
 
   .mode-bar-divider {

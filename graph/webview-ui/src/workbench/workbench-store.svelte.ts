@@ -15,6 +15,7 @@ class CommitBoxStore {
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
   stagedRepoCount = $state(0);
   stagedFileCount = $state(0);
+  commitScopeReady = $state(false);
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
   /** True when Amend's sole target repo's HEAD is already at/behind its
@@ -30,6 +31,7 @@ class CommitBoxStore {
     /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
     this.stagedRepoCount = 0;
     this.stagedFileCount = 0;
+    this.commitScopeReady = false;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
     this.amendTargetPushed = false;
@@ -45,13 +47,13 @@ class CommitBoxStore {
   }
 
   get canCommit(): boolean {
-    return this.message.trim() !== '' && !this.committing;
+    return this.message.trim() !== '' && !this.committing && this.commitScopeReady;
   }
   get canAmend(): boolean {
     /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
     /* SNIPCODE-HOOK start: S13 Amend prefill — no longer requires a message;
        an empty message means "fetch HEAD's message first", not "disabled" */
-    return !this.committing && this.stagedRepoCount === 1;
+    return !this.committing && this.commitScopeReady && this.stagedRepoCount === 1;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
   }

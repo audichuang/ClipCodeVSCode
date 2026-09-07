@@ -183,6 +183,21 @@ describe('RecentCommits', () => {
     });
   });
 
+  it('lets the inline Open File button handle Enter without activating the row', async () => {
+    const { container } = render(RecentCommits);
+    post(state());
+    await tick();
+    await fireEvent.click(container.querySelector('.commit-row')!);
+    post({ hash: HASH, files: [{ path: 'src/a.ts', status: 'M' }] }, 'recentCommitsCommitFiles');
+    await tick();
+    globalThis.__postedMessages = [];
+    const button = container.querySelector('.inline-action')!;
+    await fireEvent.keyDown(button, { key: 'Enter' });
+    expect(sent()).not.toContainEqual(expect.objectContaining({ type: 'recentCommitsOpenFile' }));
+    await fireEvent.click(button);
+    expect(sent()).toContainEqual({ type: 'recentCommitsOpenWorkingFile', payload: { path: 'src/a.ts', repoPath: '/repo' } });
+  });
+
   // The host repaints the whole state every 180ms-debounced tree change; an
   // index-keyed selection would drift onto another commit, and re-requesting
   // files on every repaint would flash the panel back to "loading".
@@ -223,6 +238,34 @@ describe('RecentCommits', () => {
     post(state());
     await tick();
     expect(sent()).toContainEqual({ type: 'recentCommitsSelectCommit', payload: { hash: HASH, repoPath: '/repo' } });
+  });
+
+  it('schedules one bounded retry after a visible state arrives before the retry floor', async () => {
+    vi.useFakeTimers();
+    const { container } = render(RecentCommits);
+    post(state());
+    await tick();
+    await fireEvent.click(container.querySelector('.commit-row')!);
+    await tick();
+
+    globalThis.__postedMessages = [];
+    vi.advanceTimersByTime(200);
+    post(state());
+    await tick();
+    expect(sent()).toHaveLength(0);
+
+    vi.advanceTimersByTime(799);
+    expect(sent()).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(sent()).toContainEqual({ type: 'recentCommitsSelectCommit', payload: { hash: HASH, repoPath: '/repo' } });
+    const requests = sent().filter((message: any) => message.type === 'recentCommitsSelectCommit');
+    vi.advanceTimersByTime(2000);
+    expect(sent().filter((message: any) => message.type === 'recentCommitsSelectCommit')).toHaveLength(requests.length + 1);
+
+    post({ hash: HASH, files: [{ path: 'a.ts', status: 'M' }] }, 'recentCommitsCommitFiles');
+    await tick();
+    vi.advanceTimersByTime(2000);
+    expect(sent().filter((message: any) => message.type === 'recentCommitsSelectCommit')).toHaveLength(requests.length + 1);
   });
 
   // …but state arrives on every 180ms-debounced tree change, so re-asking on

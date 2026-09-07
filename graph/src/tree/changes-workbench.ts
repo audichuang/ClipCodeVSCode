@@ -422,6 +422,9 @@ export class ChangesWorkbench implements vscode.Disposable {
   /** Commit every repo that has staged changes with one shared message. amend is
    *  only allowed when exactly one repo has staged work (rewrites that HEAD). */
   async commit(message: string, amend: boolean): Promise<CommitResult[]> {
+    if (!this.isCommitScopeReady()) {
+      throw new Error(vscode.l10n.t('Commit is unavailable while repositories are still loading'));
+    }
     // Only repos with staged work AND left checked in the tree are committed.
     /* SNIPCODE-HOOK start: Batch D commit status-read guard */
     // One immutable snapshot of the checkbox state for the whole commit: the
@@ -475,11 +478,14 @@ export class ChangesWorkbench implements vscode.Disposable {
   }
 
   /* SNIPCODE-HOOK start: S13 Amend prefill */
+  isCommitScopeReady(): boolean { return this.tree.isCommitScopeReady(); }
+
   /** HEAD's commit message for the single checked+staged repo, so the commit
    *  box can prefill an empty Amend textarea (webview asks for this on demand
    *  rather than the tree pushing it on every refresh). Returns null when
    *  amend wouldn't have exactly one target (same rule as commit()). */
   async amendPrefillMessage(): Promise<string | null> {
+    if (!this.isCommitScopeReady()) return null;
     const candidates = (await this.loadStatus())
       .filter(r => r.staged.length > 0 && !this.uncheckedForCommit.has(r.repoPath) && r.conflict.length === 0);
     if (candidates.length !== 1) return null;
