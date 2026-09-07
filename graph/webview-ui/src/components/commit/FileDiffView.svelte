@@ -2,6 +2,7 @@
   import type { DiffData } from '../../lib/types';
   /* SNIPCODE-HOOK start: perf — progressive reveal (untrack: the paint pass writes paintBudget) */
   import { onMount, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   /* SNIPCODE-HOOK end */
   import { t } from '../../lib/i18n/index.svelte';
   import { detectLanguage, highlightLineSync, highlightLineWithRanges, getHighlighter, ensureLanguage, activeShikiTheme, escapeHtml } from '../../lib/utils/highlighter';
@@ -274,7 +275,10 @@
   }
 
   // Syntax highlighting
-  let highlightedLines = $state<Map<string, string>>(new Map());
+  /* SNIPCODE-HOOK start: publish only changed keys; replacing the entire map
+     invalidates every already-visible line on each progressive reveal step. */
+  const highlightedLines = new SvelteMap<string, string>();
+  /* SNIPCODE-HOOK end */
   let sbsLeftEl = $state<HTMLElement | undefined>();
   let sbsRightEl = $state<HTMLElement | undefined>();
   let isSyncing = false;
@@ -566,13 +570,22 @@
       // file+hunkStart+lineIndex+content — see highlightKey) so an unrelated
       // hunk's stage/unstage doesn't re-highlight — or flash — every OTHER line.
       const reusable = ready && theme === lastHighlightTheme ? highlightedLines : undefined;
-      const newMap = new Map<string, string>();
+
       const flat: Array<{ key: string; content: string }> = [];
       for (const hunk of visibleHunks) {
         for (let i = 0; i < hunk.lines.length; i++) {
           flat.push({ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content });
         }
       }
+      // Bound retained HTML to this render set even after cancelled passes.
+      // A partial theme pass must never mix old-theme tail entries into its cache.
+      const activeKeys = new Set(flat.map(line => line.key));
+      untrack(() => {
+        if (theme !== lastHighlightTheme) highlightedLines.clear();
+        for (const key of highlightedLines.keys()) {
+          if (!activeKeys.has(key)) highlightedLines.delete(key);
+        }
+      });
       let pos = 0;
       let first = true;
       do {
@@ -581,21 +594,19 @@
           for (let j = pos; j < end; j++) {
             const { key, content } = flat[j];
             const cached = reusable?.get(key);
-            if (cached !== undefined) { newMap.set(key, cached); continue; }
+            if (cached !== undefined) continue;
             const wd = wordDiffByKey.get(key);
-            newMap.set(
+            highlightedLines.set(
               key,
               wd
                 ? highlightLineWithRanges(h, content, lang, wd.ranges, wd.kind, theme)
                 : highlightLineSync(h, content, lang, theme),
             );
           }
-          // A fresh Map per publish is required — a plain Map mutated in place
-          // is not reactive in Svelte 5, only the reassignment is.
-          highlightedLines = new Map(newMap);
+          // SvelteMap notifies only the rows whose cached HTML changed.
           lastHighlightTheme = theme;
         } else if (first) {
-          highlightedLines = new Map();
+          highlightedLines.clear();
         }
         // Never shrink: a same-file re-push already shows every row.
         if (end > untrack(() => paintBudget)) paintBudget = end;
@@ -723,6 +734,7 @@
       <div class="diff-content">
         <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
         {#each paintHunks as hunk, hunkIdx}
+          {@const hunkStart = hunk.oldStart}
           <div class="diff-hunk" class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
             <div class="diff-hunk-header">
               <div class="hunk-header-inner">
@@ -779,7 +791,7 @@
                   <span class="line-prefix">{line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' '}</span>
                 </span>
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <span class="line-content" onmousedown={(e) => { if (e.button === 0) lineSel = null; }}>{@html getHighlighted(hunk.oldStart, lineIndex, line.content)}</span>
+                <span class="line-content" onmousedown={(e) => { if (e.button === 0) lineSel = null; }}>{@html getHighlighted(hunkStart, lineIndex, line.content)}</span>
                 {@render crMarker(line)}
                 {@render noNewlinePill(line)}
               </div>
@@ -797,6 +809,7 @@
           <div class="sbs-inner">
             <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
             {#each paintHunks as hunk, hunkIdx}
+              {@const hunkStart = hunk.oldStart}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
@@ -819,9 +832,10 @@
                   {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
                   {#if row.left}
                     {@const line = row.left.line}
+                    {@const sourceIndex = row.left.index}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.left.index, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
                       {@render crMarker(line)}
                       {@render noNewlinePill(line)}
                       {#if blockLines}
@@ -858,6 +872,7 @@
           <div class="sbs-inner">
             <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
             {#each paintHunks as hunk, hunkIdx}
+              {@const hunkStart = hunk.oldStart}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
@@ -871,9 +886,10 @@
                 {#each sbsRows[hunkIdx] as row}
                   {#if row.right}
                     {@const line = row.right.line}
+                    {@const sourceIndex = row.right.index}
                     <div class="diff-line diff-{line.type}">
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunk.oldStart, row.right.index, line.content)}</span>
+                      <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
                       {@render crMarker(line)}
                       {@render noNewlinePill(line)}
                     </div>
