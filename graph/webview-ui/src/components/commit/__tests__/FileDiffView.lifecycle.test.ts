@@ -11,6 +11,8 @@ const highlighterState = vi.hoisted(() => ({
   lang: 'typescript',
   theme: 'dark-plus',
   onHighlight: undefined as undefined | (() => void),
+  workerEnabled: false,
+  workerPending: [] as Array<{ resolve: (html: string[]) => void; signal: AbortSignal }>,
   /* SNIPCODE-HOOK end */
 }));
 
@@ -38,6 +40,13 @@ vi.mock('../../../lib/utils/highlighter', () => {
     highlightLineWithRanges: highlight,
   };
 });
+
+vi.mock('../../../lib/utils/highlight-worker-client', () => ({
+  warmHighlightWorker: () => {},
+  highlightWorkerBatch: (_lines: unknown, _lang: string, _theme: string, signal: AbortSignal) => highlighterState.workerEnabled
+    ? new Promise<string[]>(resolve => highlighterState.workerPending.push({ resolve, signal }))
+    : Promise.resolve(undefined),
+}));
 
 import FileDiffView from '../FileDiffView.svelte';
 
@@ -109,11 +118,14 @@ beforeEach(() => {
   highlighterState.lang = 'typescript';
   highlighterState.theme = 'dark-plus';
   highlighterState.onHighlight = undefined;
+  highlighterState.workerEnabled = false;
+  highlighterState.workerPending.length = 0;
   document.body.classList.remove('vscode-light');
 });
 
 afterEach(() => {
   for (const resolve of highlighterState.pending.splice(0)) resolve({});
+  for (const pending of highlighterState.workerPending.splice(0)) pending.resolve([]);
   cleanup();
 });
 
@@ -144,6 +156,19 @@ describe('FileDiffView lifecycle', () => {
     document.body.classList.add('vscode-light');
     await waitFor(() => expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600));
     expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
+  });
+
+  it('drops a late worker batch after navigating to another file', async () => {
+    highlighterState.workerEnabled = true;
+    const view = render(FileDiffView, { diff: manyLineDiff(600) });
+    await waitFor(() => expect(highlighterState.workerPending.length).toBe(1));
+    const pending = highlighterState.workerPending[0];
+    highlighterState.workerEnabled = false;
+    await view.rerender({ diff: oneLineDiff('src/new.ts', 'new file') });
+    expect(pending.signal.aborted).toBe(true);
+    pending.resolve(Array(200).fill('<span data-stale="true">old worker</span>'));
+    await waitFor(() => expect(view.container.querySelector('.line-content')?.textContent).toBe('new file'));
+    expect(view.container.querySelector('[data-stale]')).toBeNull();
   });
 
   it('never shows the previous file highlight while a reused view loads the next file', async () => {

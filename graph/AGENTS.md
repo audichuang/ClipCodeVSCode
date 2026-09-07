@@ -67,6 +67,21 @@ handshake timeout (`sent no message within 15000ms`).
 all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
 `.js`/`.css` pairs exist.
 
+It also builds a separate **`highlight-worker.js` IIFE** with
+`vite.highlight-worker.config.ts`. This is a background worker, not a fourth
+webview entry. All worker imports, grammars and WASM must be inlined: VS Code
+blob workers cannot import further chunks. MainPanel/DiffPanel provide the
+resource URL in `body.dataset.highlightWorker` and permit only blob workers
+plus fetches from the webview resource source; workbench keeps its stricter CSP.
+The copy script requires the worker asset too.
+
+`highlight-worker-client.ts` starts lazily for highlighted diffs over 400 lines.
+FileDiffView always renders its first batch locally and only offloads uncached
+tail batches of at least 64 lines after the worker's grammar is ready (200 max).
+Startup never blocks rendering. Errors/timeouts fall back locally; abort and
+the existing stale check prevent late replies repainting a new file/theme.
+Keep `scripts/verify-highlight-worker.mjs` passing after worker/highlighter changes.
+
 `main.js` and `diff.js` carry Shiki; `workbench.js` does not — and their CSP
 differs because of it. Those two panels add `'wasm-unsafe-eval'` to `script-src`
 so Shiki's oniguruma WASM engine can compile; without it compilation is refused

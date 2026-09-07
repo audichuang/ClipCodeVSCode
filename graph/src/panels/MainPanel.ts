@@ -2377,6 +2377,7 @@ export class MainPanel {
        its font) is copied into assetRootUri by the host build, so all three
        URIs resolve under it. Standalone fallback keeps the upstream layout. */
     const distUri = MainPanel.assetRootUri ?? vscode.Uri.joinPath(this.extensionUri, 'webview-ui', 'dist');
+    const workerUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'highlight-worker.js'));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'main.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'main.css'));
     const codiconUri = webview.asWebviewUri(
@@ -2400,13 +2401,13 @@ export class MainPanel {
        Security policy directive". NOT added to
        commit-box-view.ts / recent-commits-view.ts — workbench.js carries no
        Shiki, so those views keep the stricter policy. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; worker-src blob:; connect-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
   <!-- SNIPCODE-HOOK end -->
   <link rel="stylesheet" href="${codiconUri}">
   <link rel="stylesheet" href="${styleUri}">
   <title>Git Graph+</title>
 </head>
-<body>
+<body data-highlight-worker="${workerUri}">
   <div id="app"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

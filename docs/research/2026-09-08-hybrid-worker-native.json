@@ -1,0 +1,240 @@
+{
+  "method": "Native VS Code new-webview paired trials; extension host and filesystem warm, background throttling disabled. Temporary rAF/color and 4ms timer probes; not uninstrumented FPS or whole-process cold boot.",
+  "large": [
+    {
+      "file": "large-render.ts",
+      "start": 1788812488941,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 173,
+      "done": true,
+      "total": 1482,
+      "tailTimerLag": 407.4000000357628,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812505987,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 142,
+      "done": true,
+      "total": 1292,
+      "tailTimerLag": 195.9000000357628,
+      "workerBatches": 5
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812528959,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 166,
+      "done": true,
+      "total": 1600,
+      "tailTimerLag": 463.69999998807907,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812541118,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 152,
+      "done": true,
+      "total": 1270,
+      "tailTimerLag": 190.79999995231628,
+      "workerBatches": 5
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812552550,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 164,
+      "done": true,
+      "total": 1509,
+      "tailTimerLag": 437.5,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812564199,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 153,
+      "done": true,
+      "total": 1447,
+      "tailTimerLag": 391.39999997615814,
+      "workerBatches": 5
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812589172,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 152,
+      "done": true,
+      "total": 1506,
+      "tailTimerLag": 440.10000002384186,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812602187,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 158,
+      "done": true,
+      "total": 1301,
+      "tailTimerLag": 218,
+      "workerBatches": 5
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812616149,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 153,
+      "done": true,
+      "total": 1540,
+      "tailTimerLag": 466.5999999642372,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812629701,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 145,
+      "done": true,
+      "total": 1307,
+      "tailTimerLag": 215.39999997615814,
+      "workerBatches": 3
+    }
+  ],
+  "small": [
+    {
+      "file": "navigation.ts",
+      "start": 1788812657828,
+      "mode": "baseline",
+      "expected": 16,
+      "first": 142,
+      "done": true,
+      "total": 143,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812670774,
+      "mode": "worker",
+      "expected": 16,
+      "first": 127,
+      "done": true,
+      "total": 127,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812684101,
+      "mode": "baseline",
+      "expected": 16,
+      "first": 135,
+      "done": true,
+      "total": 135,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812697292,
+      "mode": "worker",
+      "expected": 16,
+      "first": 136,
+      "done": true,
+      "total": 136,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812710408,
+      "mode": "baseline",
+      "expected": 16,
+      "first": 134,
+      "done": true,
+      "total": 134,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812725559,
+      "mode": "worker",
+      "expected": 16,
+      "first": 128,
+      "done": true,
+      "total": 128,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    }
+  ],
+  "excluded": [
+    {
+      "file": "large-render.ts",
+      "start": 1788811962344,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 372,
+      "done": true,
+      "total": 1785,
+      "tailTimerLag": 451,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812026465,
+      "mode": "baseline",
+      "expected": 3000,
+      "first": 277,
+      "done": true,
+      "total": 8960,
+      "tailTimerLag": 1000.8000000119209,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812388605,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 277,
+      "done": true,
+      "total": 1600,
+      "tailTimerLag": 397.39999997615814,
+      "workerBatches": 0
+    },
+    {
+      "file": "navigation.ts",
+      "start": 1788812425293,
+      "mode": "worker",
+      "expected": 16,
+      "first": 122,
+      "done": true,
+      "total": 122,
+      "tailTimerLag": 0,
+      "workerBatches": 0
+    },
+    {
+      "file": "large-render.ts",
+      "start": 1788812426860,
+      "mode": "worker",
+      "expected": 3000,
+      "first": 54,
+      "done": true,
+      "total": 1331,
+      "tailTimerLag": 394.80000001192093,
+      "workerBatches": 15
+    }
+  ]
+}
