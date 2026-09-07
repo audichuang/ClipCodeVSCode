@@ -48,6 +48,41 @@ describe('GitService', () => {
       await expect(service.emptyTreeRef()).resolves.toBe('6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321');
     });
   });
+
+  describe('hasHead', () => {
+    it('returns true when HEAD rev-parse succeeds', async () => {
+      mockExec(service, async () => 'd3b07384d113edec49eaa6238ad5ff00\n');
+      await expect(service.hasHead()).resolves.toBe(true);
+    });
+
+    it('returns false for unborn branch (Needed a single revision)', async () => {
+      mockExec(service, async () => {
+        throw new GitError('fatal: Needed a single revision', 128, ['rev-parse', '--verify', 'HEAD']);
+      });
+      await expect(service.hasHead()).resolves.toBe(false);
+    });
+
+    it('returns false for ambiguous argument HEAD', async () => {
+      mockExec(service, async () => {
+        throw new GitError("fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.", 128, ['rev-parse', '--verify', 'HEAD']);
+      });
+      await expect(service.hasHead()).resolves.toBe(false);
+    });
+
+    it('rethrows unexpected operational errors like spawn ENOENT', async () => {
+      mockExec(service, async () => {
+        throw new Error('spawn git ENOENT');
+      });
+      await expect(service.hasHead()).rejects.toThrow('spawn git ENOENT');
+    });
+
+    it('rethrows unexpected git errors like not a git repository', async () => {
+      mockExec(service, async () => {
+        throw new GitError('fatal: not a git repository (or any of the parent directories): .git', 128, ['rev-parse', '--verify', 'HEAD']);
+      });
+      await expect(service.hasHead()).rejects.toThrow('fatal: not a git repository');
+    });
+  });
   /* SNIPCODE-HOOK end */
 
   describe('clean', () => {

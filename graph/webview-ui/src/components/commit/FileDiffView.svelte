@@ -79,10 +79,11 @@
     imageGeneration?: number;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK end */
+    onSelectedLineChange?: (line: number | undefined) => void;
   }
 
   /* SNIPCODE-HOOK start: Batch B image request identity */
-  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy, imageRepoPath, imageGeneration }: Props = $props();
+  let { diff, commitHash, staged = false, stacked = false, heading, onReverse, onReverseHunk, onReverseLines, onStageHunk, onStageLines, diffMode: diffModeProp, hideModeToggle = false, stageBusy, imageRepoPath, imageGeneration, onSelectedLineChange }: Props = $props();
   /* SNIPCODE-HOOK end */
 
   // Whether this diff supports reversing (committed view). Drives both the
@@ -167,6 +168,31 @@
     for (let i = lo; i <= hi; i++) out.add(i);
     return out;
   }
+
+  function getSelectedWorkingLine(): number | undefined {
+    if (!lineSel) return undefined;
+    const hunk = diff.hunks[lineSel.hunkIdx];
+    if (!hunk) return undefined;
+    const indices = [...lineSel.indices].sort((a, b) => a - b);
+    for (const idx of indices) {
+      const line = hunk.lines[idx];
+      if (line) {
+        if (typeof line.newLineNumber === 'number') return line.newLineNumber;
+        for (let i = idx + 1; i < hunk.lines.length; i++) {
+          if (typeof hunk.lines[i]?.newLineNumber === 'number') return hunk.lines[i].newLineNumber;
+        }
+        for (let i = idx - 1; i >= 0; i--) {
+          if (typeof hunk.lines[i]?.newLineNumber === 'number') return hunk.lines[i].newLineNumber;
+        }
+        return hunk.newStart;
+      }
+    }
+    return hunk.newStart;
+  }
+
+  $effect(() => {
+    onSelectedLineChange?.(getSelectedWorkingLine());
+  });
 
   // The selected line indices that are actually reversible (+/- lines), sorted.
   // Context lines in the dragged range are dropped. Pure projection of lineSel +
@@ -736,7 +762,7 @@
         <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
         {#each paintHunks as hunk, hunkIdx}
           {@const hunkStart = hunk.oldStart}
-          <div class="diff-hunk" class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
+          <div class="diff-hunk" data-side={staged ? 'staged' : 'unstaged'} data-new-start={hunk.newStart} class:reversible={(canReverse || canStage) && isHunkComplete(hunkIdx)} class:has-selection={lineSel?.hunkIdx === hunkIdx && selectedChangedIndices.length > 0}>
             <div class="diff-hunk-header">
               <div class="hunk-header-inner">
                 <span class="diff-hunk-range" title={hunkLabel(hunk, hunkIdx)}>{hunkLabel(hunk, hunkIdx)}</span>
@@ -815,6 +841,8 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="sbs-hunk"
+                data-side={staged ? 'staged' : 'unstaged'}
+                data-new-start={hunk.newStart}
                 class:hunk-hover={(canReverse || canStage) && isHunkComplete(hunkIdx) && hoveredHunkIdx === hunkIdx}
                 onmouseenter={() => { hoveredHunkIdx = hunkIdx; }}
                 onmouseleave={() => { if (hoveredHunkIdx === hunkIdx) hoveredHunkIdx = null; }}
@@ -1010,10 +1038,9 @@
     display: flex;
     align-items: center;
     padding: 2px 10px;
-    min-height: 22px;
+    min-height: 20px;
     background: var(--vscode-editor-background, #1e1e1e);
-    border-top: 1px dashed var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-    border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.1));
+    border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.12));
     color: var(--vscode-descriptionForeground, #858585);
     font-size: 11px;
   }
@@ -1042,7 +1069,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     color: var(--vscode-descriptionForeground, #858585);
-    opacity: 0.85;
+    opacity: 0.7;
   }
 
   .hunk-action-btn {
@@ -1051,14 +1078,14 @@
     gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
-    min-height: 20px;
-    padding: 1px 7px;
+    min-height: 18px;
+    padding: 1px 6px;
     border-radius: 3px;
     border: 1px solid transparent;
     cursor: pointer;
     font-size: 11px;
     font-family: var(--vscode-font-family, sans-serif);
-    transition: opacity 0.1s, background-color 0.1s, border-color 0.1s;
+    transition: opacity 0.15s, background-color 0.1s;
   }
 
   /* The Reverse HUNK button is a hover/focus affordance; the Reverse LINES button
@@ -1066,44 +1093,44 @@
   .hunk-hunk-btn {
     opacity: 0;
     color: var(--vscode-errorForeground, #f44336);
-    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 10%, transparent);
-    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 25%, transparent);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 8%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 18%, transparent);
   }
 
   .hunk-lines-btn {
     opacity: 1;
     color: var(--vscode-errorForeground, #f44336);
-    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 10%, transparent);
-    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 25%, transparent);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 8%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 18%, transparent);
   }
 
   .hunk-hunk-btn:hover,
   .hunk-lines-btn:hover {
-    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 20%, transparent);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 16%, transparent);
   }
 
   .hunk-stage-lines-btn {
     color: var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff);
-    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 10%, transparent);
-    border-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 25%, transparent);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 8%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 18%, transparent);
     opacity: 0.95;
   }
   .hunk-stage-lines-btn:hover {
-    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 20%, transparent);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 16%, transparent);
   }
 
   /* Stage/unstage buttons (green accent) */
   .hunk-stage-btn {
     color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
-    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 10%, transparent);
-    border-color: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, transparent);
-    opacity: 0.85;
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 8%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 18%, transparent);
+    opacity: 0;
   }
   .diff-hunk.reversible:hover .hunk-stage-btn,
   .hunk-stage-btn:focus,
   .hunk-stage-btn:hover {
-    opacity: 1;
-    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 20%, transparent);
+    opacity: 0.95;
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 16%, transparent);
   }
 
   /* Per-change-block gutter arrow in SBS mode (IntelliJ-style) */
@@ -1202,26 +1229,22 @@
   }
 
   /* SNIPCODE-HOOK start: ui/diff IntelliJ-style gutter, separators, and change blocks */
-  .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)); }
-  .diff-delete { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)); }
-  .diff-empty-line { background: rgba(128, 128, 128, 0.05); }
+  .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.10)); }
+  .diff-delete { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.10)); }
+  .diff-empty-line { background: rgba(128, 128, 128, 0.03); }
 
-  /* Change block top/bottom boundary lines to clearly define each change extent */
+  /* Change block top/bottom subtle boundary */
   :not(.diff-add) + .diff-add {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 15%, transparent);
   }
   :not(.diff-delete) + .diff-delete {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 25%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 15%, transparent);
   }
   .diff-delete + .diff-add {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 35%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 20%, transparent);
   }
   .diff-add + .diff-delete {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 35%, transparent);
-  }
-  .diff-add + .diff-context,
-  .diff-delete + .diff-context {
-    border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.15));
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 20%, transparent);
   }
 
   /* Inline gutter (line numbers + prefix) */
@@ -1233,23 +1256,26 @@
     position: sticky;
     left: 0;
     z-index: 1;
-    background: var(--bg-primary);
-    border-right: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
+    background: var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    border-right: 1px solid var(--vscode-editorOverviewRuler-border, rgba(128, 128, 128, 0.12));
     box-sizing: border-box;
   }
 
   /* Gutter left accent stripe for change blocks (IntelliJ-style) */
   .diff-add .line-gutter {
     background:
-      linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
-      var(--bg-primary);
-    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
+      linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.10)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.10))),
+      var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    border-left: 2px solid var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
   }
   .diff-delete .line-gutter {
     background:
-      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
-      var(--bg-primary);
-    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.10)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.10))),
+      var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    border-left: 2px solid var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+  }
+  .diff-context .line-gutter {
+    border-left: 2px solid transparent;
   }
 
   /* Selected lines */
@@ -1259,8 +1285,8 @@
   .line-selected .line-gutter {
     background:
       linear-gradient(var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25)), var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25))),
-      var(--bg-primary);
-    box-shadow: inset 3px 0 0 var(--vscode-focusBorder, #4a9eff);
+      var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    border-left: 2px solid var(--vscode-focusBorder, #4a9eff);
   }
 
   .line-num {

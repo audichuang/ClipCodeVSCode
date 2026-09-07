@@ -1,0 +1,5 @@
+QA_PACKAGED_VERSION 0.3.42 /tmp/snipcode-live-qa/packaged/extension
+QA_UI_LANGUAGE zh-tw
+QA_HOST_DISCARD_TRANSLATION 丟棄
+QA_PACKAGED_GRAPH_AND_HOST_L10N_PASS
+Exit code:   0

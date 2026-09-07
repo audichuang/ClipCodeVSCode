@@ -1,0 +1,69 @@
+{
+  "unit": "ms, both diff sides; one warmup plus five measured; clearReadCache before each",
+  "noUntracked": {
+    "before": {
+      "samples": [
+        15.3,
+        15.8,
+        13.6,
+        15.8,
+        15.4
+      ],
+      "median": 15.4
+    },
+    "after": {
+      "samples": [
+        24.2,
+        25.6,
+        23.6,
+        24.6,
+        24.2
+      ],
+      "median": 24.2
+    }
+  },
+  "untracked5000": {
+    "before": {
+      "samples": [
+        14.3,
+        13.7,
+        13,
+        12.7,
+        13.6
+      ],
+      "median": 13.6
+    },
+    "after": {
+      "samples": [
+        26.7,
+        27.8,
+        26.8,
+        26.8,
+        26.6
+      ],
+      "median": 26.8
+    }
+  },
+  "catCommon": {
+    "before": {
+      "samples": [
+        14.6,
+        13.3,
+        14.9,
+        14.8,
+        13.8
+      ],
+      "median": 14.6
+    },
+    "after": {
+      "samples": [
+        30.1,
+        29.9,
+        32.4,
+        31.1,
+        26.2
+      ],
+      "median": 30.1
+    }
+  }
+}

@@ -28,6 +28,7 @@ import { DiffPanel } from '../DiffPanel';
 import { StaleDiffError } from '../../git/git-service';
 /* SNIPCODE-HOOK end */
 import type { ChangesWorkbench } from '../../tree/changes-workbench';
+import type { StatusChange } from '../../git/git-service';
 
 const extUri = { fsPath: '/ext' } as unknown as import('vscode').Uri;
 
@@ -38,12 +39,18 @@ function makeWorkbench() {
   return {
     fileDiffData: vi.fn(async (_r: string, _f: string, side: string) =>
       side === 'staged' ? stagedDiff : unstagedDiff),
+    uncommittedStatus: vi.fn(async (_r: string): Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }> => ({
+      staged: [{ path: 'a.ts', status: 'M' }, { path: 'b.ts', status: 'M' }],
+      unstaged: [{ path: 'a.ts', status: 'M' }, { path: 'b.ts', status: 'M' }],
+      conflict: [],
+    })),
     stageHunks: vi.fn(async () => {}),
     unstageHunks: vi.fn(async () => {}),
     stageLines: vi.fn(async () => {}),
     unstageLines: vi.fn(async () => {}),
     imageBase64: vi.fn(async () => 'QUJD'),
     fileAtRef: vi.fn(async () => ''),
+    hasHead: vi.fn(async () => true),
   };
 }
 type Workbench = ReturnType<typeof makeWorkbench>;
@@ -469,5 +476,249 @@ describe('DiffPanel', () => {
       { type: 'error', payload: { source: 'diffStageHunk', message: 'patch does not apply', operationId: 'op-1' } },
     ]);
     /* SNIPCODE-HOOK end */
+  });
+
+  describe('openNativeDiff and Jump to Source', () => {
+    it('resolves oldPath independently per side on a staged rename with unstaged modifications', async () => {
+      const wb = makeWorkbench();
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [{ path: 'new.ts', oldPath: 'old.ts', status: 'R' }],
+        unstaged: [{ path: 'new.ts', status: 'M' }],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+
+      // Staged side: left should be old.ts at HEAD, right should be new.ts at index
+      await dp.openNativeDiff('/r', 'new.ts', 'staged');
+      let calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      const stagedCall = calls[calls.length - 1] as any[];
+      expect(JSON.parse(stagedCall[1].query)).toEqual({ repoPath: '/r', file: 'old.ts', ref: 'HEAD' });
+      expect(JSON.parse(stagedCall[2].query)).toEqual({ repoPath: '/r', file: 'new.ts', ref: '' });
+      expect(stagedCall[3]).toBe('new.ts (Staged)');
+
+      // Unstaged side: left should be new.ts at index, right should be new.ts working tree file
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [{ path: 'new.ts', oldPath: 'old.ts', status: 'R' }],
+        unstaged: [{ path: 'new.ts', status: 'M' }],
+        conflict: [],
+      });
+      await dp.openNativeDiff('/r', 'new.ts', 'unstaged');
+      calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      const unstagedCall = calls[calls.length - 1] as any[];
+      expect(JSON.parse(unstagedCall[1].query)).toEqual({ repoPath: '/r', file: 'new.ts', ref: '' });
+      expect(unstagedCall[2].query).toBeUndefined(); // working tree fileUri
+      expect(unstagedCall[2].fsPath).toBe('/r/new.ts');
+      expect(unstagedCall[3]).toBe('new.ts (Working Tree)');
+    });
+
+    it('uses virtual empty document when file is deleted in working tree', async () => {
+      const wb = makeWorkbench();
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [],
+        unstaged: [{ path: 'deleted.ts', status: 'D' }],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+
+      await dp.openNativeDiff('/r', 'deleted.ts', 'unstaged');
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      const call = calls[calls.length - 1] as any[];
+      expect(JSON.parse(call[2].query)).toEqual({ repoPath: '/r', file: 'deleted.ts', ref: 'empty' });
+      expect(call[3]).toBe('deleted.ts (Working Tree)');
+    });
+
+    it('clamps requested line to document lineCount and sets selection Range', async () => {
+      const wb = makeWorkbench();
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [],
+        unstaged: [{ path: 'a.ts', status: 'M' }],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+
+      // doc lineCount is mocked as 100 in vscode-mock
+      await dp.openNativeDiff('/r', 'a.ts', 'unstaged', 250);
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      const call = calls[calls.length - 1] as any[];
+      const options = call[4];
+      expect(options.selection).toBeDefined();
+      expect(options.selection.start.line).toBe(99); // 100 clamped (0-indexed 99)
+    });
+
+    it('handles diffJumpToEditor message from webview with generation check', async () => {
+      const wb = makeWorkbench();
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [],
+        unstaged: [{ path: 'a.ts', status: 'M' }],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      // Stale generation is ignored
+      const gen = (dp as any).current.generation;
+      await H.messageHandler!({
+        type: 'diffJumpToEditor',
+        payload: { repoPath: '/r', file: 'a.ts', generation: gen + 999, line: 42 },
+      });
+      let calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(0);
+
+      // Matching generation triggers openNativeDiff
+      await H.messageHandler!({
+        type: 'diffJumpToEditor',
+        payload: { repoPath: '/r', file: 'a.ts', generation: gen, line: 42 },
+      });
+      calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][4].selection.start.line).toBe(41); // line 42 (0-indexed 41)
+    });
+
+    it('jumpCurrentToSource asks webview to request jump with active line', async () => {
+      const wb = makeWorkbench();
+      const dp = await shownPanel(wb);
+      H.panel!.webview.postMessage.mockClear();
+
+      dp.jumpCurrentToSource();
+      const messages = posted();
+      expect(messages).toEqual([{ type: 'requestJumpToSource' }]);
+    });
+
+    it('content provider returns empty string for brand new repo without commits', async () => {
+      const wb = makeWorkbench();
+      DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+      const reg = vi.mocked(vscode.workspace.registerTextDocumentContentProvider);
+      const provider = reg.mock.calls[reg.mock.calls.length - 1][1] as any;
+
+      wb.hasHead.mockResolvedValueOnce(false);
+      const uri = { query: JSON.stringify({ repoPath: '/r', file: 'a.ts', ref: 'HEAD' }) };
+      await expect(provider.provideTextDocumentContent(uri)).resolves.toBe('');
+
+      // When hasHead returns true but git emits invalid object name 'HEAD'.
+      wb.hasHead.mockResolvedValueOnce(true);
+      wb.fileAtRef.mockRejectedValueOnce(new Error("fatal: invalid object name 'HEAD'."));
+      await expect(provider.provideTextDocumentContent(uri)).resolves.toBe('');
+
+      // empty ref returns empty string directly without calling fileAtRef
+      const emptyUri = { query: JSON.stringify({ repoPath: '/r', file: 'a.ts', ref: 'empty' }) };
+      await expect(provider.provideTextDocumentContent(emptyUri)).resolves.toBe('');
+    });
+
+    it('opens native diff for first staged file in unborn repo using virtual empty document on the left', async () => {
+      const wb = makeWorkbench();
+      wb.hasHead.mockResolvedValue(false);
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [{ path: 'review.txt', status: 'A' }],
+        unstaged: [],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      await dp.openNativeDiff('/r', 'review.txt', 'staged');
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(1);
+      const [_, leftUri, rightUri, title] = calls[0] as any[];
+      // In unborn repo, left side must be empty virtual doc, NOT HEAD
+      expect(JSON.parse(leftUri.query)).toEqual({ repoPath: '/r', file: 'review.txt', ref: 'empty' });
+      expect(JSON.parse(rightUri.query)).toEqual({ repoPath: '/r', file: 'review.txt', ref: '' });
+      expect(title).toBe('review.txt (Staged)');
+    });
+
+    it('falls back to staged comparison when jumping to source of a staged-only deletion', async () => {
+      const wb = makeWorkbench();
+      wb.uncommittedStatus.mockResolvedValueOnce({
+        staged: [{ path: 'deleted.txt', status: 'D' }],
+        unstaged: [],
+        conflict: [],
+      });
+      const dp = await shownPanel(wb);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      // Even if webview requested unstaged, staged-only deletion must open staged comparison
+      await dp.openNativeDiff('/r', 'deleted.txt', 'unstaged');
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(1);
+      const [_, leftUri, rightUri, title] = calls[0] as any[];
+      expect(JSON.parse(leftUri.query)).toEqual({ repoPath: '/r', file: 'deleted.txt', ref: 'HEAD' });
+      expect(JSON.parse(rightUri.query)).toEqual({ repoPath: '/r', file: 'deleted.txt', ref: '' });
+      expect(title).toBe('deleted.txt (Staged)');
+    });
+
+    it('prevents delayed native diff open request from reclaiming editor after navigation', async () => {
+      const wb = makeWorkbench();
+      let resolveStatusA: (v: { staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }) => void;
+      const statusAPromise = new Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }>((resolve) => { resolveStatusA = resolve; });
+
+      wb.uncommittedStatus.mockImplementation(async (repoPath: string) => {
+        if (repoPath === '/repoA') {
+          return statusAPromise;
+        }
+        return { staged: [], unstaged: [{ path: 'b.ts', status: 'M' }], conflict: [] };
+      });
+
+      const dp = await shownPanel(wb);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      // Trigger open for A (which will hang on statusAPromise)
+      const openAPromise = dp.openNativeDiff('/repoA', 'a.ts', 'unstaged');
+
+      // User navigates panel to B
+      dp.show('/repoB', 'b.ts');
+
+      // Now release A's status
+      resolveStatusA!({ staged: [], unstaged: [{ path: 'a.ts', status: 'M' }], conflict: [] });
+      await openAPromise;
+
+      // vscode.diff should NOT have been called for A
+      const callsA = vi.mocked(vscode.commands.executeCommand).mock.calls
+        .filter((c) => c[0] === 'vscode.diff' && String(c[3]).includes('a.ts'));
+      expect(callsA).toHaveLength(0);
+    });
+
+    it('prevents delayed native diff open request after panel is disposed', async () => {
+      const wb = makeWorkbench();
+      let resolveStatusA: (v: { staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }) => void;
+      const statusAPromise = new Promise<{ staged: StatusChange[]; unstaged: StatusChange[]; conflict: StatusChange[] }>((resolve) => { resolveStatusA = resolve; });
+
+      wb.uncommittedStatus.mockImplementation(async (repoPath: string) => {
+        if (repoPath === '/repoA') {
+          return statusAPromise;
+        }
+        return { staged: [], unstaged: [{ path: 'b.ts', status: 'M' }], conflict: [] };
+      });
+
+      const dp = await shownPanel(wb);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      // Trigger open for A (which will hang on statusAPromise)
+      const openAPromise = dp.openNativeDiff('/repoA', 'a.ts', 'unstaged');
+
+      // User closes / disposes the panel
+      dp.dispose();
+
+      // Now release A's status
+      resolveStatusA!({ staged: [], unstaged: [{ path: 'a.ts', status: 'M' }], conflict: [] });
+      await openAPromise;
+
+      // vscode.diff should NOT have been called
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(0);
+    });
+
+    it('opens native diff directly from sidebar without webview created', async () => {
+      const wb = makeWorkbench();
+      const dp = DiffPanel.register(extUri, wb as any);
+      vi.mocked(vscode.commands.executeCommand).mockClear();
+
+      await dp.openNativeDiff('/r', 'a.ts', 'unstaged');
+
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls.filter((c) => c[0] === 'vscode.diff');
+      expect(calls).toHaveLength(1);
+      const [_, leftUri, rightUri, title] = calls[0] as any[];
+      expect(JSON.parse(leftUri.query)).toEqual({ repoPath: '/r', file: 'a.ts', ref: '' });
+      expect(rightUri.fsPath).toBe('/r/a.ts');
+      expect(title).toBe('a.ts (Working Tree)');
+    });
   });
 });

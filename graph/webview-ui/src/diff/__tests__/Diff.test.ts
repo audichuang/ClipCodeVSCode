@@ -3,6 +3,7 @@ import { render, fireEvent, cleanup } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Diff from '../Diff.svelte';
 import { diffStore } from '../diff-store.svelte';
+import { listenForHostMessages } from '../messaging';
 import { i18n } from '../../lib/i18n/index.svelte';
 import * as vscodeApiModule from '../../lib/vscode-api';
 import type { DiffData } from '../../lib/types';
@@ -31,6 +32,7 @@ function twoHunkDiff(file = 'src/a.ts'): DiffData {
 /* SNIPCODE-HOOK end */
 
 beforeEach(() => {
+  listenForHostMessages();
   diffStore.reset();
   i18n.setLocale('en');
   globalThis.__postedMessages = [];
@@ -407,6 +409,51 @@ describe('Diff.svelte next/prev hunk navigation (D11)', () => {
     diffStore.setDiffs('/r', 'src/b.ts', twoHunkDiff('src/b.ts'), null);
     await tick();
     expect(container.querySelector('.current-hunk')).toBeNull();
+  });
+
+  it('F4 jump to source prioritizes the most recently selected line across sides', async () => {
+    const staged: DiffData = {
+      file: 'src/a.ts', isBinary: false, isImage: false, fingerprint: 'fp1',
+      hunks: [{ header: '@@ -5 +5 @@', oldStart: 5, oldLines: 1, newStart: 5, newLines: 1,
+        lines: [{ type: 'add', content: 'stagedLine5', newLineNumber: 5 }] }],
+    };
+    const unstaged: DiffData = {
+      file: 'src/a.ts', isBinary: false, isImage: false, fingerprint: 'fp2',
+      hunks: [{ header: '@@ -25 +25 @@', oldStart: 25, oldLines: 1, newStart: 25, newLines: 1,
+        lines: [{ type: 'add', content: 'unstagedLine25', newLineNumber: 25 }] }],
+    };
+    diffStore.setDiffs('/r', 'src/a.ts', staged, unstaged);
+    const { container } = render(Diff);
+    const sections = container.querySelectorAll('.diff-section');
+    expect(sections.length).toBe(2);
+
+    const stagedGutter = sections[0].querySelector('.line-gutter');
+    const unstagedGutter = sections[1].querySelector('.line-gutter');
+    expect(stagedGutter).toBeTruthy();
+    expect(unstagedGutter).toBeTruthy();
+
+    // 1. Click unstaged line 25 first
+    await fireEvent.mouseDown(unstagedGutter!);
+    await tick();
+
+    // 2. Click staged line 5 second
+    await fireEvent.mouseDown(stagedGutter!);
+    await tick();
+
+    // Trigger jump to source message from host
+    globalThis.__postedMessages = [];
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'requestJumpToSource' } }));
+    await tick();
+
+    const posted = globalThis.__postedMessages.map((m: any) => m.data);
+    const jumpMsg = posted.find((d: any) => d.type === 'diffJumpToEditor');
+    expect(jumpMsg).toBeTruthy();
+    expect(jumpMsg.payload).toMatchObject({
+      repoPath: '/r',
+      file: 'src/a.ts',
+      side: 'staged',
+      line: 5,
+    });
   });
 });
 /* SNIPCODE-HOOK end */

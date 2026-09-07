@@ -226,6 +226,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('snipcode.git.recentPickRepo', () => recentCommits.pickRepo()),
     vscode.commands.registerCommand('snipcode.git.recentRefresh', () => recentCommits.refresh()),
     vscode.commands.registerCommand('snipcode.git.recentOpenGraph', () => MainPanel.createOrShow(context.extensionUri, activeRepoPath)),
+    vscode.commands.registerCommand('snipcode.diff.jumpToSource', () => diffPanel.jumpCurrentToSource()),
   );
   /* SNIPCODE-HOOK end */
 
