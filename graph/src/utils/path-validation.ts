@@ -10,7 +10,12 @@ export function resolveRepoRelativePath(repoPath: string, rel: unknown, op: stri
   }
   const fullPath = path.resolve(repoPath, rel);
   const fromRoot = path.relative(repoPath, fullPath);
-  if (fromRoot.startsWith('..') || path.isAbsolute(fromRoot)) {
+  // Compare the first SEGMENT, not the prefix: `startsWith('..')` also rejected
+  // `..foo` / `..hidden/a`, which are ordinary files at the repo root, so their
+  // diff refused to open (and one of them failed a whole multi-diff batch).
+  // Split on both separators so a Windows-style relative path is handled even
+  // when path.sep says otherwise.
+  if (fromRoot.split(/[\\/]/)[0] === '..' || path.isAbsolute(fromRoot)) {
     throw new Error(`Path escapes repository: ${rel}`);
   }
   return fullPath;

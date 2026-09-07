@@ -17,6 +17,10 @@
   import Markdown from '../common/Markdown.svelte';
   import { hasMarkdown } from '../../lib/markdown-detect';
   import { formatCommitDate } from '../../lib/utils/format-date';
+  /* SNIPCODE-HOOK start: status colour/label moved to lib/utils/file-status,
+     shared with the Recent Commits sidebar's file list. */
+  import { statusColor, statusLabel } from '../../lib/utils/file-status';
+  /* SNIPCODE-HOOK end */
 
   interface Props {
     commit?: Commit;
@@ -731,46 +735,6 @@
       expandedDirs = dirs;
     }
   });
-
-  function statusColor(s?: string): string {
-    /* SNIPCODE-HOOK start: C7 — HC Light is `vscode-high-contrast-light`, treat as light */
-    const light = document.body.classList.contains('vscode-light')
-      || document.body.classList.contains('vscode-high-contrast-light');
-    /* SNIPCODE-HOOK end */
-    if (light) {
-      switch (s) {
-        case 'A': return '#2e7d32';
-        case 'M': return '#8a6d3b';
-        case 'D': return '#b71c1c';
-        case 'R': return '#1565c0';
-        case 'C': return '#6a1b9a';
-        case 'N': return '#616161';
-        default: return 'var(--text-secondary)';
-      }
-    }
-    switch (s) {
-      case 'A': return '#4caf50';
-      case 'M': return '#e2c08d';
-      case 'D': return '#f44336';
-      case 'R': return '#2196f3';
-      case 'C': return '#9c27b0';
-      case 'N': return '#9e9e9e';
-      default: return 'var(--text-secondary)';
-    }
-  }
-
-  function statusLabel(s?: string): string {
-    switch (s) {
-      case 'A': return t('status.added');
-      case 'M': return t('status.modified');
-      case 'D': return t('status.deleted');
-      case 'R': return t('status.renamed');
-      case 'C': return t('status.copied');
-      case 'U': return t('status.untracked');
-      case 'N': return t('details.nestedRepoLabel');
-      default: return '';
-    }
-  }
 
   function toggleDir(dirPath: string) {
     const next = new Set(expandedDirs);

@@ -1535,6 +1535,82 @@ export class GitService {
     return this.parseNameStatusZ(raw);
   }
 
+  /* SNIPCODE-HOOK start: per-file merge parent for the NATIVE diff editor */
+  /**
+   * Which revision — and which path inside it — a file's change at `hash` must
+   * be diffed against, keyed by the file's path AT `hash`.
+   *
+   * Single-parent commits need nothing per file: every file compares against
+   * `fallbackRef`. A **merge** does. {@link showCommitFiles} returns the union
+   * of the diffs against every parent, so a file that arrived from parent 2..N
+   * has an EMPTY diff against the first parent, and a file one side renamed
+   * keeps its NEW path on the other side — pairing that parent with `oldPath`
+   * then reads a blob that isn't there.
+   *
+   * Parent walking matches the private {@link commitFileDiff}: `srcSha !==
+   * dstSha` in `--raw` output is that method's "parsed hunks > 0" test in
+   * another form, so a rename-only or mode-only diff against an earlier parent
+   * cannot shadow the parent that actually carries the content. The integration
+   * suite pins the two against the same merge so they can never diverge.
+   */
+  async resolveCommitFileBases(hash: string): Promise<{
+    fallbackRef: string;
+    perFile: Map<string, { ref: string; path: string }>;
+  }> {
+    this.assertSafeRef(hash, 'diff');
+    const parents = await this.commitParents(hash);
+    const perFile = new Map<string, { ref: string; path: string }>();
+    // `%P` is already a full object name, so a single parent needs no rev-parse;
+    // a root commit falls back to the empty tree via resolveDiffBaseRef.
+    const fallbackRef = parents.length >= 1 ? parents[0] : await this.resolveDiffBaseRef(hash);
+    if (parents.length <= 1) return { fallbackRef, perFile };
+
+    for (const parent of parents) {
+      this.assertSafeRef(parent, 'diff');
+      const raw = await this.exec(['diff', '--raw', '-M', '-z', '--no-abbrev', `${parent}..${hash}`]);
+      for (const entry of GitService.parseRawDiffZ(raw)) {
+        if (entry.srcSha === entry.dstSha) continue;
+        if (perFile.has(entry.path)) continue;
+        perFile.set(entry.path, { ref: parent, path: entry.oldPath ?? entry.path });
+      }
+    }
+    return { fallbackRef, perFile };
+  }
+
+  /**
+   * `git diff --raw -M -z --no-abbrev` output. Each entry is
+   * `:<srcmode> <dstmode> <srcsha> <dstsha> <status>` NUL `<path>` NUL, with
+   * rename/copy statuses carrying `<oldPath>` NUL `<path>` NUL instead. Only
+   * ever fed two-dot (`<parent>..<hash>`) diffs, so it never has to handle
+   * combined-diff rows with one column per parent.
+   */
+  private static parseRawDiffZ(
+    raw: string,
+  ): Array<{ srcSha: string; dstSha: string; status: string; path: string; oldPath?: string }> {
+    const out: Array<{ srcSha: string; dstSha: string; status: string; path: string; oldPath?: string }> = [];
+    const parts = raw.split('\0');
+    let index = 0;
+    while (index < parts.length) {
+      const meta = parts[index];
+      if (!meta || !meta.startsWith(':')) { index += 1; continue; }
+      const fields = meta.slice(1).split(' ');
+      const srcSha = fields[2] ?? '';
+      const dstSha = fields[3] ?? '';
+      const status = fields[4] ?? '';
+      const renameLike = status.startsWith('R') || status.startsWith('C');
+      const first = parts[index + 1] ?? '';
+      if (renameLike) {
+        out.push({ srcSha, dstSha, status, oldPath: first, path: parts[index + 2] ?? '' });
+        index += 3;
+      } else {
+        out.push({ srcSha, dstSha, status, path: first });
+        index += 2;
+      }
+    }
+    return out;
+  }
+  /* SNIPCODE-HOOK end */
+
   private async commitParents(hash: string): Promise<string[]> {
     try {
       const raw = await this.exec(['log', '-1', '--format=%P', hash], { silent: true });

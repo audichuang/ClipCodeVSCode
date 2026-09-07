@@ -20,6 +20,11 @@ const H = vi.hoisted(() => {
     getUncommittedDiff: vi.fn(async () => ({ staged: [], unstaged: [] })),
     getUncommittedFileDiff: vi.fn(async () => null),
     resolveDiffBaseRef: vi.fn(async () => 'parentsha'),
+    /* SNIPCODE-HOOK start: per-file merge parent — openDiff resolves the left
+       side through this now, so a merge's file gets the parent that actually
+       carries it instead of an empty first-parent diff. */
+    resolveCommitFileBases: vi.fn(async () => ({ fallbackRef: 'parentsha', perFile: new Map() })),
+    /* SNIPCODE-HOOK end */
     getConflictFiles: vi.fn(async () => []),
     getOperationState: vi.fn(async () => ({ type: null })),
     getRemoteUrl: vi.fn(async () => ''),
@@ -155,11 +160,13 @@ describe('MainPanel message routing', () => {
 
   it('openDiff for a commit builds the left URI from the resolved parent SHA, not the ~1 shorthand', async () => {
     const vscode = await import('vscode');
-    H.git.resolveDiffBaseRef.mockResolvedValue('1111111111111111111111111111111111111111');
+    H.git.resolveCommitFileBases.mockResolvedValue({
+      fallbackRef: '1111111111111111111111111111111111111111', perFile: new Map(),
+    });
 
     await dispatch({ type: 'openDiff', payload: { file: 'doc.md', commitHash: '2222222' } });
 
-    expect(H.git.resolveDiffBaseRef).toHaveBeenCalledWith('2222222');
+    expect(H.git.resolveCommitFileBases).toHaveBeenCalledWith('2222222');
     const diffCall = (vscode.commands.executeCommand as ReturnType<typeof vi.fn>).mock.calls
       .find(c => c[0] === 'vscode.diff')!;
     expect(diffCall).toBeDefined();
@@ -172,7 +179,9 @@ describe('MainPanel message routing', () => {
   /* SNIPCODE-HOOK start: ui/diff D3/X3 rename-aware pathspec */
   it('openDiff for a renamed file resolves the LEFT (parent) URI from oldPath, not the new path', async () => {
     const vscode = await import('vscode');
-    H.git.resolveDiffBaseRef.mockResolvedValue('1111111111111111111111111111111111111111');
+    H.git.resolveCommitFileBases.mockResolvedValue({
+      fallbackRef: '1111111111111111111111111111111111111111', perFile: new Map(),
+    });
 
     await dispatch({ type: 'openDiff', payload: { file: 'new.ts', commitHash: '2222222', oldPath: 'old.ts' } });
 
@@ -182,6 +191,27 @@ describe('MainPanel message routing', () => {
     expect(JSON.parse(leftUri.query).path).toMatch(/old\.ts$/);
     const rightUri = diffCall[2] as { query: string };
     expect(JSON.parse(rightUri.query).path).toMatch(/new\.ts$/);
+  });
+
+  // A merge's file list is the union across every parent, so a file that came
+  // in from parent 2..N had an EMPTY diff against the first parent — and the
+  // winning parent already knows it under its NEW name, so the left path comes
+  // from the resolution too, not from the union list's oldPath. Pinned against
+  // real git in git/__tests__/integration/merge-file-base.integration.test.ts.
+  it('openDiff for a merge file takes both ref and left path from the per-file resolution', async () => {
+    const vscode = await import('vscode');
+    H.git.resolveCommitFileBases.mockResolvedValue({
+      fallbackRef: 'firstparent',
+      perFile: new Map([['new.ts', { ref: 'secondparent', path: 'new.ts' }]]),
+    });
+
+    await dispatch({ type: 'openDiff', payload: { file: 'new.ts', commitHash: '2222222', oldPath: 'old.ts' } });
+
+    const diffCall = (vscode.commands.executeCommand as ReturnType<typeof vi.fn>).mock.calls
+      .find(c => c[0] === 'vscode.diff')!;
+    const leftUri = JSON.parse((diffCall[1] as { query: string }).query);
+    expect(leftUri.ref).toBe('secondparent');
+    expect(leftUri.path).toMatch(/new\.ts$/);
   });
   /* SNIPCODE-HOOK end */
 

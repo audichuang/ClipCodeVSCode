@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.45
+
+The Snipcode Git sidebar's recent-commit list was deliberately inert: you could
+see the graph but not click a commit, so its message body and its changed files
+were only reachable by opening the full Git Graph tab. VS Code's own Source
+Control Graph lets you click. Now this one does too — and fixing the diff it
+opens turned up a bug the full graph panel had all along.
+
+- **Clicking a commit opens a details panel under the list.** Full message,
+  author with a relative time ("3 days ago"), the committer on a separate line
+  when it differs from the author (rebased or cherry-picked history), clickable
+  parent hashes, and the list of changed files with their status letter. Clicking
+  a file opens the native diff editor — the same parent↔commit comparison, over
+  the built-in `git:` provider, that the graph panel opens for a graph row. The
+  panel's header opens every file of the commit in one multi-diff editor, titled
+  with the commit's subject. The message block and the file list scroll
+  separately, so a long message can no longer push the files out of view.
+- **A merge commit's file diff was empty for every file that came in from the
+  second parent — in the sidebar and in the full graph panel.** The file list is
+  the union of the diffs against every parent, but the left side of the diff was
+  always the *first* parent, so a file that arrived from parent 2..N compared
+  against a revision identical to the commit. A file one side had renamed made it
+  worse: the winning parent knows that file under its new name, so pairing it
+  with the old path read a blob that isn't there. Both surfaces now resolve the
+  parent — and the path inside it — per file, matching what the in-webview diff
+  view already did.
+- **Right-click a commit** for Copy Commit SHA / Short SHA / Commit Info /
+  Commit Message, and **Copy Full Source** — the extension's own copy, which the
+  sidebar was the last surface to be missing. Right-click a file for Open
+  Changes, Open File, Copy Path, or Copy Full Source for just that file. A file
+  row also gets an inline Open File action on hover.
+- **↑/↓ move the selection**, Ctrl/Cmd+↑/↓ follow the first parent or newest
+  child, and the list now keeps exactly one row in the tab order instead of
+  thirty.
+- **Nothing in a SHA-256 repository worked.** Object names there are 64
+  characters and the sidebar's validation capped them at 40, so every click was
+  dropped silently: the panel sat on "Loading changes…" and diffs did nothing.
+- **A file whose name starts with two dots** (`..keep`) was refused as a path
+  traversal attempt, because the guard compared the prefix instead of the first
+  path segment. Its diff would not open, and in a multi-diff batch it took every
+  other file down with it. Fixed for every caller, not just the sidebar.
+- **On Windows, the sidebar could point at the wrong repository.** Repo
+  comparison used a path resolve, which normalizes separators but not the drive
+  letter's case, so the same repository handed out by two different sources read
+  as two repositories. Commit requests are now also tagged with the repository
+  the row came from and dropped if the active repository has changed since —
+  switching repositories is synchronous while the view repaints asynchronously,
+  so a click could otherwise land on another repository's file.
+
 ## 0.3.44
 
 Opening a file in the Diff tab used to sit in plain text for up to a second and

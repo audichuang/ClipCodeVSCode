@@ -24,6 +24,10 @@ import {
   assertSafeArgPath as assertSafeArgPathUtil,
 } from '../utils/path-validation';
 import { SequenceGuard } from '../utils/sequence-guard';
+/* SNIPCODE-HOOK start: toGitUri moved to utils/git-uri so the Recent Commits
+   sidebar opens the byte-identical `git:` diff this panel does. */
+import { toGitUri } from '../utils/git-uri';
+/* SNIPCODE-HOOK end */
 import { resolveDefaultWorktreePath } from '../utils/worktree-path';
 import type { BranchInfo, Commit } from '../git/types';
 
@@ -1889,10 +1893,7 @@ export class MainPanel {
            MainPanel.copyFullSourceAtCommit by activateGraph; its body lives in
            src/graphCopy.ts (wired by host src/extension.ts). */
         case 'snipcodeCopyFullSource': {
-          await MainPanel.copyFullSourceAtCommit?.(message.payload, {
-            gitPath: getGitBinaryPath(),
-            gitEnv: MainPanel.extraEnv,
-          });
+          await MainPanel.copyFullSourceAtCommit?.(message.payload, MainPanel.copyRuntime);
           return;
         }
         /* SNIPCODE-HOOK end */
@@ -1987,26 +1988,22 @@ export class MainPanel {
     }
   }
 
-  /**
-   * Builds a `git:`-scheme URI in the exact format VS Code's built-in Git
-   * extension understands (mirrors its internal `toGitUri`). Using the standard
-   * scheme — rather than our own provider — lets the built-in content provider
-   * serve the blob and, crucially, lets markdown-diff tooling recognise the
-   * comparison: "Reopen editor with…" and extensions like `mddiff` only handle
-   * the `git:` scheme. (#51)
-   *
-   * ref conventions match the built-in extension: '' → index (stage 0),
-   * 'HEAD'/<sha>/<sha>~1 → that revision (`git show <ref>:<path>`). The query
-   * `path` is the absolute fsPath; the URI path keeps the file extension so the
-   * editor still infers the language.
-   */
+  /* SNIPCODE-HOOK start: delegates to utils/git-uri (shared with the Recent
+     Commits sidebar); the format contract lives in that file's doc comment. */
   private toGitUri(fullPath: string, ref: string): vscode.Uri {
-    const fileUri = vscode.Uri.file(fullPath);
-    return fileUri.with({
-      scheme: 'git',
-      query: JSON.stringify({ path: fileUri.fsPath, ref }),
-    });
+    return toGitUri(fullPath, ref);
   }
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: the Recent Commits sidebar makes the same transfer
+     call, and `extraEnv` is private static — exposing the resolved pair here
+     keeps both callers on ONE runtime. A bare git/env is unspawnable on
+     SSH-remote hosts, which surfaces as "No source copied" even though the
+     files exist, so neither caller may omit it. */
+  public static get copyRuntime(): { gitPath?: string; gitEnv?: Record<string, string> } {
+    return { gitPath: getGitBinaryPath(), gitEnv: MainPanel.extraEnv };
+  }
+  /* SNIPCODE-HOOK end */
 
   private async openDiffInEditor(
     file: string,
@@ -2029,10 +2026,17 @@ export class MainPanel {
     /* SNIPCODE-HOOK end */
 
     if (commitHash) {
-      // Commit diff: parent vs commit. Resolve the parent to a full SHA — the
-      // `<sha>~1` shorthand isn't understood by markdown-diff tooling (#51).
-      const parentRef = await this.gitService.resolveDiffBaseRef(commitHash);
-      const leftUri = this.toGitUri(leftPath, parentRef);
+      /* SNIPCODE-HOOK start: per-file merge parent. `resolveDiffBaseRef` is the
+         FIRST parent, but the file list is the union across every parent, so a
+         merge showed an empty diff for each file that arrived from parent
+         2..N — and the parent that carries it may not know the rename, so the
+         left side takes both its ref and its path from one resolution. The
+         parent is still a full SHA (the `<sha>~1` shorthand isn't understood by
+         markdown-diff tooling, #51). */
+      const { fallbackRef, perFile } = await this.gitService.resolveCommitFileBases(commitHash);
+      const base = perFile.get(file) ?? { ref: fallbackRef, path: oldPath ?? file };
+      const leftUri = this.toGitUri(this.resolveRepoRelativePath(base.path, 'openDiff'), base.ref);
+      /* SNIPCODE-HOOK end */
       const rightUri = this.toGitUri(fullPath, commitHash);
       const title = `${file} (${commitHash.substring(0, 7)})`;
       await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);

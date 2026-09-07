@@ -15,6 +15,20 @@ describe('resolveRepoRelativePath', () => {
     expect(resolveRepoRelativePath(repo, '.', 'op')).toBe(repo);
   });
 
+  /* SNIPCODE-HOOK start: `..name` is a file, not traversal. The guard compared
+     the PREFIX, so these ordinary repo-root files had their diff refused — and
+     one of them failed a whole multi-diff batch with it. */
+  it('resolves files whose name merely starts with dots', () => {
+    expect(resolveRepoRelativePath(repo, '..keep', 'op')).toBe(path.join(repo, '..keep'));
+    expect(resolveRepoRelativePath(repo, '..hidden/a.ts', 'op')).toBe(path.join(repo, '..hidden/a.ts'));
+    expect(resolveRepoRelativePath(repo, 'src/..data', 'op')).toBe(path.join(repo, 'src/..data'));
+  });
+  /* SNIPCODE-HOOK end */
+
+  it('rejects the bare parent directory', () => {
+    expect(() => resolveRepoRelativePath(repo, '..', 'op')).toThrow(/escapes repository/);
+  });
+
   it('rejects parent traversal', () => {
     expect(() => resolveRepoRelativePath(repo, '../etc/passwd', 'op')).toThrow(
       /escapes repository/

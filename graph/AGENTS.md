@@ -19,7 +19,7 @@ without a design decision — those are dead paths that only remain in old plans
 |---|---|
 | Multi-repo **Changes** tree (real stage/unstage/commit) | **Owner:** `src/tree/changes-workbench.ts` (+ `build-change-tree.ts`, `changes-tree.ts`). Ops: `GitService.stagePaths` / `unstagePaths` / `commitIndex` / `stageHunks` / `unstageHunks` / `stageLines` / `unstageLines` |
 | **Commit** message box (one shared message across repos) | `src/tree/commit-box-view.ts` (`CommitBoxViewProvider`) → `workbench.js` → `ChangesWorkbench.commit()` |
-| **Recent Commits** sidebar overview | `src/tree/recent-commits-view.ts` → `workbench.js` → `RecentCommits.svelte`; follows HEAD history without replacing the active editor |
+| **Recent Commits** sidebar overview + commit details | `src/tree/recent-commits-view.ts` → `workbench.js` → `RecentCommits.svelte`; follows HEAD history without replacing the active editor. A row click (or ↑/↓, Ctrl+↑/↓ for parent/child) selects it and opens the details panel below the list: full message, author + relative time, committer when it differs, clickable parents, changed files. A file row opens the native diff, its inline action opens the working file, the header opens all files in one multi-diff (`vscode.changes`). Right-click gives Copy SHA / Short SHA / Commit Info / Message and **Copy Full Source** (transfer to `MainPanel.copyFullSourceAtCommit` + `MainPanel.copyRuntime`, payload built host-side). Reuses `GitService.showCommitFiles` / `resolveCommitFileBases` + `utils/git-uri.ts` — the same comparison `MainPanel` opens for a graph row |
 | Full-width **Diff** tab (unified staged+unstaged, hunk/line stage, word-diff) | `src/panels/DiffPanel.ts` → `diff.js` |
 | Fetch / Pull / Push all repos + ↓↑ badges | `ChangesWorkbench.fetchAll` / `pullAll` / `pushAll` + root `package.json` `view/title` menus when `view == snipcode.changes`; badges from `GitService.aheadBehind` on tree repo nodes — **not** the graph webview `Toolbar.svelte` |
 | PR compare tab | `webview-ui/.../pr/PrView.svelte` + `GitService.commitsBetween` |
@@ -37,7 +37,7 @@ when: `../AGENTS.md`; the two vitest projects: "Key conventions" below.
 
 | Area | Role |
 |---|---|
-| `src/git/git-service.ts` | Central git CLI hub; almost all ops go through it |
+| `src/git/git-service.ts` | Central git CLI hub; almost all ops go through it. **Merge parents:** `showCommitFiles` returns the UNION of the diffs against every parent, so pairing it with `resolveDiffBaseRef` (the FIRST parent) opens an empty diff for every file that arrived from parent 2..N — and the winning parent may not know a rename, making `oldPath` read a missing blob. Anything opening a native diff editor must use **`resolveCommitFileBases`** (ref *and* left path per file); the private `commitFileDiff` walks parents the same way for the in-webview diff, and `__tests__/integration/merge-file-base.integration.test.ts` pins the two to the same parent |
 | `src/git/patch-builder.ts` | Pure patch builders for reverse-changes and forward stage/unstage hunks/lines. **Byte-safe:** it takes a raw `Buffer` and round-trips through `latin1`, never a UTF-8-decoded string — quoted-path/UTF-8/mixed-EOF fidelity. The Buffer (and the stale-diff fingerprint) comes from the **caller**: `git-service.ts` execs those diffs with `{encoding:'buffer'}`. Keep both ends buffer-typed or fidelity is lost before the builder ever runs |
 | `src/utils/message-bus.ts` | Graph webview ↔ host message types + **live** `MESSAGE_EFFECTS` gate |
 | `src/panels/MainPanel.ts` | Commit-graph WebviewPanel; message router + mutation transactions |
@@ -89,8 +89,32 @@ before optimising anything else here.
 `workbench.ts` chooses the commit box or recent graph from `body.dataset.view`.
 Acquire the VS Code API lazily and install only the chosen view's listeners:
 static imports run for both views, and a second `acquireVsCodeApi()` breaks boot.
-The recent graph's ordinary interactions stay in the sidebar; only its explicit
-Open Full Graph action opens the editor panel.
+Selecting a commit in the recent graph stays in the sidebar — only the explicit
+Open Full Graph action turns the editor into the graph panel. Opening a *file*
+from its details panel does open a diff tab, the way a file row does in every
+VS Code sidebar; that is not the same thing as the view yanking you to the graph.
+
+The details panel is a flex **sibling** of `.commit-list`, never a row inside it:
+the graph SVG is absolutely positioned at `y = row * 22`, so anything injected
+between rows throws every dot off its row. Inside it, the message block and the
+file list are **separate scrollers** — one scroller let a long message push the
+files (the reason the panel exists) out of view.
+
+**The sidebar's `recentCommits*` messages are outside both mutation gates.** They
+are ad-hoc `msg?.type ===` checks in `resolveWebviewView`, not members of
+`WebviewMessage`, so neither `MESSAGE_EFFECTS` (the compile-time exhaustive one)
+nor MainPanel's repo-switch transaction covers them. Everything wired there so
+far is read-only or a transfer to an already-gated host handler; a checkout /
+cherry-pick / revert / reset added here would race MainPanel's mutations
+unchecked. Route those through the full graph instead.
+
+Every commit-scoped sidebar message carries the `repoPath` its row came from and
+the host drops it unless that is still the active repo: `extension.ts` switches
+the active repo synchronously while this view only repaints after its git
+queries finish, so a click can arrive for the repo the user was *looking* at.
+Repo comparison uses `utils/path.ts` `samePath` (case-insensitive) — a local
+`path.resolve` comparison normalizes separators but not the drive-letter case,
+which silently dropped every request on Windows (#30).
 
 ## Matching native VS Code (webview layout)
 

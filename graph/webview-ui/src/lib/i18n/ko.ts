@@ -78,6 +78,17 @@ export const ko: Record<string, string> = {
   'recent.headScope': 'HEAD 기록',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': '스테이징 {staged} · 미스테이징 {unstaged} · 충돌 {conflicts}',
+  'recent.openChanges': '모든 변경 사항 열기',
+  'recent.closeDetails': '세부 정보 닫기',
+  'recent.loadingFiles': '변경 사항 로드 중…',
+  'recent.noFiles': '파일 변경 사항 없음',
+  'recent.copyMessage': '커밋 메시지 복사',
+  'recent.copyFullSource': '전체 소스 복사',
+  'recent.copyPath': '경로 복사',
+  'recent.openFile': '파일 열기',
+  'recent.openDiff': '변경 사항 열기',
+  'recent.parents': '부모 커밋',
+  'recent.committer': '커미터',
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 

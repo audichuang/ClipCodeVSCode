@@ -78,6 +78,17 @@ export const en: Record<string, string> = {
   'recent.headScope': 'HEAD history',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': 'Staged {staged} · Unstaged {unstaged} · Conflicts {conflicts}',
+  'recent.openChanges': 'Open All Changes',
+  'recent.closeDetails': 'Close details',
+  'recent.loadingFiles': 'Loading changes…',
+  'recent.noFiles': 'No file changes',
+  'recent.copyMessage': 'Copy Commit Message',
+  'recent.copyFullSource': 'Copy Full Source',
+  'recent.copyPath': 'Copy Path',
+  'recent.openFile': 'Open File',
+  'recent.openDiff': 'Open Changes',
+  'recent.parents': 'Parents',
+  'recent.committer': 'Committer',
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
