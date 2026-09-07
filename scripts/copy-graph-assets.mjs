@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,10 @@ const outDir = path.join(repoRoot, 'dist', 'graph-webview');
 const viteDist = path.join(repoRoot, 'graph', 'webview-ui', 'dist');
 const codiconsDist = path.join(repoRoot, 'graph', 'node_modules', '@vscode', 'codicons', 'dist');
 
+// Clear outDir first: stale flat grammar bundles from an older vite output
+// layout (e.g. dist/graph-webview/cpp.js) were never removed because the copy
+// below only ever added files, never deleted ones vite stopped emitting.
+await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
 
 // 1. Svelte bundle (main.js + main.css, plus any inlined assets vite emitted).
