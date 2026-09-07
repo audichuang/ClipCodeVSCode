@@ -415,7 +415,8 @@
      "what is on screen right now". */
   // .diff-line is min-height 20px; this only sizes the first step, never layout.
   const ROW_PX = 20;
-  const STEP = 200;
+  // 優化後續批次顆粒至 100 行，單次主執行緒任務控制在 25ms 內，兼顧高吞吐量與低互動延遲
+  const STEP = 100;
   // One viewport of rows plus slack, so the first frame is a full screen on a
   // tall monitor too. Clamped: a hidden/zero-height webview must still reveal.
   function firstStep(): number {
@@ -426,13 +427,14 @@
   // Deliberately the INITIAL file (untrack silences state_referenced_locally):
   // the per-diff reset effect above compares against it to spot a file change.
   let paintFile = untrack(() => diff?.file);
+  const EMPTY_LINES: DiffLine[] = [];
   const paintHunks = $derived.by(() => {
     let left = paintBudget;
     return renderHunks.map(hunk => {
       // Fully revealed → same object, so Svelte sees no change for that hunk.
       if (left >= hunk.lines.length) { left -= hunk.lines.length; return hunk; }
       // slice(0, n) keeps line indices, so lineSel / highlight keys line up.
-      const shown = { ...hunk, lines: left > 0 ? hunk.lines.slice(0, left) : [] };
+      const shown = { ...hunk, lines: left > 0 ? hunk.lines.slice(0, left) : EMPTY_LINES };
       left = 0;
       return shown;
     });
@@ -477,7 +479,18 @@
   }
 
   /* SNIPCODE-HOOK start: perf — rows follow the reveal, not the full render set */
-  const sbsRows = $derived(paintHunks.map(hunk => pairSideBySideRows(hunk.lines)));
+  const EMPTY_SBS_ROWS: SbsRow[] = [];
+  const sbsCache = new WeakMap<DiffLine[], SbsRow[]>();
+  function getCachedSbsRows(lines: DiffLine[]): SbsRow[] {
+    if (lines.length === 0) return EMPTY_SBS_ROWS;
+    let cached = sbsCache.get(lines);
+    if (!cached) {
+      cached = pairSideBySideRows(lines);
+      sbsCache.set(lines, cached);
+    }
+    return cached;
+  }
+  const sbsRows = $derived(paintHunks.map(hunk => getCachedSbsRows(hunk.lines)));
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
@@ -1241,6 +1254,18 @@
     transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.08s ease;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     z-index: 1;
+  }
+
+  /* 擴大透明點擊熱區至 28px 中軸槽全寬與單元格高，在大字體下無須像素級對準小圖示即可觸發 */
+  .sbs-block-stage-btn::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px;
+    height: 100%;
+    min-height: 28px;
   }
 
   /* 取消暫存按鈕樣式（解耦多語系文案，支援 staged-btn class） */
