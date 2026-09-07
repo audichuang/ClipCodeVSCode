@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.44
+
+Opening a file in the Diff tab used to sit in plain text for up to a second and
+a half before anything got coloured, and the sidebar's recent-commit list could
+not show a local branch name at all. Both are fixed.
+
+- **Syntax highlighting arrives while you are still reading, instead of all at
+  once when the whole diff has been processed.** Two costs were stacked. Shiki
+  was running its pure-JavaScript regex fallback — measured through this
+  extension's real per-line path, 50 rendered lines took 340ms and a
+  3000-line diff took 1315ms; on the oniguruma WASM engine those are 94ms and
+  537ms. The larger problem was when the result reached the screen: the pass
+  already worked in 250-line chunks and yielded between them, but it assigned
+  the highlight map exactly once, after the final chunk, so the yields kept
+  typing and scrolling alive while the diff itself stayed plain for the entire
+  pass. Each chunk now publishes as it finishes. Compiling the WASM engine needs
+  `wasm-unsafe-eval` in the graph and Diff webviews' content-security policy;
+  the commit box and the recent-commits sidebar carry no highlighter and keep
+  the stricter policy. If the engine ever fails to start, the diff renders
+  unhighlighted and says so once in the webview console rather than failing
+  silently — and a refusal that cannot be retried is not retried on every
+  subsequent file.
+- **The recent-commit list in the sidebar is readable at a real sidebar width.**
+  A local branch name never appeared: the ref filter kept only remote branches
+  and tags, which excluded the very ref that carries the current branch's name,
+  so `develop` could not be labelled. The one name that did appear was capped at
+  64px — about eight characters. The rows now follow VS Code's own Source
+  Control Graph: 22px rows, an 11px lane, a dot that punches through the rails
+  behind it, and ref pills whose name gets 100px. One ref is named and the rest
+  collapse into a single counted pill whose tooltip still identifies each of
+  them, including which remote each one came from. The 42px monospace hash is
+  gone — it was 16% of the usable width and the least identifying thing on the
+  row. Branch colours deliberately stay on the same palette as the full-page
+  graph, so one branch is one colour in both places and `branchColorRules` keeps
+  applying. The repository picker, refresh and open-full-graph actions moved to
+  the view's title bar, which returns a row of height to the list itself.
+
 ## 0.3.43
 
 A full pass over how the Git surfaces actually read — the commit graph, the main
