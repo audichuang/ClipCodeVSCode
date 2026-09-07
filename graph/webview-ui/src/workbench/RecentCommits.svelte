@@ -1,7 +1,7 @@
 <script lang="ts">
   /* SNIPCODE-HOOK start: compact sidebar commit graph (whole file is Snipcode-only,
      fenced at file level like src/tree/recent-commits-view.ts) */
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { getVsCodeApi } from '../lib/vscode-api';
   import { i18n, t } from '../lib/i18n/index.svelte';
   import { DEFAULT_GRAPH_COLORS, resolveGraphColor } from '../lib/utils/graph-color';
@@ -187,6 +187,14 @@
     files = null;
     filesError = null;
     requestFiles(commit.hash);
+    // Opening the panel shrinks the list under the row that was just clicked:
+    // at 320px the list goes from 13 rows to 4, so clicking row 8 left the
+    // selected row 88px below the fold with nothing highlighted on screen.
+    // Every entry point (click, ↑/↓, parent link, context menu) selects through
+    // here, so the reveal belongs here and not at each call site. `tick()`
+    // first — `revealRow` measures `clientHeight`, which is only the post-panel
+    // height once Svelte has flushed.
+    void tick().then(() => revealRow(commit.hash));
   }
 
   // Clicking the selected row again collapses the panel; keyboard stepping must
@@ -233,7 +241,6 @@
     const commit = target ? recent.commits.find(c => c.hash === target) : undefined;
     if (!commit) return;
     openCommit(commit);
-    revealRow(commit.hash);
   }
 
   function revealRow(hash: string): void {
@@ -316,7 +323,6 @@
     const commit = recent?.commits.find(c => c.hash === hash);
     if (!commit) return;
     openCommit(commit);
-    revealRow(hash);
   }
 
   /** Only worth a line when it differs: on rebased or cherry-picked history the
@@ -581,10 +587,14 @@
   .label .codicon { color: inherit; font-size: 12px; padding: 3px; }
   .label .description { font-size: 12px; padding-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; }
 
-  /* Details panel: a bounded second pane, so the commit list keeps at least
-     half the view. `flex: 0 0 auto` + max-height, never a fixed height — a
-     one-file commit should not reserve the space a forty-file one needs. */
-  .details { flex: 0 0 auto; max-height: 45%; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); }
+  /* Details panel: a bounded second pane. `flex: 0 0 auto` + max-height, never a
+     fixed height — a one-file commit should not reserve the space a forty-file
+     one needs. The cap is 65%, not the 45% this shipped with: the sidebar view
+     is ~3/7 of the side bar (package.json `initialSize`), so 45% of a 320px view
+     left 71px for the file list — three rows — while the commit list kept 151px
+     the user had just finished reading. The list still keeps 35% (five rows at
+     320px), which is enough to step through with ↑/↓. */
+  .details { flex: 0 0 auto; max-height: 65%; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); }
   .details-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 8px; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .details-head .hash { flex: 0 0 auto; font-family: var(--vscode-editor-font-family, monospace); color: var(--vscode-foreground); }
   .icon-btn { flex: 0 0 auto; display: flex; padding: 2px; border: none; border-radius: 4px; background: none; color: var(--vscode-icon-foreground); cursor: pointer; }
@@ -594,19 +604,30 @@
   .icon-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   .icon-btn .codicon { font-size: 14px; }
   .details-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0 8px 6px; }
-  /* Caps at just under half the panel so the file list always has room; both
-     halves keep their own scrollbar. */
-  .message-block { flex: 0 1 auto; min-height: 0; max-height: 48%; overflow: auto; }
-  .commit-message { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+  /* 40% of the panel, down from 48%: the message, its author line and the parent
+     buttons all scroll together here, and the file list — the reason the panel
+     opens — gets the rest. A share, not a fixed em cap, so a tall side bar spends
+     its extra pixels on both. The full message is also on the row tooltip and in
+     the context menu's Copy Message. Its border is also the scroller's own edge:
+     without one a clipped message ended in a half-height glyph that read as
+     broken text rather than as "scroll for more". */
+  .message-block { flex: 0 1 auto; min-height: 0; max-height: 40%; overflow: auto; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); margin-bottom: 4px; }
+  .commit-message { line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
   .commit-meta { margin: 2px 0 6px; color: var(--vscode-descriptionForeground); font-size: 11px; overflow-wrap: anywhere; }
   .files { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
-  /* `overflow: hidden` is defensive, not a fix for an observed overflow: the
-     inline action is the one element that appears (on hover) with no layout
+  /* `flex: 0 0 22px`, never a bare `height`: `.files` is a column flex container,
+     so every row is a flex ITEM, and the `overflow: hidden` below zeroes its
+     automatic minimum size. A plain height was therefore only a flex BASIS the
+     rows shrank away from — 12 files in a 71px panel rendered 12 rows of 6px
+     with the text overlapping, and `.files`'s `overflow: auto` never fired
+     because the content had already been squashed to fit.
+     `overflow: hidden` itself is defensive, not a fix for an observed overflow:
+     the inline action is the one element that appears (on hover) with no layout
      pass to absorb its 20px, and the only thing currently guaranteeing room is
      `.file-name`'s 62% cap. Measured at 300px with a 32-char name and an empty
      directory: rowScrollWidth === rowClientWidth, body/app scrollWidth
      unchanged on reveal. Raise that cap and this line is what still holds. */
-  .file-row { display: flex; align-items: center; gap: 6px; height: 22px; min-width: 0; overflow: hidden; cursor: pointer; }
+  .file-row { display: flex; flex: 0 0 22px; align-items: center; gap: 6px; min-width: 0; overflow: hidden; cursor: pointer; }
   .file-row:hover { background: var(--vscode-list-hoverBackground); }
   .file-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   .file-status { flex: 0 0 12px; text-align: center; font-weight: var(--vscode-font-weight-semibold, 600); }
