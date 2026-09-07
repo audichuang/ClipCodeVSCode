@@ -780,6 +780,7 @@ export const zh: Record<string, string> = {
   'diff.mixedLineEndings': '此行以 CRLF 结尾，与文件其余部分不同',
   'diff.prevHunk': '上一个更改',
   'diff.nextHunk': '下一个更改',
+  'diff.differences': '此文件共 {count} 处更改',
   'image.sideBySide': '并排显示',
   'image.swipe': '滑动对比',
   'image.onionSkin': '叠加对比',

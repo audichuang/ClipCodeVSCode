@@ -782,6 +782,7 @@ export const en: Record<string, string> = {
   'diff.mixedLineEndings': 'This line ends in CRLF, unlike the rest of the file',
   'diff.prevHunk': 'Previous change',
   'diff.nextHunk': 'Next change',
+  'diff.differences': '{count} changes in this file',
   'image.sideBySide': 'Side by Side',
   'image.swipe': 'Swipe',
   'image.onionSkin': 'Onion Skin',

@@ -783,6 +783,7 @@ export const zhTw: Record<string, string> = {
   'diff.mixedLineEndings': '此行以 CRLF 結尾，與檔案其餘部分不同',
   'diff.prevHunk': '上一個更改',
   'diff.nextHunk': '下一個更改',
+  'diff.differences': '此檔案共 {count} 處變更',
   'image.sideBySide': '並排顯示',
   'image.swipe': '滑動對比',
   'image.onionSkin': '疊加對比',

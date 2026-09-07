@@ -97,24 +97,29 @@
     currentHunk = -1;
   }
 
+  // Side-by-side renders every logical hunk twice (once per pane, scroll-
+  // synced) - scope to .sbs-left so inline and SBS both yield one entry per
+  // logical hunk.
+  function hunkEls(): HTMLElement[] {
+    return sectionsEl ? [...sectionsEl.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-left .sbs-hunk')] : [];
+  }
+
   function jumpHunk(dir: 1 | -1): void {
-    const container = sectionsEl;
-    if (!container) return;
-    // Side-by-side renders every logical hunk twice (once per pane, scroll-
-    // synced) - scope to .sbs-left so inline and SBS both yield one entry per
-    // logical hunk.
-    const hunks = [...container.querySelectorAll<HTMLElement>('.diff-hunk, .sbs-left .sbs-hunk')];
+    const hunks = hunkEls();
+    // Also the count's self-heal: FileDiffView drops hunks past its 3000-line
+    // render budget and reveals them on its own "show full diff" toggle, which
+    // is internal state the $effect below cannot see.
+    hunkTotal = hunks.length;
     if (hunks.length === 0) return;
-    if (dir === 1) {
-      currentHunk = Math.min(currentHunk + 1, hunks.length - 1);
-    } else {
-      if (currentHunk <= 0) return;
-      currentHunk = currentHunk - 1;
-    }
+    // -1 means "no jump made yet", so the first "next" lands on hunk 0 and
+    // "prev" at/above index 0 is a no-op instead of wrapping.
+    const next = dir === 1 ? Math.min(currentHunk + 1, hunks.length - 1) : currentHunk - 1;
+    if (next < 0) return;
     currentHunkEl?.classList.remove('current-hunk');
-    currentHunkEl = hunks[currentHunk] ?? null;
-    currentHunkEl?.classList.add('current-hunk');
-    currentHunkEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    currentHunk = next;
+    currentHunkEl = hunks[next];
+    currentHunkEl.classList.add('current-hunk');
+    currentHunkEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   onMount(() => {
@@ -125,6 +130,29 @@
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
+  });
+  /* SNIPCODE-HOOK end */
+
+  /* SNIPCODE-HOOK start: ui/diff D11b change count. The D11 arrows moved without
+     ever saying how many changes there are or which one you are on — IntelliJ's
+     diff header ("14 differences") is exactly that missing piece. It counts with
+     the SAME DOM query the arrows navigate, so the two can never disagree.
+     Only PREVIOUS gets a disabled state: that one depends on `currentHunk`
+     alone, while disabling NEXT would depend on the count — and a stale count
+     (see jumpHunk) would lock navigation out of the hunks it is missing.
+     No right-edge overview ruler to go with it: this viewer renders HUNKS, not
+     the whole file, so proportional marks tile ~100% of the strip and it
+     degrades into a coloured scrollbar. A useful one needs the file's total line
+     count from the host to map changes onto file-line space. */
+  let hunkTotal = $state(0);
+
+  $effect(() => {
+    // Everything that changes WHICH hunks are rendered. Read them so the effect
+    // re-runs after Svelte has patched the DOM and the count matches what the
+    // arrows will actually find.
+    void store.file; void mode; void store.stagedDiff; void store.unstagedDiff;
+    void collapsed.staged; void collapsed.unstaged;
+    hunkTotal = hunkEls().length;
   });
   /* SNIPCODE-HOOK end */
 
@@ -191,18 +219,30 @@
       <!-- SNIPCODE-HOOK end -->
       <!-- SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav -->
       <div class="hunk-nav">
-        <button class="hunk-nav-btn" aria-label={t('diff.prevHunk')} title={`${t('diff.prevHunk')} (Alt+↑)`} onclick={() => jumpHunk(-1)}>
-          <span class="codicon codicon-arrow-up"></span>
-        </button>
-        <button class="hunk-nav-btn" aria-label={t('diff.nextHunk')} title={`${t('diff.nextHunk')} (Alt+↓)`} onclick={() => jumpHunk(1)}>
-          <span class="codicon codicon-arrow-down"></span>
-        </button>
+        <div class="hunk-nav-group">
+          <button class="hunk-nav-btn" disabled={currentHunk <= 0} aria-label={t('diff.prevHunk')} title={`${t('diff.prevHunk')} (Alt+↑)`} onclick={() => jumpHunk(-1)}>
+            <span class="codicon codicon-arrow-up"></span>
+          </button>
+          <button class="hunk-nav-btn" aria-label={t('diff.nextHunk')} title={`${t('diff.nextHunk')} (Alt+↓)`} onclick={() => jumpHunk(1)}>
+            <span class="codicon codicon-arrow-down"></span>
+          </button>
+        </div>
+        <!-- SNIPCODE-HOOK start: ui/diff D11b change count -->
+        {#if hunkTotal > 0}
+          <span class="hunk-count" title={t('diff.differences', { count: hunkTotal })}>
+            <span class="hunk-count-current">{currentHunk >= 0 ? currentHunk + 1 : '–'}</span>/{hunkTotal}
+          </span>
+        {/if}
+        <!-- SNIPCODE-HOOK end -->
       </div>
       <!-- SNIPCODE-HOOK end -->
+      <!-- SNIPCODE-HOOK start: ui/diff IntelliJ-style toolbar divider and mode toggle -->
+      <div class="mode-bar-divider" aria-hidden="true"></div>
       <div class="diff-mode-toggle">
         <button class:active={mode === 'inline'} onclick={() => setMode('inline')}>{t('details.inline')}</button>
         <button class:active={mode === 'side-by-side'} onclick={() => setMode('side-by-side')}>{t('details.sideBySide')}</button>
       </div>
+      <!-- SNIPCODE-HOOK end -->
     </div>
     <!-- SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav -->
     <div class="sections" bind:this={sectionsEl}>
@@ -290,10 +330,14 @@
     border-radius: 4px; font-size: 12px; font-family: var(--vscode-font-family);
     background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
   }
+  /* SNIPCODE-HOOK start: ui/diff IntelliJ-style toolbar and controls */
   .mode-bar {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border, transparent);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    height: 38px; padding: 0 12px;
+    background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.08)));
+    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, rgba(128,128,128,0.2)));
     font-family: var(--vscode-font-family); flex-shrink: 0;
+    box-sizing: border-box;
   }
   /* SNIPCODE-HOOK start: D6/X2 file header — dir/base */
   .mode-bar-file {
@@ -301,57 +345,134 @@
     font-size: var(--vscode-font-size, 13px);
     display: flex; align-items: baseline; gap: 0;
   }
-  .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; }
-  .file-base { flex-shrink: 0; font-weight: 600; }
+  .file-dir { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.65; color: var(--vscode-descriptionForeground); }
+  .file-base { flex-shrink: 0; font-weight: 600; color: var(--vscode-foreground); }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify */
   .file-old-path { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.55; text-decoration: line-through; }
   .file-rename-arrow { flex-shrink: 0; opacity: 0.55; padding: 0 4px; }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav */
-  .hunk-nav { display: flex; gap: 2px; flex-shrink: 0; }
-  .hunk-nav-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; padding: 0; border-radius: 3px;
-    background: transparent; border: none; cursor: pointer;
-    color: var(--vscode-descriptionForeground);
+  .hunk-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
-  .hunk-nav-btn:hover { background: rgba(128,128,128,0.15); color: var(--vscode-foreground); }
+  .hunk-nav-group {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    border-radius: 4px;
+    background: var(--vscode-editor-background, rgba(0, 0, 0, 0.15));
+    overflow: hidden;
+  }
+  .hunk-nav-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 22px; padding: 0; border-radius: 0;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--vscode-foreground, #ccc);
+    transition: background-color 0.1s, color 0.1s;
+  }
+  .hunk-nav-btn:first-child {
+    border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  }
+  .hunk-nav-btn:hover:not(:disabled) {
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+    color: var(--vscode-foreground);
+  }
+  .hunk-nav-btn:active:not(:disabled) {
+    background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.25));
+  }
+  .hunk-nav-btn:disabled {
+    opacity: 0.35; cursor: default;
+  }
   .hunk-nav-btn .codicon { font-size: 14px; }
   /* SNIPCODE-HOOK end */
-  .diff-mode-toggle { display: flex; gap: 2px; background: rgba(128,128,128,0.15); border-radius: 3px; padding: 1px; }
-  .diff-mode-toggle button {
-    padding: 2px 8px; font-size: 0.75em; border-radius: 2px;
-    background: transparent; color: var(--vscode-descriptionForeground); border: none; cursor: pointer;
+
+  /* SNIPCODE-HOOK start: ui/diff D11b change count */
+  .hunk-count {
+    align-self: center;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0 8px; height: 22px; min-width: 36px; text-align: center;
+    font-size: 11px; font-variant-numeric: tabular-nums;
+    border-radius: 11px;
+    background: var(--vscode-badge-background, rgba(128, 128, 128, 0.15));
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
+    box-sizing: border-box;
   }
-  .diff-mode-toggle button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .hunk-count-current { font-weight: 700; color: var(--vscode-foreground); }
+  /* SNIPCODE-HOOK end */
+
+  .mode-bar-divider {
+    width: 1px; height: 16px;
+    background: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    flex-shrink: 0;
+  }
+
+  .diff-mode-toggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: var(--vscode-input-background, rgba(0, 0, 0, 0.2));
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    border-radius: 4px; padding: 2px;
+    box-sizing: border-box; flex-shrink: 0;
+  }
+  .diff-mode-toggle button {
+    height: 20px; padding: 0 9px; font-size: 11px; font-weight: 500; border-radius: 3px;
+    background: transparent; color: var(--vscode-descriptionForeground); border: none; cursor: pointer;
+    line-height: 20px; transition: color 0.1s, background-color 0.1s;
+  }
+  .diff-mode-toggle button:hover {
+    color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
+  }
+  .diff-mode-toggle button.active {
+    background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.25));
+    color: var(--vscode-foreground);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  }
 
   /* The panel owns the scroll; each FileDiffView is `stacked` (flex:none, its own
      content height) so both sections form one long page instead of two half-height
      independently-scrolling boxes. */
   .sections { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+
+  /* SNIPCODE-HOOK start: ui/diff IntelliJ-style section header */
   .diff-section { display: flex; flex-direction: column; }
   .section-header {
     display: flex; align-items: center;
-    background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.08));
+    background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.06));
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.15));
     position: sticky; top: 0; z-index: 3;
+    min-height: 28px;
   }
   .section-toggle {
     flex: 1; display: flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border: none; cursor: pointer; text-align: left;
+    padding: 3px 12px; border: none; cursor: pointer; text-align: left;
     background: transparent;
     color: var(--vscode-foreground); font-family: var(--vscode-font-family);
   }
-  .section-open-btn {
-    display: flex; align-items: center; padding: 4px 10px;
-    border: none; cursor: pointer; background: transparent;
-    color: var(--vscode-descriptionForeground);
+  .section-toggle:hover {
+    background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06));
   }
-  .section-open-btn:hover { color: var(--vscode-foreground); }
+  .section-open-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; margin-right: 8px;
+    border: none; border-radius: 3px; cursor: pointer; background: transparent;
+    color: var(--vscode-descriptionForeground);
+    transition: background-color 0.1s, color 0.1s;
+  }
+  .section-open-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+    color: var(--vscode-foreground);
+  }
   .side-badge {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; padding: 2px 7px; border-radius: 8px;
+    font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 4px;
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   }
   /* SNIPCODE-HOOK start: D6/X2 badge icon + status letter + stats, tinted per side */
   .side-badge .codicon { font-size: 11px; }
@@ -361,15 +482,17 @@
   .side-badge.unstaged { background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #63b0f4) 25%, var(--vscode-badge-background)); }
   .side-status {
     font-weight: 700;
-    opacity: 0.9;
+    opacity: 0.95;
   }
   .side-stats {
-    display: inline-flex; gap: 6px; margin-left: 2px; padding: 1px 4px;
-    font-size: 11px; font-weight: 700; opacity: 1;
+    display: inline-flex; gap: 6px; margin-left: 2px; padding: 1px 6px;
+    font-size: 11px; font-weight: 700; border-radius: 3px;
     background: var(--vscode-editor-background, transparent);
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
   }
   .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91); }
   .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
   /* Each FileDiffView renders its own sticky filename toolbar. In this unified

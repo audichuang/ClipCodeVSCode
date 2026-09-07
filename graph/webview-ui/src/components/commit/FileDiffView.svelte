@@ -982,19 +982,23 @@
     width: max-content;
   }
 
+  /* SNIPCODE-HOOK start: ui/diff IntelliJ-style minimalist hunk header divider */
   /* Each hunk is a grouping container so it can carry a header bar and show a
      hover highlight outlining exactly what "Reverse Hunk" will affect. */
   .diff-hunk {
     position: relative;
-    border-top: 1px solid var(--border-color);
   }
 
   .diff-hunk-header {
-    padding: 2px 8px;
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    font-size: 0.85em;
-    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 2px 10px;
+    min-height: 22px;
+    background: var(--vscode-editor-background, #1e1e1e);
+    border-top: 1px dashed var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.1));
+    color: var(--vscode-descriptionForeground, #858585);
+    font-size: 11px;
   }
 
   /* inline-flex (content width, not the hunk's full max-content width) so the
@@ -1014,92 +1018,113 @@
      buttons right. It may still shrink/ellipsize if the panel is very narrow. */
   .diff-hunk-range {
     font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    color: var(--vscode-descriptionForeground, #858585);
+    opacity: 0.85;
   }
 
   .hunk-action-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
-    min-width: 26px;
-    min-height: 26px;
-    padding: 4px 8px;
-    background: transparent;
-    border: none;
+    min-height: 20px;
+    padding: 1px 7px;
+    border-radius: 3px;
+    border: 1px solid transparent;
     cursor: pointer;
-    font-size: 0.95em;
-    color: var(--vscode-errorForeground, #f44336);
-    transition: opacity 0.1s, background 0.1s;
+    font-size: 11px;
+    font-family: var(--vscode-font-family, sans-serif);
+    transition: opacity 0.1s, background-color 0.1s, border-color 0.1s;
   }
 
   /* The Reverse HUNK button is a hover/focus affordance; the Reverse LINES button
      is explicit (only renders when a selection exists), so it's always visible. */
   .hunk-hunk-btn {
     opacity: 0;
-    transition: opacity 0.1s;
+    color: var(--vscode-errorForeground, #f44336);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 10%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 25%, transparent);
   }
 
   .hunk-lines-btn {
     opacity: 1;
+    color: var(--vscode-errorForeground, #f44336);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 10%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 25%, transparent);
   }
 
-  /* SNIPCODE-HOOK start (B-2c): stage/unstage buttons (green accent). */
+  .hunk-hunk-btn:hover,
+  .hunk-lines-btn:hover {
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f44336) 20%, transparent);
+  }
+
+  .hunk-stage-lines-btn {
+    color: var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 10%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 25%, transparent);
+    opacity: 0.95;
+  }
+  .hunk-stage-lines-btn:hover {
+    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 20%, transparent);
+  }
+
+  /* Stage/unstage buttons (green accent) */
   .hunk-stage-btn {
-    color: var(--vscode-charts-green, #48bf91);
-    /* SNIPCODE-HOOK start: ui/diff D10 discoverable by default (was opacity:0,
-       hover-only — the SBS equivalent, .sbs-block-stage-btn, is also visible
-       by default; this matches it instead of hiding the only whole-hunk
-       stage affordance in inline mode until the user happens to hover). */
-    opacity: 0.9;
-    /* SNIPCODE-HOOK end */
+    color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 10%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, transparent);
+    opacity: 0.85;
   }
   .diff-hunk.reversible:hover .hunk-stage-btn,
-  .hunk-stage-btn:focus {
+  .hunk-stage-btn:focus,
+  .hunk-stage-btn:hover {
     opacity: 1;
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 20%, transparent);
   }
-  /* Per-change-block gutter arrow. Anchored on the block's first line (last child
-     of that line's flex row); `margin-left:auto` pushes it to the line's right end
-     and `position: sticky; right` pins it to the visible right edge of the left
-     pane (≈ the center gutter) so it never scrolls off with the long `pre` line —
-     works because every .diff-line is stretched to the pane's max-content width.
-     Always visible (IntelliJ-style), brightened on hover of its line/hunk. */
+
+  /* Per-change-block gutter arrow in SBS mode (IntelliJ-style) */
   .sbs-block-stage-btn {
     position: sticky;
-    right: 3px;
+    right: 4px;
     margin-left: auto;
     align-self: center;
     flex-shrink: 0;
     z-index: 2;
-    opacity: 0.9;
+    opacity: 0.85;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 20px;
+    height: 20px;
     padding: 0;
-    border: 1px solid var(--vscode-focusBorder, #4a9eff);
-    border-radius: 4px;
-    background: var(--vscode-button-background, #0e639c);
-    color: var(--vscode-button-foreground, #fff);
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+    border-radius: 3px;
+    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--vscode-foreground, #ccc);
     cursor: pointer;
-    font-size: 0.95em;
+    font-size: 0.85em;
     line-height: 1;
-    transition: opacity 0.1s;
+    transition: opacity 0.1s, background-color 0.1s, border-color 0.1s, color 0.1s;
   }
   .sbs-hunk.hunk-hover .sbs-block-stage-btn,
   .diff-line:hover .sbs-block-stage-btn,
   .sbs-block-stage-btn:hover,
   .sbs-block-stage-btn:focus {
     opacity: 1;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    border-color: var(--vscode-focusBorder, #4a9eff);
   }
   /* Busy gate (stageBusy prop): dim + block clicks even while hovered/focused. */
   .hunk-stage-btn:disabled,
+  .hunk-stage-lines-btn:disabled,
   .sbs-block-stage-btn:disabled {
     opacity: 0.35 !important;
     cursor: not-allowed;
@@ -1159,75 +1184,106 @@
     /* SNIPCODE-HOOK end */
   }
 
+  /* SNIPCODE-HOOK start: ui/diff IntelliJ-style gutter, separators, and change blocks */
   .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)); }
   .diff-delete { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)); }
   .diff-empty-line { background: rgba(128, 128, 128, 0.05); }
 
-  /* Inline gutter (line numbers + prefix) is the drag handle for line-selection.
-     Suppress native text selection here so dragging selects whole lines instead. */
+  /* Change block top/bottom boundary lines to clearly define each change extent */
+  :not(.diff-add) + .diff-add {
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 25%, transparent);
+  }
+  :not(.diff-delete) + .diff-delete {
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 25%, transparent);
+  }
+  .diff-delete + .diff-add {
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 35%, transparent);
+  }
+  .diff-add + .diff-delete {
+    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 35%, transparent);
+  }
+  .diff-add + .diff-context,
+  .diff-delete + .diff-context {
+    border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.15));
+  }
+
+  /* Inline gutter (line numbers + prefix) */
   .line-gutter {
     display: flex;
     flex-shrink: 0;
     user-select: none;
     cursor: pointer;
-    /* SNIPCODE-HOOK start: ui/diff D9 sticky gutter */
-    /* Pinned to the left edge so line numbers/+-/ stay reachable when a long
-       line is scrolled horizontally. Needs an OPAQUE background (below) or
-       the content scrolling underneath would show through it. */
     position: sticky;
     left: 0;
     z-index: 1;
     background: var(--bg-primary);
-    /* SNIPCODE-HOOK end */
+    border-right: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
+    box-sizing: border-box;
   }
 
-  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
-  /* The row's own (non-sticky) background can stay a translucent tint — see
-     .diff-add/.diff-delete above — because nothing scrolls underneath a
-     static element. The GUTTER is sticky, so the same translucent tint there
-     would let horizontally-scrolled content bleed through it. Layer the tint
-     as an opaque background-image over a solid background-color instead:
-     compositing a translucent gradient onto an opaque color under it always
-     yields an opaque result, so it reads identically to the plain tint. */
+  /* Gutter left accent stripe for change blocks (IntelliJ-style) */
   .diff-add .line-gutter {
     background:
       linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
       var(--bg-primary);
+    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
   }
   .diff-delete .line-gutter {
     background:
       linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
       var(--bg-primary);
+    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
   }
-  /* SNIPCODE-HOOK end */
 
-  /* Selected lines get a clear accent that reads over the add/delete tints. */
+  /* Selected lines */
   .diff-line.line-selected {
     background: var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25));
   }
-  /* SNIPCODE-HOOK start: ui/diff D9 opaque sticky gutter per row tint */
-  /* Both the tint (opaque, same reasoning as .diff-add/.diff-delete above)
-     and the focus accent move to the gutter: the accent is an INSET box-shadow
-     anchored at the left edge, which the opaque sticky gutter would otherwise
-     paint over and hide. Declared after .diff-add/.diff-delete's gutter rules
-     so a selected changed line shows the selection tint, not the change tint. */
   .line-selected .line-gutter {
     background:
       linear-gradient(var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25)), var(--vscode-editor-selectionBackground, rgba(120, 150, 255, 0.25))),
       var(--bg-primary);
     box-shadow: inset 3px 0 0 var(--vscode-focusBorder, #4a9eff);
   }
-  /* SNIPCODE-HOOK end */
 
   .line-num {
-    width: 45px;
+    width: 40px;
     flex-shrink: 0;
     text-align: right;
     padding-right: 8px;
-    color: var(--text-secondary);
-    opacity: 0.5;
-    font-size: 0.9em;
+    color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.45));
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, monospace);
     user-select: none;
+    box-sizing: border-box;
+  }
+
+  .diff-add .line-num.new,
+  .diff-delete .line-num.old {
+    color: var(--vscode-editorLineNumber-activeForeground, var(--vscode-foreground, #cccccc));
+    opacity: 0.9;
+    font-weight: 500;
+  }
+
+  /* Side-by-side pane line-num */
+  .sbs-pane .line-num {
+    border-right: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-primary);
+  }
+  .sbs-pane .diff-add .line-num {
+    background:
+      linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
+      var(--bg-primary);
+    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
+  }
+  .sbs-pane .diff-delete .line-num {
+    background:
+      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
+      var(--bg-primary);
+    box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
   }
 
   .line-prefix {
@@ -1235,14 +1291,20 @@
     flex-shrink: 0;
     text-align: center;
     user-select: none;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    font-weight: 700;
   }
 
-  /* SNIPCODE-HOOK start: ui/diff D P2 use the theme's own decoration colors */
-  /* These already flip appropriately per light/dark/high-contrast theme on
-     their own, so the separate vscode-light override rule that used to exist
-     here is no longer needed — VS Code supplies the right value either way. */
-  .diff-add .line-prefix { color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50); }
-  .diff-delete .line-prefix { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+  .diff-add .line-prefix {
+    color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
+  }
+  .diff-delete .line-prefix {
+    color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+  }
+  .diff-context .line-prefix {
+    opacity: 0;
+  }
   /* SNIPCODE-HOOK end */
 
   .line-content {
