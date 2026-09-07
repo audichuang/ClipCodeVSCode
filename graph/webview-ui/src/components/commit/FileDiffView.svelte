@@ -308,6 +308,7 @@
   /* SNIPCODE-HOOK end */
   let sbsLeftEl = $state<HTMLElement | undefined>();
   let sbsRightEl = $state<HTMLElement | undefined>();
+  let sbsCenterEl = $state<HTMLElement | undefined>();
   let isSyncing = false;
 
   function handleSbsScroll(e: Event) {
@@ -318,6 +319,7 @@
       isSyncing = true;
       other.scrollTop = target.scrollTop;
       other.scrollLeft = target.scrollLeft;
+      if (sbsCenterEl) sbsCenterEl.scrollTop = target.scrollTop;
       requestAnimationFrame(() => { isSyncing = false; });
     }
   }
@@ -850,53 +852,65 @@
               >
                 <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
                 {#each sbsRows[hunkIdx] as row}
-                  <!-- SNIPCODE-HOOK start: per-change-block stage arrow. Anchored
-                       on the block's first line (works even for a pure-addition
-                       block, whose left-pane row is an empty placeholder). The
-                       arrow is `position: sticky; right` + margin-left:auto so it
-                       stays pinned to the visible right edge of the left pane (≈
-                       the center gutter, IntelliJ-style) instead of scrolling off
-                       with the long `pre` line content. -->
-                  {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
-                  {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
+                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
                   {#if row.left}
                     {@const line = row.left.line}
                     {@const sourceIndex = row.left.index}
-                    <div class="diff-line diff-{line.type}">
+                    <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
                       <span class="line-num">{line.oldLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
                       {@render crMarker(line)}
                       {@render noNewlinePill(line)}
-                      {#if blockLines}
-                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
-                                disabled={stageBusy}
-                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
-                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
-                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                        </button>
-                      {/if}
                     </div>
                   {:else}
                     <div class="diff-line diff-empty-line">
                       <span class="line-num"></span>
                       <span class="line-content"></span>
-                      {#if blockLines}
-                        <button class="sbs-block-stage-btn" onclick={() => stageBlock(hunkIdx, blockLines)}
-                                disabled={stageBusy}
-                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
-                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
-                          <i class="codicon {staged ? 'codicon-chevron-left' : 'codicon-chevron-right'}"></i>
-                        </button>
-                      {/if}
                     </div>
                   {/if}
-                  <!-- SNIPCODE-HOOK end -->
                 {/each}
                 <!-- SNIPCODE-HOOK end -->
               </div>
             {/each}
           </div>
         </div>
+
+        <!-- SNIPCODE-HOOK start: IntelliJ-style independent center action and connector gutter -->
+        <div class="sbs-center-gutter" bind:this={sbsCenterEl} onwheel={(e) => {
+          if (sbsLeftEl) sbsLeftEl.scrollTop += e.deltaY;
+        }}>
+          <div class="sbs-center-inner">
+            {#each paintHunks as hunk, hunkIdx}
+              {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
+              <div class="sbs-center-hunk">
+                {#each sbsRows[hunkIdx] as row}
+                  {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
+                  {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
+                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
+                  {@const isDelete = !!(row.left && row.left.line.type === 'delete' && !row.right)}
+                  {@const isAdd = !!(row.right && row.right.line.type === 'add' && !row.left)}
+                  <div
+                    class="sbs-center-cell"
+                    class:cell-modify={isModify}
+                    class:cell-delete={isDelete}
+                    class:cell-add={isAdd}
+                  >
+                    {#if blockLines}
+                      <button class="sbs-block-stage-btn" class:staged-btn={staged} onclick={() => stageBlock(hunkIdx, blockLines)}
+                              disabled={stageBusy}
+                              aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                              title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
+                        <span class="intellij-arrow-glyph" aria-hidden="true">{staged ? '«' : '»'}</span>
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        </div>
+        <!-- SNIPCODE-HOOK end -->
+
         <div class="sbs-pane sbs-right" bind:this={sbsRightEl} onscroll={handleSbsScroll}>
           <div class="sbs-inner">
             <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
@@ -913,10 +927,11 @@
               >
                 <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
                 {#each sbsRows[hunkIdx] as row}
+                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
                   {#if row.right}
                     {@const line = row.right.line}
                     {@const sourceIndex = row.right.index}
-                    <div class="diff-line diff-{line.type}">
+                    <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
                       <span class="line-num">{line.newLineNumber ?? ''}</span>
                       <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
                       {@render crMarker(line)}
@@ -1133,38 +1148,129 @@
     background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 16%, transparent);
   }
 
+  /* ── IntelliJ-style Center Action & Connection Gutter ── */
+  .sbs-center-gutter {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    flex-shrink: 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--vscode-editor-font-size, 12px);
+    line-height: 1.5;
+    background: var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    border-left: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
+    border-right: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
+    user-select: none;
+    z-index: 2;
+    overflow: hidden;
+  }
+
+  .sbs-center-inner {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+  }
+
+  .sbs-center-hunk {
+    position: relative;
+  }
+
+  .sbs-center-cell {
+    min-height: max(20px, 1.5em);
+    line-height: 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-sizing: border-box;
+  }
+
+  /* 行高 strut：確保即使單元格內無文字，高度也與代碼行的 line box 100% 絕對等高 */
+  .sbs-center-cell::before {
+    content: '\00a0';
+    visibility: hidden;
+    width: 0;
+    display: inline-block;
+    line-height: inherit;
+    font-size: inherit;
+    font-family: inherit;
+  }
+
+  /* 中央連接色帶（IntelliJ 區塊連接對應感） */
+  .sbs-center-cell.cell-modify {
+    background: linear-gradient(to right, color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 16%, transparent), color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 16%, transparent));
+  }
+
+  .sbs-center-cell.cell-delete {
+    background: linear-gradient(to right, color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 16%, transparent) 55%, transparent 100%);
+  }
+
+  .sbs-center-cell.cell-add {
+    background: linear-gradient(to right, transparent 0%, color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 16%, transparent) 45%);
+  }
+
+  /* 變更區塊首行上方細邊界（使用 inset box-shadow 避免破壞行高） */
+  :not(.cell-modify):not(.cell-delete):not(.cell-add) + .cell-modify,
+  :not(.cell-modify):not(.cell-delete):not(.cell-add) + .cell-add {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 22%, transparent);
+  }
+  :not(.cell-modify):not(.cell-delete):not(.cell-add) + .cell-delete {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 22%, transparent);
+  }
+
   /* Per-change-block gutter arrow in SBS mode (IntelliJ-style) */
   .sbs-block-stage-btn {
-    position: sticky;
-    right: 4px;
-    margin-left: auto;
-    align-self: center;
-    flex-shrink: 0;
-    z-index: 2;
-    opacity: 0.85;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 20px;
-    height: 20px;
+    height: 18px;
     padding: 0;
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+    border: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 40%, transparent);
     border-radius: 3px;
-    background: var(--vscode-editor-background, #1e1e1e);
-    color: var(--vscode-foreground, #ccc);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 18%, var(--vscode-editor-background, #1e1e1e));
+    color: var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
     cursor: pointer;
-    font-size: 0.85em;
+    font-size: 13px;
+    font-weight: 700;
     line-height: 1;
-    transition: opacity 0.1s, background-color 0.1s, border-color 0.1s, color 0.1s;
+    transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.08s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    z-index: 1;
   }
-  .sbs-hunk.hunk-hover .sbs-block-stage-btn,
-  .diff-line:hover .sbs-block-stage-btn,
+
+  /* 取消暫存按鈕樣式（解耦多語系文案，支援 staged-btn class） */
+  .sbs-block-stage-btn.staged-btn,
+  .sbs-block-stage-btn[aria-label*="Unstage"] {
+    border-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 40%, transparent);
+    background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff) 18%, var(--vscode-editor-background, #1e1e1e));
+    color: var(--vscode-gitDecoration-modifiedResourceForeground, #3794ff);
+  }
+
+  .intellij-arrow-glyph {
+    display: inline-block;
+    font-family: var(--vscode-editor-font-family, 'JetBrains Mono', monospace);
+    font-weight: 700;
+    font-size: 13px;
+    line-height: 1;
+    transform: translateY(-0.5px);
+  }
+
+  .sbs-center-cell:hover .sbs-block-stage-btn,
   .sbs-block-stage-btn:hover,
   .sbs-block-stage-btn:focus {
     opacity: 1;
     background: var(--vscode-button-background, #0e639c);
-    color: var(--vscode-button-foreground, #fff);
+    color: var(--vscode-button-foreground, #ffffff);
     border-color: var(--vscode-focusBorder, #4a9eff);
+    box-shadow: 0 0 6px var(--vscode-focusBorder, rgba(74, 158, 255, 0.4));
+  }
+  .sbs-block-stage-btn:active {
+    transform: translate(-50%, -50%) scale(0.92);
   }
   /* Busy gate (stageBusy prop): dim + block clicks even while hovered/focused. */
   .hunk-stage-btn:disabled,
@@ -1179,11 +1285,13 @@
      the whole-line add/delete background; uses a stronger tint so the changed
      characters stand out (IntelliJ-style). Inherits the Shiki syntax color. */
   :global(.word-diff-del) {
-    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
+    background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 38%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 28%, transparent);
     border-radius: 2px;
   }
   :global(.word-diff-add) {
-    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.30));
+    background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 38%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 28%, transparent);
     border-radius: 2px;
   }
   /* SNIPCODE-HOOK end */
@@ -1222,29 +1330,46 @@
 
   .diff-line {
     display: flex;
-    min-height: 20px;
+    min-height: max(20px, 1.5em);
     /* SNIPCODE-HOOK start: ui/diff D P2 line-height scales with editor font size */
     line-height: 1.5;
+    box-sizing: border-box;
     /* SNIPCODE-HOOK end */
   }
 
-  /* SNIPCODE-HOOK start: ui/diff IntelliJ-style gutter, separators, and change blocks */
-  .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.10)); }
-  .diff-delete { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.10)); }
-  .diff-empty-line { background: rgba(128, 128, 128, 0.03); }
+  .diff-add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.12)); }
+  .diff-delete { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.12)); }
+  .diff-empty-line {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(128, 128, 128, 0.025),
+      rgba(128, 128, 128, 0.025) 6px,
+      transparent 6px,
+      transparent 12px
+    );
+  }
+
+  /* Modify row subtle boundary（使用 inset box-shadow 避免影響行高） */
+  .diff-modify {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 18%, transparent),
+                inset 0 -1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 18%, transparent);
+  }
+  .diff-modify + .diff-modify {
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 18%, transparent);
+  }
 
   /* Change block top/bottom subtle boundary */
-  :not(.diff-add) + .diff-add {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 15%, transparent);
+  :not(.diff-add) + .diff-add:not(.diff-modify) {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 15%, transparent);
   }
-  :not(.diff-delete) + .diff-delete {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 15%, transparent);
+  :not(.diff-delete) + .diff-delete:not(.diff-modify) {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 15%, transparent);
   }
   .diff-delete + .diff-add {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 20%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #48bf91) 20%, transparent);
   }
   .diff-add + .diff-delete {
-    border-top: 1px solid color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 20%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f44336) 20%, transparent);
   }
 
   /* Inline gutter (line numbers + prefix) */
@@ -1310,23 +1435,30 @@
 
   /* Side-by-side pane line-num */
   .sbs-pane .line-num {
+    width: 44px;
+    padding-right: 10px;
     border-right: 1px solid var(--vscode-editorOverviewRuler-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.18)));
     position: sticky;
     left: 0;
     z-index: 1;
-    background: var(--bg-primary);
+    background: var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
+    color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.45));
   }
   .sbs-pane .diff-add .line-num {
     background:
       linear-gradient(var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15)), var(--vscode-diffEditor-insertedLineBackground, rgba(72, 191, 145, 0.15))),
-      var(--bg-primary);
+      var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
     box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-addedResourceForeground, #48bf91);
+    color: var(--vscode-editorLineNumber-activeForeground, #7cd98a);
+    font-weight: 600;
   }
   .sbs-pane .diff-delete .line-num {
     background:
-      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.15))),
-      var(--bg-primary);
+      linear-gradient(var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.15)), var(--vscode-diffEditor-removedLineBackground, rgba(255, 60, 60, 0.15))),
+      var(--vscode-editorGutter-background, var(--vscode-editor-background, #1e1e1e));
     box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+    color: var(--vscode-editorLineNumber-activeForeground, #f48771);
+    font-weight: 600;
   }
 
   .line-prefix {
@@ -1467,11 +1599,12 @@
   }
 
   .sbs-left {
-    border-right: 1px solid var(--border-color);
+    border-right: none;
   }
 
   .sbs-pane .diff-line {
     width: 100%;
+    min-height: max(20px, 1.5em);
   }
 
   /* ── Stacked mode (multiple FileDiffViews in a scrolling column) ── */
@@ -1489,7 +1622,8 @@
 
   /* In SBS mode, .diff-sbs uses height:100% which resolves to 0 when the     */
   /* parent has no fixed height. Switch to auto so both panes size to content. */
-  .diff-wrapper.stacked .diff-sbs {
+  .diff-wrapper.stacked .diff-sbs,
+  .diff-wrapper.stacked .sbs-center-gutter {
     height: auto;
   }
 

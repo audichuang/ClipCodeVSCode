@@ -243,22 +243,7 @@
       {/if}
     {:else}
     <div class="mode-bar">
-      <!-- SNIPCODE-HOOK start: D6/X2 file header — dir/base -->
-      <!-- Diff tab hides FileDiffView's own toolbar (below), so this is the
-           ONLY place the full path is visible; per-side status/± live on
-           each section's badge instead (see .side-badge). -->
-      <span class="mode-bar-file" title={store.file}>
-        <!-- SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify -->
-        {#if renameOldPath}
-          <span class="file-old-path">{renameOldPath}</span>
-          <span class="file-rename-arrow">→</span>
-        {/if}
-        <!-- SNIPCODE-HOOK end -->
-        {#if fileDir}<span class="file-dir">{fileDir}</span>{/if}
-        <span class="file-base">{fileBase}</span>
-      </span>
-      <!-- SNIPCODE-HOOK end -->
-      <!-- SNIPCODE-HOOK start: ui/diff D11 next/prev hunk nav -->
+      <!-- SNIPCODE-HOOK start: ui/diff IntelliJ-style hunk nav & diff counter at left -->
       <div class="hunk-nav">
         <div class="hunk-nav-group">
           <button class="hunk-nav-btn" disabled={currentHunk <= 0} aria-label={t('diff.prevHunk')} title={`${t('diff.prevHunk')} (Alt+↑)`} onclick={() => jumpHunk(-1)}>
@@ -276,9 +261,23 @@
         {/if}
         <!-- SNIPCODE-HOOK end -->
       </div>
-      <!-- SNIPCODE-HOOK end -->
-      <!-- SNIPCODE-HOOK start: ui/diff IntelliJ-style toolbar divider and mode toggle -->
       <div class="mode-bar-divider" aria-hidden="true"></div>
+      <!-- SNIPCODE-HOOK end -->
+
+      <!-- SNIPCODE-HOOK start: D6/X2 file header — dir/base -->
+      <span class="mode-bar-file" title={store.file}>
+        <!-- SNIPCODE-HOOK start: F4 header shows the old path for a rename+modify -->
+        {#if renameOldPath}
+          <span class="file-old-path">{renameOldPath}</span>
+          <span class="file-rename-arrow">→</span>
+        {/if}
+        <!-- SNIPCODE-HOOK end -->
+        {#if fileDir}<span class="file-dir">{fileDir}</span>{/if}
+        <span class="file-base">{fileBase}</span>
+      </span>
+      <!-- SNIPCODE-HOOK end -->
+
+      <!-- SNIPCODE-HOOK start: ui/diff IntelliJ-style mode toggle at right -->
       <div class="diff-mode-toggle">
         <button class:active={mode === 'inline'} onclick={() => setMode('inline')}>{t('details.inline')}</button>
         <button class:active={mode === 'side-by-side'} onclick={() => setMode('side-by-side')}>{t('details.sideBySide')}</button>
@@ -382,9 +381,9 @@
   .mode-bar {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     height: 32px; padding: 0 10px;
-    background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background, #1e1e1e));
-    border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.15));
-    font-family: var(--vscode-font-family); flex-shrink: 0;
+    background: var(--vscode-editorWidget-background, var(--vscode-editorGroupHeader-tabsBackground, #252526));
+    border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.2)));
+    font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif); flex-shrink: 0;
     box-sizing: border-box;
   }
   /* SNIPCODE-HOOK start: D6/X2 file header — dir/base */
