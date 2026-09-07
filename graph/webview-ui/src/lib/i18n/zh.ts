@@ -67,6 +67,7 @@ export const zh: Record<string, string> = {
   'workbench.commitTimeout': '提交超时，未收到结果，请刷新后确认状态。',
   'workbench.committedCount': '已提交 {count} 个仓库',
   'workbench.commitScope': '提交范围：{repos} 个仓库 · {files} 个文件',
+  'workbench.commitScopeFailed': '无法读取仓库状态，请点击刷新重试。',
   'workbench.messagePlaceholder': '提交信息（共用一则，应用到所有已暂存的仓库）',
   'workbench.commit': '提交',
   'workbench.amend': '修正',

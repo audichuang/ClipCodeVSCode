@@ -177,6 +177,27 @@ describe('RepoDiscoveryService', () => {
         rmSync(library, { recursive: true, force: true });
       }
     });
+
+    /* SNIPCODE-HOOK start: perf — the .gitmodules gate. The test above proves
+       real submodules still surface; this one proves the gate is actually in
+       force, which no outcome assertion can show (skipping the spawn and
+       spawning it to get an empty answer produce the same repo list). */
+    it('skips the `git submodule status` spawn for repos without submodules', async () => {
+      initRepo(root);
+      initRepo(join(root, 'nested'));
+      const exec = vi.spyOn(RepoDiscoveryService as unknown as { execGit: (...args: unknown[]) => Promise<string> }, 'execGit');
+      try {
+        await RepoDiscoveryService.discoverRepos([root]);
+        const subcommands = exec.mock.calls.map(call => (call[0] as string[])[0]);
+        expect(subcommands.filter(sub => sub === 'submodule')).toEqual([]);
+        // Guards against the spy observing nothing at all (which would make the
+        // assertion above vacuously true).
+        expect(subcommands).toContain('rev-parse');
+      } finally {
+        exec.mockRestore();
+      }
+    });
+    /* SNIPCODE-HOOK end */
   });
 
   describe('caching', () => {
@@ -311,7 +332,10 @@ describe('RepoDiscoveryService', () => {
       expect(a.map(r => r.path)).toEqual([root]);
       const subcommands = exec.mock.calls.map(call => (call[0] as string[])[0]);
       expect(subcommands.filter(sub => sub === 'rev-parse')).toHaveLength(1);
-      expect(subcommands.filter(sub => sub === 'submodule')).toHaveLength(1);
+      // 0, not 1: `getSubmodules` recognises "no submodules" from the filesystem
+      // and never spawns (see the submodule discovery suite). `rev-parse` above
+      // is what proves the three calls shared one walk.
+      expect(subcommands.filter(sub => sub === 'submodule')).toHaveLength(0);
       expect(progress.sort()).toEqual([1, 2]);
       exec.mockRestore();
     });

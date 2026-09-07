@@ -41,6 +41,11 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
 
   private groups: GroupNode[] = [];
   private commitScopeReady = false;
+  /* SNIPCODE-HOOK start: tell a failed status read apart from a slow one — both
+     leave commitScopeReady false, and the commit box rendered "Loading…" for
+     the failure too, forever (nothing re-asks until the next refresh). */
+  private commitScopeFailed = false;
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
   private readonly refreshSequence = new SequenceGuard();
   /* SNIPCODE-HOOK end */
@@ -56,6 +61,7 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
     const ticket = this.refreshSequence.issue();
     this.commitScopeReady = false;
+    this.commitScopeFailed = false;
     this._onDidChangeTreeData.fire();
     /* SNIPCODE-HOOK start: progressive first paint
        Paint the repos that have answered instead of a blank view until the last
@@ -79,6 +85,15 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     };
     let repos: RepoStatus[];
     try { repos = await this.loadStatus(paintPartial); }
+    catch (err) {
+      /* SNIPCODE-HOOK start: surface the failure instead of a permanent "Loading…" */
+      if (this.refreshSequence.isCurrent(ticket)) {
+        this.commitScopeFailed = true;
+        this._onDidChangeTreeData.fire();
+      }
+      throw err;
+      /* SNIPCODE-HOOK end */
+    }
     finally { if (partialTimer) clearTimeout(partialTimer); }
     /* SNIPCODE-HOOK end */
     if (!this.refreshSequence.isCurrent(ticket)) return;
@@ -104,6 +119,11 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
 
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
   isCommitScopeReady(): boolean { return this.commitScopeReady; }
+
+  /* SNIPCODE-HOOK start: a failed status read stays blocked (fail-closed) but
+     says so — recovery is the view's Refresh, or the next watcher refresh. */
+  isCommitScopeFailed(): boolean { return this.commitScopeFailed; }
+  /* SNIPCODE-HOOK end */
 
   getStagedRepoCount(): number {
     return (this.groups.find(group => group.group === 'staged')?.repos ?? [])

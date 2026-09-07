@@ -86,6 +86,16 @@ and yielding is not the same as progressive rendering — publish each chunk, or
 input stays responsive while the diff stays plain for the whole pass. Measure
 before optimising anything else here.
 
+The grammar warm-up hangs off the **`diffLoading` message** (`diff.ts` has its own
+listener for it), so a path that pushes a diff without posting that message first
+tokenises its first screen with a cold grammar — a coupling neither file shows on
+its own. Its snippet is sized to the 20–50ms window git actually takes: a richer
+one tokenises the first real screen ~5× faster but costs more main thread than it
+saves, so hint→first-screen gets **worse**. Numbers for that and for everything
+else already measured and rejected here (worker, row virtualisation, grammar
+chunk-splitting, `STATUS_CONCURRENCY`, a status TTL cache):
+`../docs/research/2026-09-07-perf-audit.md`.
+
 `workbench.ts` chooses the commit box or recent graph from `body.dataset.view`.
 Acquire the VS Code API lazily and install only the chosen view's listeners:
 static imports run for both views, and a second `acquireVsCodeApi()` breaks boot.

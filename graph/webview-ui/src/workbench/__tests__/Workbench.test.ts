@@ -56,3 +56,33 @@ describe('Workbench.svelte — Ctrl/Cmd+Enter commits from the textarea (S14)', 
     expect(posted.some((p) => p.type === 'workbenchCommit')).toBe(false);
   });
 });
+
+/* SNIPCODE-HOOK start: the scope line has three states, and a failed status
+   read used to render as the same "Loading…" as a slow one — forever, since
+   nothing re-asks until the next refresh. */
+describe('Workbench.svelte — commit scope line', () => {
+  const scopeText = () => document.querySelector('.commit-scope')!.textContent;
+
+  it('says loading before the first snapshot lands', () => {
+    render(Workbench);
+    expect(scopeText()).toContain('Loading');
+  });
+
+  it('says the read failed instead of loading when it failed', async () => {
+    render(Workbench);
+    workbenchStore.commitScopeFailed = true;
+    await Promise.resolve();
+    expect(scopeText()).toContain('Could not read the repository status');
+    expect(scopeText()).not.toContain('Loading');
+  });
+
+  it('shows the real scope once ready, failure flag or not', async () => {
+    render(Workbench);
+    workbenchStore.stagedRepoCount = 2;
+    workbenchStore.stagedFileCount = 5;
+    workbenchStore.commitScopeReady = true;
+    await Promise.resolve();
+    expect(scopeText()).toContain('2');
+    expect(scopeText()).toContain('5');
+  });
+});

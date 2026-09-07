@@ -36,6 +36,20 @@ describe('GitService', () => {
     });
   });
 
+  /* SNIPCODE-HOOK start: emptyTreeRef must not throw on old git */
+  describe('emptyTreeRef', () => {
+    it('falls back to the sha1 empty tree when `--show-object-format` is unsupported', async () => {
+      mockExec(service, async () => { throw new Error("unknown option `show-object-format'"); });
+      await expect(service.emptyTreeRef()).resolves.toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
+    });
+
+    it('uses the sha256 empty tree when the repo reports sha256', async () => {
+      mockExec(service, async () => 'sha256\n');
+      await expect(service.emptyTreeRef()).resolves.toBe('6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321');
+    });
+  });
+  /* SNIPCODE-HOOK end */
+
   describe('clean', () => {
     it('calls git clean -f -d by default', async () => {
       const calls: string[][] = [];

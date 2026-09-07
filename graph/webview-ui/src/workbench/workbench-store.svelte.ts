@@ -16,6 +16,9 @@ class CommitBoxStore {
   stagedRepoCount = $state(0);
   stagedFileCount = $state(0);
   commitScopeReady = $state(false);
+  /* SNIPCODE-HOOK start: the scope read FAILED (vs still running) */
+  commitScopeFailed = $state(false);
+  /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
   /** True when Amend's sole target repo's HEAD is already at/behind its
@@ -32,6 +35,7 @@ class CommitBoxStore {
     this.stagedRepoCount = 0;
     this.stagedFileCount = 0;
     this.commitScopeReady = false;
+    this.commitScopeFailed = false;
     /* SNIPCODE-HOOK end */
     /* SNIPCODE-HOOK start: S13 Amend prefill + "already pushed" warning */
     this.amendTargetPushed = false;

@@ -45,6 +45,19 @@ const ENV = {
   GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', LC_ALL: 'C',
   GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@e.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@e.com',
 };
+/* SNIPCODE-HOOK start: perf — panel-before-tree ordering fixture */
+/** Repo with ONE committed file and one unstaged edit to it, i.e. a real
+ *  stageable hunk (initDirtyRepo's untracked file has no diff to stage). */
+function initRepoWithHunk(path: string, file = 'f.txt'): void {
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, file), 'one\ntwo\nthree\n');
+  for (const args of [['init', '--initial-branch=main'], ['config', 'commit.gpgsign', 'false'], ['add', '-A'], ['commit', '-m', 'init']]) {
+    execSync(`git ${args.map(a => `'${a}'`).join(' ')}`, { cwd: path, env: { ...process.env, ...ENV }, stdio: 'pipe' });
+  }
+  writeFileSync(join(path, file), 'one\nTWO\nthree\n');
+}
+/* SNIPCODE-HOOK end */
+
 function initDirtyRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   for (const args of [['init', '--initial-branch=main'], ['config', 'commit.gpgsign', 'false'], ['add', '-A'], ['commit', '--allow-empty', '-m', 'init']]) {
@@ -125,6 +138,40 @@ d('Changes tree progressive paint (real git, one repo blocked)', () => {
 
 });
 
+/* SNIPCODE-HOOK start: perf — the Diff panel is re-rendered before the tree
+   refresh, not after it. Ordering is the whole point of the change: waiting for
+   a 25-repo status pool kept the Diff tab's busy gate locked on every click. */
+d('Stage/unstage re-renders the Diff panel before the tree refresh', () => {
+  beforeEach(() => {
+    H.root = realpathSync(mkdtempSync(join(tmpdir(), 'ggp-stage-order-')));
+    RepoDiscoveryService.clearCache();
+  });
+  afterEach(() => {
+    rmSync(H.root, { recursive: true, force: true });
+    RepoDiscoveryService.clearCache();
+  });
+
+  it('calls refreshIfCurrent before the tree starts re-reading status', async () => {
+    const repo = join(H.root, 'r');
+    initRepoWithHunk(repo);
+    const wb = new ChangesWorkbench();
+    const diff = await wb.fileDiffData(repo, 'f.txt', 'unstaged');
+    expect(diff?.hunks.length).toBe(1);
+
+    const order: string[] = [];
+    wb.tree.onDidChangeTreeData(() => order.push('tree'));
+    wb.setDiffPanel({
+      refreshIfCurrent: () => order.push('panel'),
+      invalidateIndexDocuments: () => {},
+    } as unknown as Parameters<typeof wb.setDiffPanel>[0]);
+
+    await wb.stageHunks(repo, 'f.txt', [0], String(diff?.fingerprint));
+    expect(order[0]).toBe('panel');
+    expect(order).toContain('tree');
+  });
+});
+/* SNIPCODE-HOOK end */
+
 // No workbench mocks: readiness belongs to the final, latest tree snapshot.
 describe('Commit scope readiness', () => {
   it.each([true, false])('tracks the latest refresh regardless of completion order: %s', async (oldFirst) => {
@@ -152,4 +199,39 @@ describe('Commit scope readiness', () => {
     await expect(tree.refresh()).rejects.toThrow('read failed');
     expect(tree.isCommitScopeReady()).toBe(false);
   });
+
+  /* SNIPCODE-HOOK start: a failed read must not render as "Loading…" forever */
+  it('reports a failed read as failed, and clears that on the next attempt', async () => {
+    let fail = true;
+    const tree = new ChangesTreeProvider(async () => {
+      if (fail) throw new Error('read failed');
+      return [];
+    });
+    expect(tree.isCommitScopeFailed()).toBe(false);
+    await expect(tree.refresh()).rejects.toThrow('read failed');
+    expect(tree.isCommitScopeFailed()).toBe(true);
+    expect(tree.isCommitScopeReady()).toBe(false);
+    fail = false;
+    await tree.refresh();
+    expect(tree.isCommitScopeFailed()).toBe(false);
+    expect(tree.isCommitScopeReady()).toBe(true);
+  });
+
+  it('does not mark failure from a superseded refresh', async () => {
+    const finish: Array<() => void> = [];
+    const fail: Array<() => void> = [];
+    const tree = new ChangesTreeProvider(() => new Promise((resolve, reject) => {
+      finish.push(() => resolve([]));
+      fail.push(() => reject(new Error('stale failure')));
+    }));
+    const old = tree.refresh();
+    const latest = tree.refresh();
+    fail[0]();
+    await expect(old).rejects.toThrow('stale failure');
+    expect(tree.isCommitScopeFailed()).toBe(false);
+    finish[1]();
+    await latest;
+    expect(tree.isCommitScopeReady()).toBe(true);
+  });
+  /* SNIPCODE-HOOK end */
 });

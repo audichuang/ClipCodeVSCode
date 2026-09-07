@@ -69,6 +69,20 @@ beforeEach(() => {
 });
 
 describe('DiffPanel', () => {
+  /* SNIPCODE-HOOK start: perf — grammar warm reaches the FIRST file too */
+  it('posts diffLoading for the file that created the panel, before its diffShow', async () => {
+    const wb = makeWorkbench();
+    await shownPanel(wb);
+    const loading = posted().filter((m) => m.type === 'diffLoading');
+    expect(loading).toHaveLength(1);
+    expect(loading[0].payload).toEqual({ repoPath: '/r', file: 'a.ts', generation: expect.any(Number) });
+    // The webview warms the grammar off this message while the host runs git,
+    // so it has to precede the diff it is warming for.
+    const types = posted().map((m) => m.type);
+    expect(types.indexOf('diffLoading')).toBeLessThan(types.indexOf('diffShow'));
+  });
+  /* SNIPCODE-HOOK end */
+
   /* SNIPCODE-HOOK start: D6/X2 basename-only editor tab */
   it('titles the tab with the basename while the webview keeps the full path', async () => {
     const wb = makeWorkbench();

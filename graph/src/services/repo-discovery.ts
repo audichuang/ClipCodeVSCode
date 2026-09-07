@@ -245,8 +245,12 @@ export class RepoDiscoveryService {
     // (where `.git` is a file pointing at the real gitdir) are detected too.
     // Bare repositories (no `.git` entry; HEAD/refs/objects at the top level) are
     // intentionally not surfaced — the rest of the extension assumes a working tree.
+    return this.exists(path.join(dir, '.git'));
+  }
+
+  private static async exists(entry: string): Promise<boolean> {
     try {
-      await fs.promises.access(path.join(dir, '.git'));
+      await fs.promises.access(entry);
       return true;
     } catch {
       return false;
@@ -258,6 +262,27 @@ export class RepoDiscoveryService {
    * Works for both initialized and uninitialized submodules, cross-platform.
    */
   private static async getSubmodules(repoPath: string): Promise<RepoInfo[]> {
+    /* SNIPCODE-HOOK start: perf — recognise "no submodules" without spawning.
+       `git submodule status` is a shell wrapper (~18 execve, 10-15ms) where the
+       plumbing commands around it cost ~1ms, and the slow pass fires one per
+       discovered repo. Those spawns gate the `full` promise, which since the
+       commit-scope guard (changes-tree.ts `commitScopeReady`) also gates the
+       Commit button — so a 25-repo workspace paid ~1s of shell wrappers before
+       the primary action unlocked. Two filesystem signals stand in for the
+       spawn: `.gitmodules` (a tracked working-tree file, present whenever
+       submodules are configured, worktree checkouts included) and
+       `.git/modules/` (present once one was ever initialised, which covers a
+       `.gitmodules` deleted in the working tree but still in the index — git
+       would list those gitlinks and the file alone would not). The second
+       signal is main-checkout-only: in a linked worktree `.git` is a FILE, so
+       that path never resolves and only `.gitmodules` speaks — which is the
+       normal case there anyway, since it is a tracked file. Not worth resolving
+       the real gitdir for the deleted-but-staged corner. */
+    if (!(await this.exists(path.join(repoPath, '.gitmodules')))
+      && !(await this.exists(path.join(repoPath, '.git', 'modules')))) {
+      return [];
+    }
+    /* SNIPCODE-HOOK end */
     try {
       const raw = await this.execGit(['submodule', 'status', '--recursive'], repoPath);
       if (!raw.trim()) { return []; }
