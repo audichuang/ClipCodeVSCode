@@ -73,13 +73,9 @@ export const zh: Record<string, string> = {
   'workbench.amendTitle': '修正上一次提交（仅单一仓库；信息为空时会先带入旧信息）',
   'workbench.amendPushedWarning': '该提交已推送到远程。amend 会改写已推送的历史。',
   /* SNIPCODE-HOOK start: compact sidebar commit graph */
-  'recent.repoPicker': '仓库',
-  'recent.refresh': '刷新近期提交',
-  'recent.openFullGraph': '打开完整 Git Graph',
   'recent.loading': '正在加载近期提交…',
   'recent.noCommits': 'HEAD 没有提交',
   'recent.headScope': 'HEAD 历史',
-  'recent.headMarker': 'HEAD',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': '已暂存 {staged} · 未暂存 {unstaged} · 冲突 {conflicts}',
   /* SNIPCODE-HOOK end */

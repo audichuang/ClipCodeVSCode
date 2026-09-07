@@ -76,13 +76,9 @@ export const zhTw: Record<string, string> = {
   'workbench.amendTitle': '修正上一次提交（僅單一儲存庫；訊息空白時會先帶入舊訊息）',
   'workbench.amendPushedWarning': '此 commit 已推送到遠端，Amend 會改寫已推送的歷史。',
   /* SNIPCODE-HOOK start: compact sidebar commit graph */
-  'recent.repoPicker': '儲存庫',
-  'recent.refresh': '重新整理近期提交',
-  'recent.openFullGraph': '開啟完整 Git Graph',
   'recent.loading': '正在載入近期提交…',
   'recent.noCommits': 'HEAD 沒有提交',
   'recent.headScope': 'HEAD 歷史紀錄',
-  'recent.headMarker': 'HEAD',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': '已暫存 {staged} · 未暫存 {unstaged} · 衝突 {conflicts}',
   /* SNIPCODE-HOOK end */

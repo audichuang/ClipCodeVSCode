@@ -140,5 +140,7 @@
   "unknown error": "未知错误",
   "You · Uncommitted": "你 · 未提交",
   "Not committed yet": "尚未提交",
-  "Open this commit in Graph": "在 Graph 打开此 commit"
+  "Open this commit in Graph": "在 Graph 打开此 commit",
+  "recentCurrentRepo": "当前",
+  "recentSwitchRepo": "切换仓库"
 }

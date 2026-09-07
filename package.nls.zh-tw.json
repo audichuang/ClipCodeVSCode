@@ -123,5 +123,8 @@
   "configuration.gitGraphPlus.defaults.deleteBranch.force.description": "刪除分支對話方塊中「強制刪除」的預設狀態。",
   "configuration.gitGraphPlus.defaults.deleteBranch.deleteRemote.description": "刪除分支對話方塊中「同時刪除遠端追蹤分支」的預設狀態。",
   "configuration.gitGraphPlus.defaults.deleteTag.deleteRemote.description": "刪除標籤對話方塊中「同時刪除遠端上的標籤」的預設狀態。",
-  "configuration.gitGraphPlus.defaults.removeWorktree.deleteBranch.description": "移除工作樹對話方塊中「同時刪除該工作樹的分支」的預設狀態。"
+  "configuration.gitGraphPlus.defaults.removeWorktree.deleteBranch.description": "移除工作樹對話方塊中「同時刪除該工作樹的分支」的預設狀態。",
+  "cmd.snipcode.git.recentPickRepo.title": "切換儲存庫",
+  "cmd.snipcode.git.recentRefresh.title": "重新整理近期提交",
+  "cmd.snipcode.git.recentOpenGraph.title": "開啟完整 Git 線圖"
 }

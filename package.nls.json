@@ -123,5 +123,8 @@
   "configuration.gitGraphPlus.defaults.deleteBranch.force.description": "Default state of \"force delete\" in the Delete Branch dialog.",
   "configuration.gitGraphPlus.defaults.deleteBranch.deleteRemote.description": "Default state of \"also delete the remote-tracking branch\" in the Delete Branch dialog.",
   "configuration.gitGraphPlus.defaults.deleteTag.deleteRemote.description": "Default state of \"also delete the tag on remote\" in the Delete Tag dialog.",
-  "configuration.gitGraphPlus.defaults.removeWorktree.deleteBranch.description": "Default state of \"also delete the worktree's branch\" in the Remove Worktree dialog."
+  "configuration.gitGraphPlus.defaults.removeWorktree.deleteBranch.description": "Default state of \"also delete the worktree's branch\" in the Remove Worktree dialog.",
+  "cmd.snipcode.git.recentPickRepo.title": "Switch Repository",
+  "cmd.snipcode.git.recentRefresh.title": "Refresh Recent Commits",
+  "cmd.snipcode.git.recentOpenGraph.title": "Open Full Git Graph"
 }
