@@ -83,9 +83,15 @@ it: `docs/research/2026-07-10-vscode-git-operations-audit.md`.
 ## Release
 
 Pushing a `v<version>` tag runs `.github/workflows/publish.yml` (test → build →
-e2e → `vsce publish`). Use the `vscode-extension-release` skill — it owns the
-"not done until the version is verified live" discipline. Open VSX is not set up
-yet (namespace unclaimed) — VS Code Marketplace only for now.
+e2e → `vsce publish`). **A release is not done when CI goes green** — the
+Marketplace verifies and indexes the upload minutes later, so poll
+`vsce show audichuang.clipcode-vscode --json` until `.versions[0].version` is the
+new one before telling anyone it shipped (measured lag on real releases: 5–8
+minutes after the publish step succeeded). Bump `package.json` **and**
+`package-lock.json` — `npm ci` does not check the version field, so a stale
+lockfile ships silently. Open VSX is not set up yet (namespace unclaimed) — VS
+Code Marketplace only for now. (A `vscode-extension-release` skill automates
+this, but it lives outside this repo.)
 
 ## Where to start in the code
 

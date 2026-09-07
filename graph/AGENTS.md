@@ -29,18 +29,9 @@ Fence every Snipcode-only edit with `/* SNIPCODE-HOOK start/end */` for upstream
 
 ## Build & test (from this folder)
 
-Prefer **root** `npm run build` when shipping with Snipcode. Inside `graph/`:
-
-```bash
-npm test                                      # vitest: backend + webview
-npx vitest run --project backend              # extension-host only
-npx vitest run --project webview              # Svelte/webview only
-npx vitest run src/git/__tests__/git-service.test.ts   # single file
-cd webview-ui && npm run check                # svelte-check
-```
-
-Standalone `npm run build` / `npm run package` still exist for upstream-style
-dev; Snipcode packaging is always from the **repo root**.
+Standalone `npm run build` / `npm run package` survive for upstream-style dev,
+but Snipcode packaging is **always from the repo root**. Which suites to run
+when: `../AGENTS.md`; the two vitest projects: "Key conventions" below.
 
 ## Roles (not a file tree)
 
@@ -53,8 +44,8 @@ dev; Snipcode packaging is always from the **repo root**.
 | `src/panels/DiffPanel.ts` | Snipcode Diff tab (classic `diff.js` bundle) |
 | `src/tree/*` | **Live** Snipcode Git: Changes TreeView + `CommitBoxViewProvider` |
 | `src/workbench/*` | **Mostly orphaned B-2a leftovers** (`getWorkbenchStatus` / `commitAcrossRepos` / `WORKBENCH_MESSAGE_EFFECTS`) — only used by their own tests. Live multi-repo commit is `ChangesWorkbench.commit()`. Do not wire new features through these helpers unless resurrecting that protocol. |
-| `webview-ui/` | Svelte 5 UI: graph, modals, PR view, commit-box + diff entries |
-| `l10n/` + `webview-ui/src/lib/i18n/` | Host vs webview strings (`en`/`ko`/`zh`) |
+| `webview-ui/` | Svelte 5 UI (three entries — see the bundle table below) |
+| `l10n/` + `webview-ui/src/lib/i18n/` | **Two separate** string systems, and only one is guarded: host `vscode.l10n.t` bundles (`l10n/bundle.l10n*.json`) vs webview dictionaries. `i18n/__tests__/parity.test.ts` fails if a webview key is missing from any dictionary; **nothing checks the host bundles**, so a key added to one of those and forgotten in another silently ships the raw key to that locale (zh-cn/zh-tw currently carry 26 keys neither `bundle.l10n.json` nor `ko` has). A key added to one system is invisible to the other |
 
 Full structure: read the tree or search the code — do not maintain a hand-written inventory here.
 
@@ -76,11 +67,45 @@ handshake timeout (`sent no message within 15000ms`).
 all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
 `.js`/`.css` pairs exist.
 
+`main.js` and `diff.js` carry Shiki; `workbench.js` does not — and their CSP
+differs because of it. Those two panels add `'wasm-unsafe-eval'` to `script-src`
+so Shiki's oniguruma WASM engine can compile; without it compilation is refused
+outright (`WebAssembly.CompileError`) and every diff renders as plain text. Give
+a Shiki-using feature to `workbench.js` and it fails **silently** until
+`commit-box-view.ts` / `recent-commits-view.ts` get the directive too.
+
+The no-top-level-`import` rule above is about **static** imports. A classic
+`<script nonce>` **can** `import()` at runtime — the nonce is inherited, checked
+against the built `assets/` chunks — which is how `main.js` lazy-loads grammars.
+Don't re-litigate this to justify inlining.
+
+**Diff-open latency is dominated by Shiki tokenising**, not git and not bundle
+size: ~250ms–1.3s of tokenising against ~20ms for the five git invocations one
+file open costs and ~17ms to parse a 3MB bundle (519-file repo, Linux). Chunking
+and yielding is not the same as progressive rendering — publish each chunk, or
+input stays responsive while the diff stays plain for the whole pass. Measure
+before optimising anything else here.
+
 `workbench.ts` chooses the commit box or recent graph from `body.dataset.view`.
 Acquire the VS Code API lazily and install only the chosen view's listeners:
 static imports run for both views, and a second `acquireVsCodeApi()` breaks boot.
 The recent graph's ordinary interactions stay in the sidebar; only its explicit
 Open Full Graph action opens the editor panel.
+
+## Matching native VS Code (webview layout)
+
+Read native rather than guess: the installed
+`.vscode-test/vscode-linux-x64-*/resources/app/out/vs/workbench/workbench.desktop.main.{js,css}`
+carries the real geometry constants, `--vscode-*` theme tokens and algorithms of
+VS Code's own views. The sidebar commit list's 22px rows, 11px lanes, r5 dots and
+ref-pill sizing were measured out of it; guessing produced a 64px branch-name cap
+nobody could read.
+
+Column widths in `CommitGraph.svelte` do **not** respond to viewport pressure the
+way the CSS suggests: `.col-message` is the only flexible column, so it absorbs
+every pixel of shrink and the fixed right-hand columns keep their basis at any
+width. Making one of them `flex`-shrinkable is inert — to give the subject room
+you have to reduce a column's basis or shorten its content.
 
 ## Key conventions (踩雷)
 
@@ -139,6 +164,13 @@ Open Full Graph action opens the editor panel.
 
 ## Permissions
 
-Release / marketplace / workflow edits: follow **`../AGENTS.md`**. Visual
-changes under `webview-ui/**` should go through the work-root
-`verify-webview-ui` skill before claiming the UI is done.
+Release / marketplace / workflow edits: follow **`../AGENTS.md`**.
+
+A visual change under `webview-ui/**` is not done until it has been **rendered
+and looked at**: the webview vitest project runs on happy-dom, which computes no
+layout, so `getBoundingClientRect` is all zeros and a positioning bug passes
+every test. The committed harness and the method are
+`docs/research/2026-09-06-ui-audit/render.md` + the `harness/` folder beside it.
+Assert geometry with numbers, not by eyeballing the screenshot. (A
+`verify-webview-ui` skill wraps this flow but lives outside this repo — the
+harness is the part a clone actually gets.)
