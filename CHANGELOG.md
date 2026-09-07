@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.43
+
+A full pass over how the Git surfaces actually read — the commit graph, the main
+panel, Diff, PR compare and the multi-repo sidebar — plus Traditional Chinese
+that is finally Traditional Chinese.
+
+- **The commit graph now answers "which line is mine, where did it come from,
+  where does it merge back" without clicking anything.** Branch colours are
+  assigned from the tip's ref name instead of the lowest free lane, so a colour
+  stays with its branch instead of being recycled the moment a rail ends; lines
+  and dots that are not ancestors of HEAD are dimmed rather than drawn at full
+  strength; hovering a row spotlights that whole rail; the HEAD row gets a lane-
+  coloured inset and its dot a double ring; and the Uncommitted node is wired to
+  HEAD instead of floating as a second root on lane 0. Light and High Contrast
+  themes get their own palette — half the previous colours sat below 3:1 there.
+  The invisible 0.07-alpha glow layer under every line is gone, which also
+  halves the number of paths drawn.
+- **Traditional Chinese users get Traditional Chinese.** `zh-TW` was being
+  truncated to `zh` and served the Simplified dictionary; the host's own strings
+  never shipped at all (no `l10n` field, and `.vscodeignore` excluded the
+  bundles), so parts of the UI showed raw message keys. There is now a real
+  `zh-tw` dictionary, locale resolution tries the full tag first, the host
+  bundles are in the VSIX, and view/command titles are localizable through
+  `package.nls.json`.
+- **Diff renders things it used to silently drop.** A rename with edits no longer
+  shows up as a whole-file add (the pathspec now carries the old path, resolved
+  per side — the staged side of an `RM` file is `R`, the unstaged side `M`, so
+  one remembered value cannot be right for both); `\ No newline at end of file`
+  and stray `\r` from CRLF files are shown instead of rendering as two
+  identical-looking lines; the Diff tab loads the shared stylesheet it was
+  missing, so hunk boundaries and pane dividers exist again; and hunk staging no
+  longer remounts the whole view, losing your scroll position.
+- **The multi-repo sidebar and PR compare say what they are showing.** Conflicted
+  files are their own group instead of being offered as committable; Discard
+  exists; file status letters and colours come from our own decoration provider
+  so repos nested deeper than vscode.git looks are no longer blank; repo rows
+  carry a file count and stay collapsed when there is more than one repo, so the
+  first repo cannot bury the rest; the commit box reports how many repos and
+  files a Commit would actually touch, and keeps your draft when the view is
+  hidden. PR compare reloads when the branches move under it, distinguishes the
+  four situations that all used to read "No changed files", and shows
+  merge-base, ahead/behind and per-file +/- in one line.
+- **A recent-commit graph under the commit box**, collapsible, so the sidebar can
+  show history without leaving it for the graph tab.
+- **The VSIX is 1.26 MB instead of 1.81 MB.** Every Shiki grammar was being
+  shipped twice — the asset-copy step only ever added files, so the flat bundles
+  from an older Vite output layout were never removed — and a 577 KB JUnit
+  report, this repo's own agent docs and `.vscode/` were going out with it.
+
 ## 0.3.42
 
 Copy a whole branch, and a copy notification whose numbers describe what is
