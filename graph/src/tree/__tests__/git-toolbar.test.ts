@@ -707,6 +707,26 @@ describe('Changes tree repo badges', () => {
     await expect(repoDescription(undefined, undefined)).resolves.toBe('1 · main'); // no upstream
   });
 
+  // A single-repo workspace has nothing to be crowded out by, so collapsing it
+  // would cost that user an extra click on every refresh for no gain; only a
+  // group with siblings starts collapsed.
+  it('collapses repo rows only when the group has more than one repo', async () => {
+    const collapsibleStates = async (repoPaths: string[]): Promise<number[]> => {
+      const provider = new ChangesTreeProvider(async () => repoPaths.map(repoPath => ({
+        repoName: repoPath.slice(1), repoPath, branch: 'main',
+        staged: [], unstaged: [{ path: 'f.ts', status: 'M' }], conflict: [],
+      })) as RepoStatus[]);
+      await provider.refresh();
+      const groups = provider.getChildren();
+      const unstaged = groups.find(g => provider.getTreeItem(g).contextValue === 'group-unstaged')!;
+      return provider.getChildren(unstaged)
+        .map(repo => provider.getTreeItem(repo).collapsibleState as number);
+    };
+
+    await expect(collapsibleStates(['/r'])).resolves.toEqual([2]);            // Expanded
+    await expect(collapsibleStates(['/a', '/b'])).resolves.toEqual([1, 1]);   // Collapsed
+  });
+
   it('keeps the newest refresh when an older status read finishes last', async () => {
     let releaseOld!: (value: RepoStatus[]) => void;
     const oldStatus = new Promise<RepoStatus[]>(resolve => { releaseOld = resolve; });

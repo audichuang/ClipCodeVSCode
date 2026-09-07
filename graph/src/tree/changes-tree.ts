@@ -135,8 +135,17 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
       /* SNIPCODE-HOOK end */
       /* SNIPCODE-HOOK start: compact multi-repo summaries — keep the first
          paint useful on large workspaces; files are one explicit expansion
-         away while the repo row remains a compact summary. */
-      const item = new vscode.TreeItem(node.repoName, vscode.TreeItemCollapsibleState.Collapsed);
+         away while the repo row remains a compact summary. Collapsing is
+         conditional: a single-repo workspace has nothing to be crowded out
+         by, so it stays expanded rather than costing every such user an
+         extra click on every refresh. */
+      const siblingRepoCount = this.groups.find(group => group.group === node.group)?.repos.length ?? 1;
+      const item = new vscode.TreeItem(
+        node.repoName,
+        siblingRepoCount > 1
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded,
+      );
       // IntelliJ-style incoming/outgoing badges; zero or no-upstream sides drop out.
       item.description = `${node.files.length} · ${node.branch}`
         + (node.behind ? ` ↓${node.behind}` : '')
