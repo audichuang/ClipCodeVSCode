@@ -19,6 +19,7 @@ without a design decision — those are dead paths that only remain in old plans
 |---|---|
 | Multi-repo **Changes** tree (real stage/unstage/commit) | **Owner:** `src/tree/changes-workbench.ts` (+ `build-change-tree.ts`, `changes-tree.ts`). Ops: `GitService.stagePaths` / `unstagePaths` / `commitIndex` / `stageHunks` / `unstageHunks` / `stageLines` / `unstageLines` |
 | **Commit** message box (one shared message across repos) | `src/tree/commit-box-view.ts` (`CommitBoxViewProvider`) → `workbench.js` → `ChangesWorkbench.commit()` |
+| **Recent Commits** sidebar overview | `src/tree/recent-commits-view.ts` → `workbench.js` → `RecentCommits.svelte`; follows HEAD history without replacing the active editor |
 | Full-width **Diff** tab (unified staged+unstaged, hunk/line stage, word-diff) | `src/panels/DiffPanel.ts` → `diff.js` |
 | Fetch / Pull / Push all repos + ↓↑ badges | `ChangesWorkbench.fetchAll` / `pullAll` / `pushAll` + root `package.json` `view/title` menus when `view == snipcode.changes`; badges from `GitService.aheadBehind` on tree repo nodes — **not** the graph webview `Toolbar.svelte` |
 | PR compare tab | `webview-ui/.../pr/PrView.svelte` + `GitService.commitsBetween` |
@@ -67,13 +68,19 @@ handshake timeout (`sent no message within 15000ms`).
 | Bundle | Vite config | Loaded by |
 |---|---|---|
 | `main.js` | `webview-ui/vite.config.ts` | `MainPanel` (graph) |
-| `workbench.js` | `vite.workbench.config.ts` (`inlineDynamicImports`) | `CommitBoxViewProvider` |
+| `workbench.js` | `vite.workbench.config.ts` (`inlineDynamicImports`) | `CommitBoxViewProvider` / `RecentCommitsViewProvider` |
 | `diff.js` | `vite.diff.config.ts` | `DiffPanel` |
 
 `webview-ui`'s `build` runs these **three single-entry** builds back-to-back.
 **Do not** merge into one multi-entry Vite build (shared Svelte runtime chunk →
 all three boot blank). Root `scripts/copy-graph-assets.mjs` asserts all three
 `.js`/`.css` pairs exist.
+
+`workbench.ts` chooses the commit box or recent graph from `body.dataset.view`.
+Acquire the VS Code API lazily and install only the chosen view's listeners:
+static imports run for both views, and a second `acquireVsCodeApi()` breaks boot.
+The recent graph's ordinary interactions stay in the sidebar; only its explicit
+Open Full Graph action opens the editor panel.
 
 ## Key conventions (踩雷)
 

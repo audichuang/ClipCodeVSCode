@@ -8,6 +8,7 @@ const H = vi.hoisted(() => ({
   registeredCommands: [] as string[],
   commandHandlers: {} as Record<string, (...args: unknown[]) => unknown>,
   treeViewsCreated: [] as string[],
+  treeSelectionHandlers: {} as Record<string, (event: unknown) => void>,
   workspaceFolders: undefined as Array<{ uri: { fsPath: string } }> | undefined,
   gitPathConfig: null as string | string[] | null,
   worktreeList: [] as Array<{ path: string; isMain: boolean }>,
@@ -28,7 +29,7 @@ vi.mock('vscode', () => ({
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
   },
   window: {
-    createTreeView: (id: string) => { H.treeViewsCreated.push(id); return { description: '', message: undefined, onDidChangeCheckboxState: () => ({ dispose() {} }), dispose() {} }; },
+    createTreeView: (id: string) => { H.treeViewsCreated.push(id); return { description: '', message: undefined, onDidChangeCheckboxState: () => ({ dispose() {} }), onDidChangeSelection: (handler: (event: unknown) => void) => { H.treeSelectionHandlers[id] = handler; return { dispose() {} }; }, dispose() {} }; },
     showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(async () => undefined),
     showErrorMessage: vi.fn(),
@@ -93,6 +94,7 @@ beforeEach(() => {
   H.registeredCommands = [];
   H.commandHandlers = {};
   H.treeViewsCreated = [];
+  H.treeSelectionHandlers = {};
   H.workspaceFolders = undefined;
   H.gitPathConfig = null;
   H.worktreeList = [];
@@ -162,6 +164,20 @@ describe('activate', () => {
     const { MainPanel } = await import('../panels/MainPanel');
     expect(MainPanel.setGitServiceProvider).toHaveBeenCalledWith(expect.any(Function));
   });
+
+  /* SNIPCODE-HOOK start: Changes selection follows custom Diff repo */
+  it('routes Changes repo selection through the active repo switch flow', async () => {
+    H.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+    const ctx = makeContext();
+    activate(ctx);
+    H.treeSelectionHandlers['snipcode.changes']({ selection: [{ kind: 'repo', repoPath: '/other' }] });
+
+    const { MainPanel } = await import('../panels/MainPanel');
+    const provider = vi.mocked(MainPanel.setGitServiceProvider).mock.calls.at(-1)?.[0] as ((repoPath: string) => unknown);
+    expect(provider('/other')).toBeTruthy();
+    expect(provider('/repo')).toBeUndefined();
+  });
+  /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: R6 commit box retains context when the view is hidden */
   it('registers the commit box webview with retainContextWhenHidden (R6)', () => {

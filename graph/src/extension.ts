@@ -14,6 +14,9 @@ import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
 import { ChangesWorkbench } from './tree/changes-workbench';
 import { CommitBoxViewProvider } from './tree/commit-box-view';
+/* SNIPCODE-HOOK start: compact sidebar commit graph */
+import { RecentCommitsViewProvider } from './tree/recent-commits-view';
+/* SNIPCODE-HOOK end */
 /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
 import { ChangeDecorationProvider } from './tree/change-decorations';
 /* SNIPCODE-HOOK end */
@@ -201,12 +204,30 @@ export function activate(context: vscode.ExtensionContext) {
   const changesView = vscode.window.createTreeView('snipcode.changes', { treeDataProvider: workbench.tree, showCollapseAll: true, canSelectMany: true });
   workbench.setView(changesView);
   changesView.onDidChangeCheckboxState((e) => workbench.handleCheckboxChange(e.items));
+  /* SNIPCODE-HOOK start: Changes selection follows the selected repo even when
+     no active editor exists (custom Diff opens from the tree command). */
+  const changesSelection = changesView.onDidChangeSelection((e) => {
+    const node = e.selection[0] as { kind?: string; repoPath?: string } | undefined;
+    if (node?.repoPath) switchToRepo(node.repoPath);
+  });
+  /* SNIPCODE-HOOK end */
   const diffPanel = DiffPanel.register(context.extensionUri, workbench);
   workbench.setDiffPanel(diffPanel);
+  /* SNIPCODE-HOOK start: compact sidebar commit graph */
+  const recentCommits = new RecentCommitsViewProvider(context.extensionUri, {
+    get: () => ({ path: activeRepoPath, service: activeGitService }),
+    switchToRepo,
+    openFullGraph: () => MainPanel.createOrShow(context.extensionUri, activeRepoPath),
+  });
+  const recentTreeRefresh = workbench.tree.onDidChangeTreeData(() => recentCommits.scheduleRefresh());
+  /* SNIPCODE-HOOK end */
   context.subscriptions.push(
     workbench,
     changesView,
+    changesSelection,
     diffPanel,
+    recentCommits,
+    recentTreeRefresh,
     /* SNIPCODE-HOOK start: S5 own FileDecorationProvider */
     vscode.window.registerFileDecorationProvider(new ChangeDecorationProvider()),
     /* SNIPCODE-HOOK end */
@@ -218,6 +239,11 @@ export function activate(context: vscode.ExtensionContext) {
          view disposes the webview and any in-progress commit message is lost. */
       { webviewOptions: { retainContextWhenHidden: true } },
       /* SNIPCODE-HOOK end */
+    ),
+    vscode.window.registerWebviewViewProvider(
+      RecentCommitsViewProvider.viewType,
+      recentCommits,
+      { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );
   workbench.registerCommands(context);
@@ -364,6 +390,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (sidebarRefreshTimer) { clearTimeout(sidebarRefreshTimer); }
     sidebarRefreshTimer = setTimeout(() => {
       sidebarRefreshTimer = null;
+      recentCommits.scheduleRefresh();
       doSidebarRefresh();
     }, 300);
   }
@@ -412,6 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
     MainPanel.currentPanel?.switchRepo(newPath);
 
     refreshAll();
+    recentCommits.scheduleRefresh();
   }
 
   let editorRepoSwitchTimer: ReturnType<typeof setTimeout> | null = null;

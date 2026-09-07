@@ -2,6 +2,7 @@
   "viewsContainer.snipcode-git.title": "Snipcode Git",
   "view.snipcode.changes.name": "變更",
   "view.snipcode.commitBox.name": "提交",
+  "view.snipcode.recentCommits.name": "近期提交",
   "view.clipcode.history.name": "Snipcode 歷史紀錄",
   "view.gitGraphPlus.branches.name": "分支",
   "view.gitGraphPlus.remotes.name": "遠端",

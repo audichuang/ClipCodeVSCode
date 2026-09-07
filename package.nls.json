@@ -2,6 +2,7 @@
   "viewsContainer.snipcode-git.title": "Snipcode Git",
   "view.snipcode.changes.name": "Changes",
   "view.snipcode.commitBox.name": "Commit",
+  "view.snipcode.recentCommits.name": "Recent Commits",
   "view.clipcode.history.name": "Snipcode History",
   "view.gitGraphPlus.branches.name": "Branches",
   "view.gitGraphPlus.remotes.name": "Remotes",

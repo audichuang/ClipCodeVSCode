@@ -17,7 +17,10 @@ declare function acquireVsCodeApi(): VsCodeApi;
 
 // Minimal one-shot vscode api (workbench has its own bundle/context; the graph
 // vscode-api.ts drags in uiStore, so we acquire locally in ~3 lines).
-const vscode = acquireVsCodeApi();
+let vscode: VsCodeApi | undefined;
+function vscodeApi(): VsCodeApi {
+  return vscode ??= acquireVsCodeApi();
+}
 
 // Guards the commit round-trip: cleared as soon as a terminal reply (result or
 // error) arrives; if the view gets disposed/reloaded mid-commit and neither
@@ -38,14 +41,14 @@ function clearCommitTimer(): void {
  *  being hidden/remounted — see extension.ts retainContextWhenHidden). Call on
  *  every message change; cheap, and setState is a plain object write. */
 export function saveDraft(message: string): void {
-  vscode.setState({ message });
+  vscodeApi().setState({ message });
 }
 /* SNIPCODE-HOOK end */
 
 /** Wire the extension -> webview message handler. Call once at boot. */
 export function listenForHostMessages(): void {
   /* SNIPCODE-HOOK start: R6 restore an in-progress commit draft after remount */
-  const saved = vscode.getState() as { message?: string } | undefined;
+  const saved = vscodeApi().getState() as { message?: string } | undefined;
   if (saved?.message) workbenchStore.message = saved.message;
   /* SNIPCODE-HOOK end */
   window.addEventListener('message', (e) => {
@@ -83,7 +86,7 @@ export function listenForHostMessages(): void {
     }
   });
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
-  vscode.postMessage({ type: 'workbenchReady' });
+  vscodeApi().postMessage({ type: 'workbenchReady' });
   /* SNIPCODE-HOOK end */
 }
 
@@ -98,7 +101,7 @@ export function postCommit(amend: boolean): void {
     workbenchStore.commitError = t('workbench.commitTimeout');
     /* SNIPCODE-HOOK end */
   }, COMMIT_TIMEOUT_MS);
-  vscode.postMessage({
+  vscodeApi().postMessage({
     type: 'workbenchCommit',
     payload: { message: workbenchStore.message, amend },
   });
@@ -108,6 +111,6 @@ export function postCommit(amend: boolean): void {
 /** Ask the host for HEAD's message of the single Amend target repo, so an
  *  empty textarea gets filled instead of Amend silently doing nothing. */
 export function requestAmendPrefill(): void {
-  vscode.postMessage({ type: 'workbenchRequestAmendPrefill' });
+  vscodeApi().postMessage({ type: 'workbenchRequestAmendPrefill' });
 }
 /* SNIPCODE-HOOK end */

@@ -393,12 +393,20 @@
       "snipcode-git": [
         {
           "id": "snipcode.changes",
-          "name": "%view.snipcode.changes.name%"
+          "name": "%view.snipcode.changes.name%",
+          "initialSize": 3
         },
         {
           "id": "snipcode.commitBox",
           "name": "%view.snipcode.commitBox.name%",
-          "type": "webview"
+          "type": "webview",
+          "initialSize": 1
+        },
+        {
+          "id": "snipcode.recentCommits",
+          "name": "%view.snipcode.recentCommits.name%",
+          "type": "webview",
+          "initialSize": 2
         }
       ],
       "scm": [
