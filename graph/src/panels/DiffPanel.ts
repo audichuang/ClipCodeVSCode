@@ -213,6 +213,21 @@ export class DiffPanel {
         if (this.current) {
           const generation = this.seq.issue();
           this.current = { ...this.current, generation };
+          /* SNIPCODE-HOOK start: perf — warm the grammar on the FIRST file too.
+             `show()` only posts `diffLoading` when `this.ready` is already true,
+             so the file that CREATES the panel never sent one — and the webview
+             hangs its grammar warm-up off exactly that message (diff.ts). The
+             session's first file therefore tokenised its first screen with a
+             cold grammar: 129ms vs 89ms hint→first-screen (Node, 3000-line TS
+             diff, 20ms git). Posting it here gives that file the same overlap
+             with git as every later navigation. No operationId: a fresh page
+             has no op gate (see just above), and `beginLoad` would drop the
+             message if it carried one. */
+          panel.webview.postMessage({
+            type: 'diffLoading',
+            payload: { repoPath: this.current.repoPath, file: this.current.file, generation },
+          });
+          /* SNIPCODE-HOOK end */
           void this.push(this.current, generation);
         }
         /* SNIPCODE-HOOK end */

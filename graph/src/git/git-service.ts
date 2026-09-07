@@ -386,7 +386,14 @@ export class GitService {
   }
 
   async emptyTreeRef(): Promise<string> {
-    const format = (await this.exec(['rev-parse', '--show-object-format'], { silent: true })).trim();
+    // `--show-object-format` needs git 2.29 and `silent` only suppresses the
+    // log line — the exec still throws. `resolveCommitFileBases` now calls this
+    // for EVERY historical diff, not just root commits, so an unhandled throw
+    // here would take out every commit-file comparison on an older git rather
+    // than only the sha256 distinction this lookup exists for.
+    const format = await this.exec(['rev-parse', '--show-object-format'], { silent: true })
+      .then(out => out.trim())
+      .catch(() => 'sha1');
     return GitService.EMPTY_TREE[format] ?? GitService.EMPTY_TREE.sha1;
   }
 

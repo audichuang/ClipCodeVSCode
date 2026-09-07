@@ -67,6 +67,7 @@ export const ko: Record<string, string> = {
   'workbench.commitTimeout': '커밋 시간 초과 — 결과를 받지 못했습니다. 새로고침 후 상태를 확인하세요.',
   'workbench.committedCount': '{count}개 저장소 커밋됨',
   'workbench.commitScope': '커밋 범위: 저장소 {repos}개 · 파일 {files}개',
+  'workbench.commitScopeFailed': '리포지토리 상태를 읽을 수 없습니다 — 새로 고침으로 다시 시도하세요.',
   'workbench.messagePlaceholder': '커밋 메시지(공유, 스테이징된 모든 저장소에 적용)',
   'workbench.commit': 'Commit',
   'workbench.amend': 'Amend',

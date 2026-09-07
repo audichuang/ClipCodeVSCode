@@ -67,6 +67,7 @@ export const en: Record<string, string> = {
   'workbench.commitTimeout': 'Commit timed out — no result was received. Refresh and check the status.',
   'workbench.committedCount': 'Committed {count} repo(s)',
   'workbench.commitScope': 'Commit scope: {repos} repo(s) · {files} file(s)',
+  'workbench.commitScopeFailed': 'Could not read the repository status — use Refresh to try again.',
   'workbench.messagePlaceholder': 'Commit message (shared; applies to every staged repo)',
   'workbench.commit': 'Commit',
   'workbench.amend': 'Amend',

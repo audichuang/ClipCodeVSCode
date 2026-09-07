@@ -7,6 +7,16 @@
 
   const store = workbenchStore;
 
+  /* SNIPCODE-HOOK start: three states, not two — ready / failed / still loading */
+  const scopeText = $derived(
+    store.commitScopeReady
+      ? t('workbench.commitScope', { repos: store.stagedRepoCount, files: store.stagedFileCount })
+      : store.commitScopeFailed
+        ? t('workbench.commitScopeFailed')
+        : t('recent.loading'),
+  );
+  /* SNIPCODE-HOOK end */
+
   const failures = $derived(store.results.filter((r) => !r.ok));
   const okCount = $derived(store.results.filter((r) => r.ok).length);
 
@@ -54,7 +64,7 @@
     onkeydown={onTextareaKeydown}
   ></textarea>
 
-  <p class="commit-scope">{store.commitScopeReady ? t('workbench.commitScope', { repos: store.stagedRepoCount, files: store.stagedFileCount }) : t('recent.loading')}</p>
+  <p class="commit-scope">{scopeText}</p>
 
   <div class="actions">
     <button class="btn primary" disabled={!store.canCommit} onclick={() => postCommit(false)}>

@@ -480,6 +480,10 @@ export class ChangesWorkbench implements vscode.Disposable {
   /* SNIPCODE-HOOK start: S13 Amend prefill */
   isCommitScopeReady(): boolean { return this.tree.isCommitScopeReady(); }
 
+  /* SNIPCODE-HOOK start: failed status read, not a slow one */
+  isCommitScopeFailed(): boolean { return this.tree.isCommitScopeFailed(); }
+  /* SNIPCODE-HOOK end */
+
   /** HEAD's commit message for the single checked+staged repo, so the commit
    *  box can prefill an empty Amend textarea (webview asks for this on demand
    *  rather than the tree pushing it on every refresh). Returns null when
@@ -556,33 +560,46 @@ export class ChangesWorkbench implements vscode.Disposable {
   /* SNIPCODE-HOOK start: Batch B stale diff fingerprint */
   async stageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).stageHunks(file, hunkIndices, fingerprint));
-    await this.refresh();
+    /* SNIPCODE-HOOK start: perf — re-render the panel BEFORE the tree.
+       `refresh()` re-reads status for every repo in the workspace (~100ms at 25
+       repos) and the Diff tab's busy gate only releases when its own push
+       lands, so waiting for the tree charged every hunk click the whole pool.
+       The panel's read needs nothing from the tree: the mutation ran under
+       runExclusive and exec() already dropped this repo's read cache. */
     // Only re-render if the user is still on this file — a slow apply must not
     // yank the panel back after they navigated elsewhere.
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
+    await this.refresh();
+    /* SNIPCODE-HOOK end */
   }
 
   /** Unstage the selected hunks of one staged file, then refresh + re-render the
    *  file's remaining staged diff. */
   async unstageHunks(repoPath: string, file: string, hunkIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageHunks(file, hunkIndices, fingerprint));
-    await this.refresh();
+    /* SNIPCODE-HOOK start: perf — panel before tree, see stageHunks */
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
+    await this.refresh();
+    /* SNIPCODE-HOOK end */
   }
 
   /* SNIPCODE-HOOK start (B-2d): line-level stage/unstage, mirrors stageHunks. */
   /** Stage the selected changed lines of one hunk of an unstaged file. */
   async stageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).stageLines(file, hunkIndex, lineIndices, fingerprint));
-    await this.refresh();
+    /* SNIPCODE-HOOK start: perf — panel before tree, see stageHunks */
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
+    await this.refresh();
+    /* SNIPCODE-HOOK end */
   }
 
   /** Unstage the selected changed lines of one hunk of a staged file. */
   async unstageLines(repoPath: string, file: string, hunkIndex: number, lineIndices: number[], fingerprint: string, operationId?: string): Promise<void> {
     await runExclusive(repoPath, () => this.svcFor(repoPath).unstageLines(file, hunkIndex, lineIndices, fingerprint));
-    await this.refresh();
+    /* SNIPCODE-HOOK start: perf — panel before tree, see stageHunks */
     this.diffPanel?.refreshIfCurrent(repoPath, file, operationId);
+    await this.refresh();
+    /* SNIPCODE-HOOK end */
   }
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
