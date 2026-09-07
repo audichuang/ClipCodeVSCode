@@ -2033,11 +2033,12 @@ export class MainPanel {
          left side takes both its ref and its path from one resolution. The
          parent is still a full SHA (the `<sha>~1` shorthand isn't understood by
          markdown-diff tooling, #51). */
-      const { fallbackRef, perFile } = await this.gitService.resolveCommitFileBases(commitHash);
-      const base = perFile.get(file) ?? { ref: fallbackRef, path: oldPath ?? file };
-      const leftUri = this.toGitUri(this.resolveRepoRelativePath(base.path, 'openDiff'), base.ref);
+      const { fallbackRef, fallbackLeftExists, emptyRef, perFile } = await this.gitService.resolveCommitFileBases(commitHash);
+      const base = perFile.get(file) ?? { ref: fallbackRef, path: oldPath ?? file, leftExists: fallbackLeftExists, rightExists: true };
+      const basePath = this.resolveRepoRelativePath(base.path, 'openDiff');
+      const leftUri = this.toGitUri(basePath, base.leftExists ? base.ref : emptyRef);
       /* SNIPCODE-HOOK end */
-      const rightUri = this.toGitUri(fullPath, commitHash);
+      const rightUri = this.toGitUri(fullPath, base.rightExists ? commitHash : emptyRef);
       const title = `${file} (${commitHash.substring(0, 7)})`;
       await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
     } else if (staged) {

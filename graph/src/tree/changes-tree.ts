@@ -40,6 +40,7 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private groups: GroupNode[] = [];
+  private commitScopeReady = false;
   /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
   private readonly refreshSequence = new SequenceGuard();
   /* SNIPCODE-HOOK end */
@@ -54,6 +55,8 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
   async refresh(): Promise<void> {
     /* SNIPCODE-HOOK start: Batch D latest-wins tree refresh */
     const ticket = this.refreshSequence.issue();
+    this.commitScopeReady = false;
+    this._onDidChangeTreeData.fire();
     /* SNIPCODE-HOOK start: progressive first paint
        Paint the repos that have answered instead of a blank view until the last
        one does (25 repos, one on a slow disk: the other 24 used to wait for it).
@@ -74,8 +77,9 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
         this._onDidChangeTreeData.fire();
       }, PARTIAL_PAINT_MS);
     };
-    const repos = await this.loadStatus(paintPartial);
-    if (partialTimer) { clearTimeout(partialTimer); partialTimer = undefined; }
+    let repos: RepoStatus[];
+    try { repos = await this.loadStatus(paintPartial); }
+    finally { if (partialTimer) clearTimeout(partialTimer); }
     /* SNIPCODE-HOOK end */
     if (!this.refreshSequence.isCurrent(ticket)) return;
     const groups = buildChangeTree(repos);
@@ -93,11 +97,14 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeTreeNo
     // permanent "Staged 0 / Unstaged 0" — collapse to an empty root instead so
     // the "No changes" / "No git repository" welcome content can show through.
     this.groups = groups.every((g) => g.count === 0) ? [] : groups;
+    this.commitScopeReady = true;
     /* SNIPCODE-HOOK end */
     this._onDidChangeTreeData.fire();
   }
 
   /* SNIPCODE-HOOK start: Batch D exact-one-repo amend guard */
+  isCommitScopeReady(): boolean { return this.commitScopeReady; }
+
   getStagedRepoCount(): number {
     return (this.groups.find(group => group.group === 'staged')?.repos ?? [])
       .filter(repo => this.isCheckedForCommit(repo.repoPath)).length;

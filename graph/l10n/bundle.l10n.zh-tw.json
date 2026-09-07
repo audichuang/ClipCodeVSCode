@@ -142,5 +142,6 @@
   "Not committed yet": "尚未提交",
   "Open this commit in Graph": "在 Graph 開啟此 commit",
   "recentCurrentRepo": "目前",
-  "recentSwitchRepo": "切換儲存庫"
+  "recentSwitchRepo": "切換儲存庫",
+  "Commit is unavailable while repositories are still loading": "儲存庫仍在載入，暫時無法提交"
 }

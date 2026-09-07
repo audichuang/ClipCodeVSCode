@@ -73,7 +73,7 @@ describe('resolveCommitFileBases (merge parents)', () => {
 
     const { perFile } = await git.resolveCommitFileBases(merge);
     const base = perFile.get('renamed.txt');
-    expect(base).toEqual({ ref: second, path: 'renamed.txt' });
+    expect(base).toEqual({ ref: second, path: 'renamed.txt', leftExists: true, rightExists: true });
     // Not `a.txt`: the winning parent already calls it renamed.txt, so pairing
     // that parent with the union list's oldPath would read a missing blob.
     expect(base!.path).not.toBe('a.txt');
@@ -95,16 +95,16 @@ describe('resolveCommitFileBases (merge parents)', () => {
     const { fallbackRef, perFile } = await git.resolveCommitFileBases(merge);
 
     expect(fallbackRef).toBe(first);
-    expect(perFile.get('b.txt')).toEqual({ ref: first, path: 'b.txt' });
+    expect(perFile.get('b.txt')).toEqual({ ref: first, path: 'b.txt', leftExists: true, rightExists: true });
   });
 
-  it('resolves an ordinary commit to its single parent with no per-file work', async () => {
+  it('resolves an ordinary commit to its single parent and existing sides', async () => {
     const parent = commit(repo.path, 'first', { 'a.txt': BASE });
     const child = commit(repo.path, 'second', { 'a.txt': `${BASE}more\n` });
 
     const { fallbackRef, perFile } = await git.resolveCommitFileBases(child);
     expect(fallbackRef).toBe(parent);
-    expect(perFile.size).toBe(0);
+    expect(perFile.get('a.txt')).toEqual({ ref: parent, path: 'a.txt', leftExists: true, rightExists: true });
   });
 
   it('resolves a root commit to the empty tree', async () => {
@@ -116,7 +116,20 @@ describe('resolveCommitFileBases (merge parents)', () => {
     // rather than an empty file.
     expect(fallbackRef).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
     expect(fallbackRef).not.toBe(root);
+    expect((await git.resolveCommitFileBases(root)).fallbackLeftExists).toBe(false);
     expect(perFile.size).toBe(0);
   });
+  it('records absent sides for non-root additions and deletions', async () => {
+    commit(repo.path, 'base', { 'removed.txt': 'remove me\n' });
+    const added = commit(repo.path, 'add', { 'added.txt': 'new\n' });
+    const a = await git.resolveCommitFileBases(added);
+    expect(a.perFile.get('added.txt')).toMatchObject({ leftExists: false, rightExists: true });
+    runGit(repo.path, ['rm', 'removed.txt']);
+    runGit(repo.path, ['commit', '-m', 'delete']);
+    const d = await git.resolveCommitFileBases(runGit(repo.path, ['rev-parse', 'HEAD']).trim());
+    expect(d.perFile.get('removed.txt')).toMatchObject({ leftExists: true, rightExists: false });
+    expect(d.emptyRef).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
+  });
+
 });
 /* SNIPCODE-HOOK end */

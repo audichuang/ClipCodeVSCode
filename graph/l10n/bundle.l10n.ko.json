@@ -116,5 +116,6 @@
   "remoteRemoved": "리모트 '{0}'이(가) 제거되었습니다",
   "worktreeRemoved": "Worktree가 제거되었습니다",
   "recentCurrentRepo": "현재",
-  "recentSwitchRepo": "리포지토리 전환"
+  "recentSwitchRepo": "리포지토리 전환",
+  "Commit is unavailable while repositories are still loading": "저장소를 불러오는 동안 커밋할 수 없습니다"
 }

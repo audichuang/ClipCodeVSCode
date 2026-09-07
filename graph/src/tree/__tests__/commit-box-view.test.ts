@@ -21,6 +21,7 @@ describe('CommitBoxViewProvider', () => {
   it('replays the staged repo count after the webview listener is ready', async () => {
     const postMessage = vi.fn();
     const workbench = {
+      isCommitScopeReady: () => true,
       tree: {
         getStagedRepoCount: () => 1,
         getStagedFileCount: () => 2,
@@ -48,13 +49,14 @@ describe('CommitBoxViewProvider', () => {
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'workbenchCommitState',
-      payload: { stagedRepoCount: 1, stagedFileCount: 2, amendTargetPushed: false, locale: 'en' },
+      payload: { commitScopeReady: true, stagedRepoCount: 1, stagedFileCount: 2, amendTargetPushed: false, locale: 'en' },
     });
   });
 
   /* SNIPCODE-HOOK start: S13 Amend prefill */
   it('replies to a prefill request with the workbench-resolved HEAD message', async () => {
     const workbench = {
+      isCommitScopeReady: () => true,
       tree: {
         getStagedRepoCount: () => 1,
         getStagedFileCount: () => 0,
@@ -86,6 +88,7 @@ describe('CommitBoxViewProvider', () => {
 
   it('replies with a null message when amend does not have exactly one target', async () => {
     const workbench = {
+      isCommitScopeReady: () => true,
       tree: {
         getStagedRepoCount: () => 2,
         getStagedFileCount: () => 0,

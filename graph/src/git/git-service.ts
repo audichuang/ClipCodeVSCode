@@ -382,6 +382,10 @@ export class GitService {
       // `--quiet` exits non-zero with no output when the parent doesn't exist
       // (root commit) — fall through to the empty tree.
     }
+    return this.emptyTreeRef();
+  }
+
+  async emptyTreeRef(): Promise<string> {
     const format = (await this.exec(['rev-parse', '--show-object-format'], { silent: true })).trim();
     return GitService.EMPTY_TREE[format] ?? GitService.EMPTY_TREE.sha1;
   }
@@ -1540,8 +1544,8 @@ export class GitService {
    * Which revision — and which path inside it — a file's change at `hash` must
    * be diffed against, keyed by the file's path AT `hash`.
    *
-   * Single-parent commits need nothing per file: every file compares against
-   * `fallbackRef`. A **merge** does. {@link showCommitFiles} returns the union
+   * Single-parent commits use their parent and record missing sides for adds
+   * and deletes. A **merge** also needs a parent per file. {@link showCommitFiles} returns the union
    * of the diffs against every parent, so a file that arrived from parent 2..N
    * has an EMPTY diff against the first parent, and a file one side renamed
    * keeps its NEW path on the other side — pairing that parent with `oldPath`
@@ -1555,26 +1559,27 @@ export class GitService {
    */
   async resolveCommitFileBases(hash: string): Promise<{
     fallbackRef: string;
-    perFile: Map<string, { ref: string; path: string }>;
+    fallbackLeftExists: boolean;
+    emptyRef: string;
+    perFile: Map<string, { ref: string; path: string; leftExists: boolean; rightExists: boolean }>;
   }> {
     this.assertSafeRef(hash, 'diff');
     const parents = await this.commitParents(hash);
-    const perFile = new Map<string, { ref: string; path: string }>();
-    // `%P` is already a full object name, so a single parent needs no rev-parse;
-    // a root commit falls back to the empty tree via resolveDiffBaseRef.
-    const fallbackRef = parents.length >= 1 ? parents[0] : await this.resolveDiffBaseRef(hash);
-    if (parents.length <= 1) return { fallbackRef, perFile };
-
+    const emptyRef = await this.emptyTreeRef();
+    const fallbackRef = parents[0] ?? emptyRef;
+    const perFile = new Map<string, { ref: string; path: string; leftExists: boolean; rightExists: boolean }>();
     for (const parent of parents) {
       this.assertSafeRef(parent, 'diff');
       const raw = await this.exec(['diff', '--raw', '-M', '-z', '--no-abbrev', `${parent}..${hash}`]);
       for (const entry of GitService.parseRawDiffZ(raw)) {
-        if (entry.srcSha === entry.dstSha) continue;
-        if (perFile.has(entry.path)) continue;
-        perFile.set(entry.path, { ref: parent, path: entry.oldPath ?? entry.path });
+        if (entry.srcSha === entry.dstSha || perFile.has(entry.path)) continue;
+        perFile.set(entry.path, {
+          ref: parent, path: entry.oldPath ?? entry.path,
+          leftExists: !/^0+$/.test(entry.srcSha), rightExists: !/^0+$/.test(entry.dstSha),
+        });
       }
     }
-    return { fallbackRef, perFile };
+    return { fallbackRef, fallbackLeftExists: parents.length > 0, emptyRef, perFile };
   }
 
   /**

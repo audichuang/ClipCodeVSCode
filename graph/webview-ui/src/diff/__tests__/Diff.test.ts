@@ -338,6 +338,18 @@ describe('Diff.svelte next/prev hunk navigation (D11)', () => {
     expect(prev().disabled).toBe(true);
   });
 
+  it('resets the selected change when collapsing removes the selected hunk', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), twoHunkDiff());
+    const { getByLabelText, container } = render(Diff);
+    await fireEvent.click(getByLabelText('Next change'));
+    await fireEvent.click(getByLabelText('Next change'));
+    expect(container.querySelector('.hunk-count')?.textContent?.replace(/\s+/g, '')).toBe('2/4');
+    await fireEvent.click(container.querySelectorAll('.section-toggle')[1]);
+    await tick();
+    expect(container.querySelector('.hunk-count')?.textContent?.replace(/\s+/g, '')).toBe('–/2');
+    expect(container.querySelector('.current-hunk')).toBeNull();
+  });
+
   it('counts the hunks of BOTH sections, matching what the arrows navigate', async () => {
     diffStore.setDiffs('/r', 'src/a.ts', twoHunkDiff(), textDiff());
     const { container } = render(Diff);

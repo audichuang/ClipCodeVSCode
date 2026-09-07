@@ -23,7 +23,7 @@ const H = vi.hoisted(() => {
     /* SNIPCODE-HOOK start: per-file merge parent — openDiff resolves the left
        side through this now, so a merge's file gets the parent that actually
        carries it instead of an empty first-parent diff. */
-    resolveCommitFileBases: vi.fn(async () => ({ fallbackRef: 'parentsha', perFile: new Map() })),
+    resolveCommitFileBases: vi.fn(async () => ({ fallbackRef: 'parentsha', fallbackLeftExists: true, emptyRef: 'emptytree', perFile: new Map() })),
     /* SNIPCODE-HOOK end */
     getConflictFiles: vi.fn(async () => []),
     getOperationState: vi.fn(async () => ({ type: null })),
@@ -161,7 +161,7 @@ describe('MainPanel message routing', () => {
   it('openDiff for a commit builds the left URI from the resolved parent SHA, not the ~1 shorthand', async () => {
     const vscode = await import('vscode');
     H.git.resolveCommitFileBases.mockResolvedValue({
-      fallbackRef: '1111111111111111111111111111111111111111', perFile: new Map(),
+      fallbackRef: '1111111111111111111111111111111111111111', fallbackLeftExists: true, emptyRef: 'emptytree', perFile: new Map(),
     });
 
     await dispatch({ type: 'openDiff', payload: { file: 'doc.md', commitHash: '2222222' } });
@@ -180,7 +180,7 @@ describe('MainPanel message routing', () => {
   it('openDiff for a renamed file resolves the LEFT (parent) URI from oldPath, not the new path', async () => {
     const vscode = await import('vscode');
     H.git.resolveCommitFileBases.mockResolvedValue({
-      fallbackRef: '1111111111111111111111111111111111111111', perFile: new Map(),
+      fallbackRef: '1111111111111111111111111111111111111111', fallbackLeftExists: true, emptyRef: 'emptytree', perFile: new Map(),
     });
 
     await dispatch({ type: 'openDiff', payload: { file: 'new.ts', commitHash: '2222222', oldPath: 'old.ts' } });
@@ -201,8 +201,8 @@ describe('MainPanel message routing', () => {
   it('openDiff for a merge file takes both ref and left path from the per-file resolution', async () => {
     const vscode = await import('vscode');
     H.git.resolveCommitFileBases.mockResolvedValue({
-      fallbackRef: 'firstparent',
-      perFile: new Map([['new.ts', { ref: 'secondparent', path: 'new.ts' }]]),
+      fallbackRef: 'firstparent', fallbackLeftExists: true, emptyRef: 'emptytree',
+      perFile: new Map([['new.ts', { ref: 'secondparent', path: 'new.ts', leftExists: true, rightExists: true }]]),
     });
 
     await dispatch({ type: 'openDiff', payload: { file: 'new.ts', commitHash: '2222222', oldPath: 'old.ts' } });

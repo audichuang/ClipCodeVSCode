@@ -34,6 +34,7 @@ vi.mock('vscode', () => {
 vi.mock('../../git/vscode-git-bridge', () => ({ triggerVSCodeGitAuth: vi.fn(async () => false) }));
 vi.mock('../../utils/config', () => ({ readTimeoutMs: () => 30_000 }));
 
+import { ChangesTreeProvider } from '../changes-tree';
 import { ChangesWorkbench } from '../changes-workbench';
 import type { RepoNode } from '../build-change-tree';
 import { RepoDiscoveryService } from '../../services/repo-discovery';
@@ -90,13 +91,65 @@ d('Changes tree progressive paint (real git, one repo blocked)', () => {
     const refreshing = wb.tree.refresh();
 
     await shim.waitForIntercept();
-    await waitFor(() => paints.length > 0);
+    await waitFor(() => paints.some(p => p.length > 0));
     // b's status is still held by the shim — a and c did not wait for it.
-    expect(paints[0]).toEqual([repos[0], repos[2]]);
+    expect(paints.find(p => p.length > 0)).toEqual([repos[0], repos[2]]);
 
     shim.release();
     await refreshing;
     expect(paints.at(-1)).toEqual(repos); // discovery order, blocked repo included
     expect(paints.length).toBeGreaterThanOrEqual(2);
+  });
+  it('blocks commit and amend while a staged repo is still loading', async () => {
+    const repos = ['a', 'b'].map(name => {
+      const p = join(H.root, name); initDirtyRepo(p);
+      execSync('git add dirty.txt', { cwd: p }); return p;
+    });
+    const heads = repos.map(p => execSync('git rev-parse HEAD', { cwd: p }).toString());
+    shim = createGitShim({ subcommand: 'status', cwd: repos[1] });
+    setGitBinaryPath(shim.path);
+    const wb = new ChangesWorkbench();
+    await expect(wb.commit('too early', false)).rejects.toThrow('still loading');
+    const refreshing = wb.tree.refresh();
+    await shim.waitForIntercept();
+    await waitFor(() => wb.tree.getStagedRepoCount() === 1);
+    expect(wb.isCommitScopeReady()).toBe(false);
+    await expect(wb.commit('too early', false)).rejects.toThrow('still loading');
+    await expect(wb.commit('too early', true)).rejects.toThrow('still loading');
+    expect(repos.map(p => execSync('git rev-parse HEAD', { cwd: p }).toString())).toEqual(heads);
+    shim.release(); await refreshing;
+    expect(wb.isCommitScopeReady()).toBe(true);
+    expect(wb.tree.getStagedRepoCount()).toBe(2);
+    expect((await wb.commit('complete displayed scope', false)).map(r => r.ok)).toEqual([true, true]);
+  });
+
+});
+
+// No workbench mocks: readiness belongs to the final, latest tree snapshot.
+describe('Commit scope readiness', () => {
+  it.each([true, false])('tracks the latest refresh regardless of completion order: %s', async (oldFirst) => {
+    const finish: Array<() => void> = [];
+    const tree = new ChangesTreeProvider(() => new Promise(resolve => finish.push(() => resolve([]))));
+    expect(tree.isCommitScopeReady()).toBe(false);
+    const old = tree.refresh(); const latest = tree.refresh();
+    if (oldFirst) {
+      finish[0](); await old;
+      expect(tree.isCommitScopeReady()).toBe(false);
+      finish[1](); await latest;
+    } else {
+      finish[1](); await latest;
+      expect(tree.isCommitScopeReady()).toBe(true);
+      finish[0](); await old;
+    }
+    expect(tree.isCommitScopeReady()).toBe(true);
+  });
+
+  it('keeps a failed refresh locked even after a previously successful snapshot', async () => {
+    const load = vi.fn().mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('read failed'));
+    const tree = new ChangesTreeProvider(load);
+    await tree.refresh();
+    expect(tree.isCommitScopeReady()).toBe(true);
+    await expect(tree.refresh()).rejects.toThrow('read failed');
+    expect(tree.isCommitScopeReady()).toBe(false);
   });
 });

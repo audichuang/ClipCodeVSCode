@@ -58,6 +58,7 @@ export function listenForHostMessages(): void {
       case 'workbenchCommitState':
         workbenchStore.stagedRepoCount = Number(msg.payload?.stagedRepoCount ?? 0);
         workbenchStore.stagedFileCount = Number(msg.payload?.stagedFileCount ?? 0);
+        workbenchStore.commitScopeReady = Boolean(msg.payload?.commitScopeReady);
         /* SNIPCODE-HOOK start: S13 "already pushed" warning for Amend */
         workbenchStore.amendTargetPushed = Boolean(msg.payload?.amendTargetPushed);
         /* SNIPCODE-HOOK end */
