@@ -475,6 +475,7 @@ export class DiffPanel {
   /* SNIPCODE-HOOK end */
 
   private getHtml(webview: vscode.Webview, assetRoot: vscode.Uri): string {
+    const workerUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'highlight-worker.js'));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'diff.css'));
     const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(assetRoot, 'codicon.css'));
@@ -490,12 +491,12 @@ export class DiffPanel {
        Security policy directive". NOT added to
        commit-box-view.ts / recent-commits-view.ts — workbench.js carries no
        Shiki, so those views keep the stricter policy. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; worker-src blob:; connect-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
   <!-- SNIPCODE-HOOK end -->
   <link href="${styleUri}" rel="stylesheet" />
   <link href="${codiconUri}" rel="stylesheet" />
 </head>
-<body>
+<body data-highlight-worker="${workerUri}">
   <div id="diff-app"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

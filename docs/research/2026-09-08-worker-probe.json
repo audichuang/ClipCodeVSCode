@@ -1,0 +1,106 @@
+{
+  "scope": "Node prototype: blocking control, current-size chunked main, streaming worker; warm 3000-line TS HTML, no browser DOM",
+  "modes": [
+    "blocking",
+    "chunked-main",
+    "streaming-worker"
+  ],
+  "startupIncludingWarmupMs": 476.192,
+  "samples": [
+    [
+      {
+        "totalMs": 205.97916699999996,
+        "maxTimerLagMs": 202.10849999999994,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 205.91004099999986,
+        "maxTimerLagMs": 202.13295799999992,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 198.93895800000018,
+        "maxTimerLagMs": 194.9827919999998,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 186.26379199999974,
+        "maxTimerLagMs": 182.2948339999998,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 192.06950000000006,
+        "maxTimerLagMs": 189.26158399999986,
+        "bytes": 1038197
+      }
+    ],
+    [
+      {
+        "totalMs": 211.8040000000001,
+        "maxTimerLagMs": 11.953042000000096,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 219.72566700000016,
+        "maxTimerLagMs": 13.757041000000072,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 214.508875,
+        "maxTimerLagMs": 12.720124999999825,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 204.3929159999998,
+        "maxTimerLagMs": 12.29970800000001,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 213.75912500000004,
+        "maxTimerLagMs": 13.965833000000202,
+        "bytes": 1038197
+      }
+    ],
+    [
+      {
+        "totalMs": 198.27579100000003,
+        "maxTimerLagMs": 0.6480420000000322,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 204.979959,
+        "maxTimerLagMs": 1.0042920000000777,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 184.19508399999995,
+        "maxTimerLagMs": 1.1366250000000946,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 181.3259579999999,
+        "maxTimerLagMs": 1.0044169999996484,
+        "bytes": 1038197
+      },
+      {
+        "totalMs": 207.73974999999973,
+        "maxTimerLagMs": 1.1755419999999503,
+        "bytes": 1038197
+      }
+    ]
+  ],
+  "medians": [
+    {
+      "totalMs": 198.93895800000018,
+      "maxTimerLagMs": 194.9827919999998
+    },
+    {
+      "totalMs": 213.75912500000004,
+      "maxTimerLagMs": 12.720124999999825
+    },
+    {
+      "totalMs": 198.27579100000003,
+      "maxTimerLagMs": 1.0044169999996484
+    }
+  ]
+}

@@ -9,6 +9,7 @@
   /* SNIPCODE-HOOK (B-2d): intraline word-level diff. */
   import { pairHunkWordDiffs } from '../../lib/utils/word-diff';
   import ImageDiff from '../common/ImageDiff.svelte';
+  import { warmHighlightWorker, highlightWorkerBatch } from '../../lib/utils/highlight-worker-client';
 
   // Right-click target on a diff line. The parent owns the context menu (it
   // already hosts one for the file tree), so we just hand it the location plus
@@ -549,6 +550,8 @@
     const visibleHunks = renderHunks;
     const theme = shikiTheme; // capture so a theme switch invalidates the pass
     let cancelled = false;
+    const workerAbort = new AbortController();
+    if (wantHighlight && totalLines > 400) warmHighlightWorker(lang);
     const stale = () => cancelled || diff !== target;
     const yieldTask = () => new Promise<void>(resolve => setTimeout(resolve, 0));
     (async () => {
@@ -591,18 +594,16 @@
       do {
         const end = Math.min(flat.length, pos + (first ? firstStep() : STEP));
         if (ready && h) {
-          for (let j = pos; j < end; j++) {
-            const { key, content } = flat[j];
-            const cached = reusable?.get(key);
-            if (cached !== undefined) continue;
+          const missing = flat.slice(pos, end).filter(line => reusable?.get(line.key) === undefined);
+          const work = missing.map(line => ({ content: line.content, ...wordDiffByKey.get(line.key) }));
+          const background = first ? undefined : await highlightWorkerBatch(work, lang, theme, workerAbort.signal);
+          if (stale()) return;
+          missing.forEach(({ key, content }, index) => {
             const wd = wordDiffByKey.get(key);
-            highlightedLines.set(
-              key,
-              wd
-                ? highlightLineWithRanges(h, content, lang, wd.ranges, wd.kind, theme)
-                : highlightLineSync(h, content, lang, theme),
-            );
-          }
+            highlightedLines.set(key, background?.[index] ?? (wd
+              ? highlightLineWithRanges(h!, content, lang, wd.ranges, wd.kind, theme)
+              : highlightLineSync(h!, content, lang, theme)));
+          });
           // SvelteMap notifies only the rows whose cached HTML changed.
           lastHighlightTheme = theme;
         } else if (first) {
@@ -618,7 +619,7 @@
         }
       } while (pos < flat.length);
     })().catch(() => {});
-    return () => { cancelled = true; };
+    return () => { cancelled = true; workerAbort.abort(); };
   });
   /* SNIPCODE-HOOK end */
 
