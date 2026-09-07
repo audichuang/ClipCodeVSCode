@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "marked": "^12.0.2",
-    "shiki": "^1.0.0"
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

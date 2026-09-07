@@ -93,8 +93,17 @@ its own. Its snippet is sized to the 20–50ms window git actually takes: a rich
 one tokenises the first real screen ~5× faster but costs more main thread than it
 saves, so hint→first-screen gets **worse**. Numbers for that and for everything
 else already measured and rejected here (worker, row virtualisation, grammar
-chunk-splitting, `STATUS_CONCURRENCY`, a status TTL cache):
-`../docs/research/2026-09-07-perf-audit.md`.
+chunk-splitting, `STATUS_CONCURRENCY`, a status TTL cache, and every alternative
+tokeniser from tree-sitter to prismjs): `../docs/research/2026-09-07-perf-audit.md`.
+
+The tail's remaining 2.3× is **not** a package choice — it is threading shiki's
+`grammarState` from one line to the next instead of restarting every line from
+`INITIAL`. Two things block it, and both are design work rather than a patch: a
+unified diff is **two interleaved streams** (state flows along context+delete and
+context+add separately, reset at every hunk boundary — one stream lets a deleted
+`/*` comment out an added line), and `highlightKey` stops being
+content-addressed, so the D7 reuse cache that keeps a stage/unstage from
+re-colouring every other line needs a new key.
 
 `workbench.ts` chooses the commit box or recent graph from `body.dataset.view`.
 Acquire the VS Code API lazily and install only the chosen view's listeners:
