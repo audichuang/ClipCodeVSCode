@@ -9,6 +9,8 @@ const highlighterState = vi.hoisted(() => ({
   pending: [] as Array<(value: unknown) => void>,
   /* SNIPCODE-HOOK start: perf — progressive reveal: '' = "no grammar" path */
   lang: 'typescript',
+  theme: 'dark-plus',
+  onHighlight: undefined as undefined | (() => void),
   /* SNIPCODE-HOOK end */
 }));
 
@@ -18,10 +20,12 @@ vi.mock('../../../lib/utils/highlighter', () => {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-  const highlight = (_highlighter: unknown, content: string) =>
-    `<span data-highlighted="true">${escapeHtml(content)}</span>`;
+  const highlight = (_highlighter: unknown, content: string, ...args: unknown[]) => {
+    highlighterState.onHighlight?.();
+    return `<span data-highlighted="true" data-theme="${args.at(-1)}">${escapeHtml(content)}</span>`;
+  };
   return {
-    activeShikiTheme: () => 'dark-plus',
+    activeShikiTheme: () => highlighterState.theme,
     detectLanguage: () => highlighterState.lang,
     ensureLanguage: () => Promise.resolve(true),
     escapeHtml,
@@ -103,6 +107,9 @@ beforeEach(() => {
   highlighterState.delayFromCall = Number.POSITIVE_INFINITY;
   highlighterState.pending.length = 0;
   highlighterState.lang = 'typescript';
+  highlighterState.theme = 'dark-plus';
+  highlighterState.onHighlight = undefined;
+  document.body.classList.remove('vscode-light');
 });
 
 afterEach(() => {
@@ -111,6 +118,34 @@ afterEach(() => {
 });
 
 describe('FileDiffView lifecycle', () => {
+  it.each(['inline', 'side-by-side'] as const)('does not repeatedly read old rows as new batches arrive (%s)', async mode => {
+    const key = JSON.stringify(['src/large.ts', 1, 0, 'const value0 = 0;']);
+    const original = Map.prototype.get;
+    let firstRowReads = 0;
+    const spy = vi.spyOn(Map.prototype, 'get').mockImplementation(function (this: Map<unknown, unknown>, k: unknown) {
+      if (k === key) firstRowReads++;
+      return original.call(this, k);
+    });
+    try {
+      const view = render(FileDiffView, { diff: manyLineDiff(3000), diffMode: mode });
+      await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(mode === 'inline' ? 3000 : 6000), { timeout: 15000 });
+      expect(firstRowReads).toBeLessThanOrEqual(10);
+    } finally { spy.mockRestore(); }
+  }, 20000);
+
+  it('does not reuse old-theme tail entries when a theme pass is interrupted by refresh', async () => {
+    const view = render(FileDiffView, { diff: manyLineDiff(600) });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="dark-plus"]')).toHaveLength(600));
+    highlighterState.onHighlight = () => {
+      highlighterState.onHighlight = undefined;
+      queueMicrotask(() => { void view.rerender({ diff: manyLineDiff(600) }); });
+    };
+    highlighterState.theme = 'light-plus';
+    document.body.classList.add('vscode-light');
+    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600));
+    expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
+  });
+
   it('never shows the previous file highlight while a reused view loads the next file', async () => {
     highlighterState.delayFromCall = 2;
     const view = render(FileDiffView, { diff: oneLineDiff('src/old.ts', 'old source') });
