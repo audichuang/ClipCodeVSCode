@@ -69,6 +69,31 @@ export class RecentCommitsViewProvider implements vscode.WebviewViewProvider, vs
     });
   }
 
+  /**
+   * Repository switch + refresh moved out of the webview body and onto the view
+   * title bar (package.json `view/title`, `view == snipcode.recentCommits`).
+   * Native's Source Control Graph puts its repository picker in the pane header
+   * too, and in a ~300px sidebar the old in-body `<select>` row cost a whole
+   * row of height that the commit list needs more.
+   */
+  async pickRepo(): Promise<void> {
+    const repos = await this.discover();
+    if (repos.length === 0) { return; }
+    const active = this.context.get().path;
+    const picked = await vscode.window.showQuickPick(
+      repos.map(repo => ({
+        label: repo.name,
+        description: samePath(repo.path, active) ? vscode.l10n.t('recentCurrentRepo') : undefined,
+        detail: repo.path,
+        repoPath: repo.path,
+      })),
+      { title: vscode.l10n.t('recentSwitchRepo'), matchOnDetail: true },
+    );
+    if (!picked || samePath(picked.repoPath, active)) { return; }
+    this.context.switchToRepo(picked.repoPath);
+    await this.refresh();
+  }
+
   scheduleRefresh(): void {
     if (!this.view?.visible) return;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);

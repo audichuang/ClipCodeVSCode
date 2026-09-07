@@ -31,6 +31,16 @@ DARK = {
  'diffEditor-insertedTextBackground':'rgba(156,204,44,0.2)','diffEditor-removedTextBackground':'rgba(255,0,0,0.2)',
  'diffEditor-insertedLineBackground':'rgba(155,185,85,0.2)','diffEditor-removedLineBackground':'rgba(255,0,0,0.2)',
  'font-family':SANS,'font-size':'13px',
+ # scmGraph.* — native Source Control Graph tokens (values read out of
+ # 1.136.1's workbench.desktop.main.js registerColor calls; foreground1..5 are
+ # theme-independent in native, the ref colours are approximated for the harness).
+ 'scmGraph-foreground1':'#FFB000','scmGraph-foreground2':'#DC267F','scmGraph-foreground3':'#994F00',
+ 'scmGraph-foreground4':'#40B0A6','scmGraph-foreground5':'#B66DFF',
+ 'scmGraph-historyItemBaseRefColor':'#EA5C00','scmGraph-historyItemRefColor':'#007ACC',
+ 'scmGraph-historyItemRemoteRefColor':'#008000',
+ 'scmGraph-historyItemHoverDefaultLabelBackground':'#616161',
+ 'scmGraph-historyItemHoverDefaultLabelForeground':'#f8f8f8',
+ 'scmGraph-historyItemHoverLabelForeground':'#ffffff',
 }
 LIGHT = {
  'foreground':'#3b3b3b','descriptionForeground':'#3b3b3b','disabledForeground':'rgba(97,97,97,0.5)',
@@ -56,6 +66,16 @@ LIGHT = {
  'diffEditor-insertedTextBackground':'rgba(156,204,44,0.2)','diffEditor-removedTextBackground':'rgba(255,0,0,0.2)',
  'diffEditor-insertedLineBackground':'rgba(155,185,85,0.2)','diffEditor-removedLineBackground':'rgba(255,0,0,0.2)',
  'font-family':SANS,'font-size':'13px',
+ # scmGraph.* — native Source Control Graph tokens (values read out of
+ # 1.136.1's workbench.desktop.main.js registerColor calls; foreground1..5 are
+ # theme-independent in native, the ref colours are approximated for the harness).
+ 'scmGraph-foreground1':'#FFB000','scmGraph-foreground2':'#DC267F','scmGraph-foreground3':'#994F00',
+ 'scmGraph-foreground4':'#40B0A6','scmGraph-foreground5':'#B66DFF',
+ 'scmGraph-historyItemBaseRefColor':'#EA5C00','scmGraph-historyItemRefColor':'#007ACC',
+ 'scmGraph-historyItemRemoteRefColor':'#008000',
+ 'scmGraph-historyItemHoverDefaultLabelBackground':'#616161',
+ 'scmGraph-historyItemHoverDefaultLabelForeground':'#f8f8f8',
+ 'scmGraph-historyItemHoverLabelForeground':'#ffffff',
 }
 
 ttf = base64.b64encode(open(f'{CODICON}/codicon.ttf','rb').read()).decode()

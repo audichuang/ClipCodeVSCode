@@ -73,13 +73,9 @@ export const en: Record<string, string> = {
   'workbench.amendTitle': 'Amend the previous commit (single repo only; an empty message fetches the previous one first)',
   'workbench.amendPushedWarning': 'This commit has already been pushed to the remote. Amending rewrites already-pushed history.',
   /* SNIPCODE-HOOK start: compact sidebar commit graph */
-  'recent.repoPicker': 'Repository',
-  'recent.refresh': 'Refresh recent commits',
-  'recent.openFullGraph': 'Open full Git Graph',
   'recent.loading': 'Loading recent commits…',
   'recent.noCommits': 'No commits on HEAD',
   'recent.headScope': 'HEAD history',
-  'recent.headMarker': 'HEAD',
   'recent.aheadBehind': '↑{ahead} ↓{behind}',
   'recent.changes': 'Staged {staged} · Unstaged {unstaged} · Conflicts {conflicts}',
   /* SNIPCODE-HOOK end */

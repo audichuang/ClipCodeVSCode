@@ -378,6 +378,24 @@
         "title": "%cmd.snipcode.git.discardRepo.title%",
         "category": "%category.snipcodeGit%",
         "icon": "$(discard)"
+      },
+      {
+        "command": "snipcode.git.recentPickRepo",
+        "title": "%cmd.snipcode.git.recentPickRepo.title%",
+        "category": "%category.snipcodeGit%",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "snipcode.git.recentRefresh",
+        "title": "%cmd.snipcode.git.recentRefresh.title%",
+        "category": "%category.snipcodeGit%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "snipcode.git.recentOpenGraph",
+        "title": "%cmd.snipcode.git.recentOpenGraph.title%",
+        "category": "%category.snipcodeGit%",
+        "icon": "$(git-branch)"
       }
     ],
     "viewsContainers": {
@@ -406,7 +424,7 @@
           "id": "snipcode.recentCommits",
           "name": "%view.snipcode.recentCommits.name%",
           "type": "webview",
-          "initialSize": 2
+          "initialSize": 3
         }
       ],
       "scm": [
@@ -628,6 +646,21 @@
           "command": "gitGraphPlus.pruneWorktrees",
           "when": "view == gitGraphPlus.worktrees",
           "group": "navigation@4"
+        },
+        {
+          "command": "snipcode.git.recentPickRepo",
+          "when": "view == snipcode.recentCommits",
+          "group": "navigation@0"
+        },
+        {
+          "command": "snipcode.git.recentRefresh",
+          "when": "view == snipcode.recentCommits",
+          "group": "navigation@1"
+        },
+        {
+          "command": "snipcode.git.recentOpenGraph",
+          "when": "view == snipcode.recentCommits",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -872,6 +905,18 @@
         },
         {
           "command": "snipcode.git.filterReposActive",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.recentPickRepo",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.recentRefresh",
+          "when": "false"
+        },
+        {
+          "command": "snipcode.git.recentOpenGraph",
           "when": "false"
         }
       ]

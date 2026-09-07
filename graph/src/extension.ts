@@ -219,6 +219,16 @@ export function activate(context: vscode.ExtensionContext) {
     switchToRepo,
     openFullGraph: () => MainPanel.createOrShow(context.extensionUri, activeRepoPath),
   });
+  /* SNIPCODE-HOOK start: recent-commits view title actions — repository switch,
+     refresh and open-full-graph live in the pane header (package.json
+     `view/title`) instead of a toolbar row inside the 300px webview. */
+  context.subscriptions.push(
+    vscode.commands.registerCommand('snipcode.git.recentPickRepo', () => recentCommits.pickRepo()),
+    vscode.commands.registerCommand('snipcode.git.recentRefresh', () => recentCommits.refresh()),
+    vscode.commands.registerCommand('snipcode.git.recentOpenGraph', () => MainPanel.createOrShow(context.extensionUri, activeRepoPath)),
+  );
+  /* SNIPCODE-HOOK end */
+
   const recentTreeRefresh = workbench.tree.onDidChangeTreeData(() => recentCommits.scheduleRefresh());
   /* SNIPCODE-HOOK end */
   context.subscriptions.push(
