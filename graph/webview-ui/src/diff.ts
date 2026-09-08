@@ -5,6 +5,7 @@ import { listenForHostMessages } from './diff/messaging';
 import { getVsCodeApi } from './lib/vscode-api';
 /* SNIPCODE-HOOK start: perf — warm Shiki at boot, not on the first file. */
 import { getHighlighter, detectLanguage, warmLanguage } from './lib/utils/highlighter';
+import { warmHighlightWorker } from './lib/utils/highlight-worker-client';
 /* SNIPCODE-HOOK end */
 
 listenForHostMessages();
@@ -42,6 +43,12 @@ window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type !== 'diffLoading') return;
   const file = msg.payload?.file;
-  if (typeof file === 'string') void warmLanguage(detectLanguage(file));
+  if (typeof file === 'string') {
+    const lang = detectLanguage(file);
+    if (lang) {
+      void warmLanguage(lang);
+      warmHighlightWorker(lang);
+    }
+  }
 });
 /* SNIPCODE-HOOK end */

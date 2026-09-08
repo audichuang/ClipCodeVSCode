@@ -75,7 +75,7 @@ export function warmHighlightWorker(lang: string): void {
 
 export async function highlightWorkerBatch(lines: HighlightWorkLine[], lang: string, theme: HighlightTheme, signal: AbortSignal): Promise<string[] | undefined> {
   // Small/cached edits and worker startup keep the low-latency local path.
-  if (!worker || !warmed.has(lang) || lines.length < 64 || signal.aborted || disabled) return;
+  if (!worker || !warmed.has(lang) || lines.length < 16 || signal.aborted || disabled) return;
   const reply = await request(worker, { type: 'highlight', lines, lang, theme }, signal);
   if (reply?.error || !Array.isArray(reply?.html) || reply.html.length !== lines.length || !reply.html.every(x => typeof x === 'string')) return;
   return reply.html;

@@ -99,7 +99,7 @@ const profile = await mkdtemp(join(tmpdir(), 'snipcode-layout-'));
 let complete, browser, timer, stderr = '';
 const result = new Promise(resolve => { complete = resolve; });
 const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/diff.css"><link rel="stylesheet" href="/codicon.css"></head>
-<body class="vscode-dark" style="--vscode-editor-font-family:monospace;--vscode-editor-font-size:12px"><div id="diff-app"></div>
+<body class="vscode-dark" data-highlight-worker="/highlight-worker.js" style="--vscode-editor-font-family:monospace;--vscode-editor-font-size:12px"><div id="diff-app"></div>
 <script>window.onerror=(message,source,line,column)=>fetch('/result',{method:'POST',body:JSON.stringify({ok:false,error:String(message)+' at '+source+':'+line+':'+column})});window.onunhandledrejection=e=>window.onerror(e.reason);window.diffReady=new Promise(r=>window.ready=r);window.acquireVsCodeApi=()=>({getState:()=>({diffMode:'side-by-side'}),setState:()=>{},postMessage:m=>{if(m.type==='diffReady')ready()}});</script>
 <script src="/diff.js"></script><script>(${(performanceMode ? checkPerformance : checkLayout).toString()})(${JSON.stringify(budgets)})</script></body></html>`;
 const server = createServer(async (req, res) => {
