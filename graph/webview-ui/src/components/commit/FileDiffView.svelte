@@ -416,7 +416,7 @@
   // .diff-line is min-height 20px; this only sizes the first step, never layout.
   const ROW_PX = 20;
   // Smaller tail batches yield more often; measure actual long tasks on the target host.
-  const STEP = 100;
+  const STEP = 80;
   // One viewport of rows plus slack, so the first frame is a full screen on a
   // tall monitor too. Clamped: a hidden/zero-height webview must still reveal.
   function firstStep(): number {
@@ -518,18 +518,16 @@
   });
   /* SNIPCODE-HOOK end */
 
-  /* SNIPCODE-HOOK start (B-2d): per-line word-diff ranges, keyed like the
-     highlight cache so the effect can overlay them on the Shiki output. */
-  const wordDiffByKey = $derived.by(() => {
-    const map = new Map<string, { ranges: import('../../lib/utils/word-diff').Range[]; kind: 'add' | 'delete' }>();
-    for (const hunk of renderHunks) {
-      const paired = pairHunkWordDiffs(hunk.lines);
-      for (const [lineIdx, entry] of paired) {
-        map.set(highlightKey(diff.file, hunk.oldStart, lineIdx, hunk.lines[lineIdx].content), entry);
-      }
+  /* SNIPCODE-HOOK start (B-2d): per-line word-diff ranges, cached per hunk on demand. */
+  const hunkWordDiffCache = new WeakMap<DiffData['hunks'][number], Map<number, { ranges: import('../../lib/utils/word-diff').Range[]; kind: 'add' | 'delete' }>>();
+  function getLineWordDiff(hunk: DiffData['hunks'][number], lineIdx: number) {
+    let cached = hunkWordDiffCache.get(hunk);
+    if (!cached) {
+      cached = pairHunkWordDiffs(hunk.lines);
+      hunkWordDiffCache.set(hunk, cached);
     }
-    return map;
-  });
+    return cached.get(lineIdx);
+  }
   /* SNIPCODE-HOOK end */
 
   /* SNIPCODE-HOOK start: Batch C bind cached HTML to file and content identity. */
@@ -572,6 +570,8 @@
      plain (firstStep()); with a warm engine that is all microtasks, so the
      very first frame is coloured. Later steps yield a task between them so
      paint and input run while the tail fills in.
+     Pipelined background worker: requests the next step's worker batch while
+     the current task yields, so background tokenising overlaps main-thread layout.
      Restructured from the Batch C / D7 chunked pass: the D7 content-addressed
      cache is unchanged (a same-file re-push reuses every untouched line, no
      flash), but `lastHighlightTheme` is now recorded on the FIRST publish —
@@ -615,10 +615,10 @@
       // hunk's stage/unstage doesn't re-highlight — or flash — every OTHER line.
       const reusable = ready && theme === lastHighlightTheme ? highlightedLines : undefined;
 
-      const flat: Array<{ key: string; content: string }> = [];
+      const flat: Array<{ key: string; content: string; hunk: DiffData['hunks'][number]; lineIndex: number }> = [];
       for (const hunk of visibleHunks) {
         for (let i = 0; i < hunk.lines.length; i++) {
-          flat.push({ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content });
+          flat.push({ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content, hunk, lineIndex: i });
         }
       }
       // Bound retained HTML to this render set even after cancelled passes.
@@ -630,17 +630,34 @@
           if (!activeKeys.has(key)) highlightedLines.delete(key);
         }
       });
+
+      function prepareWork(from: number, to: number) {
+        const slice = flat.slice(from, to);
+        const missing = slice.filter(line => reusable?.get(line.key) === undefined);
+        const work = missing.map(line => ({ content: line.content, ...getLineWordDiff(line.hunk, line.lineIndex) }));
+        return { missing, work };
+      }
+
       let pos = 0;
       let first = true;
+      let nextWorkerPromise: Promise<string[] | undefined> | undefined = undefined;
+
       do {
         const end = Math.min(flat.length, pos + (first ? firstStep() : STEP));
         if (ready && h) {
-          const missing = flat.slice(pos, end).filter(line => reusable?.get(line.key) === undefined);
-          const work = missing.map(line => ({ content: line.content, ...wordDiffByKey.get(line.key) }));
-          const background = first ? undefined : await highlightWorkerBatch(work, lang, theme, workerAbort.signal);
+          const { missing, work } = prepareWork(pos, end);
+          let background: string[] | undefined;
+          if (first) {
+            background = undefined;
+          } else if (nextWorkerPromise) {
+            background = await nextWorkerPromise;
+            nextWorkerPromise = undefined;
+          } else {
+            background = await highlightWorkerBatch(work, lang, theme, workerAbort.signal);
+          }
           if (stale()) return;
-          missing.forEach(({ key, content }, index) => {
-            const wd = wordDiffByKey.get(key);
+          missing.forEach(({ key, content, hunk, lineIndex }, index) => {
+            const wd = getLineWordDiff(hunk, lineIndex);
             highlightedLines.set(key, background?.[index] ?? (wd
               ? highlightLineWithRanges(h!, content, lang, wd.ranges, wd.kind, theme)
               : highlightLineSync(h!, content, lang, theme)));
@@ -655,6 +672,13 @@
         pos = end;
         first = false;
         if (pos < flat.length) {
+          if (ready && h) {
+            const nextEnd = Math.min(flat.length, pos + STEP);
+            const { work: nextWork } = prepareWork(pos, nextEnd);
+            if (nextWork.length > 0) {
+              nextWorkerPromise = highlightWorkerBatch(nextWork, lang, theme, workerAbort.signal);
+            }
+          }
           await yieldTask();
           if (stale()) return;
         }

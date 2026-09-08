@@ -14,7 +14,7 @@ const highlighterState = vi.hoisted(() => ({
   theme: 'dark-plus',
   onHighlight: undefined as undefined | (() => void),
   workerEnabled: false,
-  workerPending: [] as Array<{ resolve: (html: string[]) => void; signal: AbortSignal; length: number }>,
+  workerPending: [] as Array<{ resolve: (html: string[]) => void; signal: AbortSignal; length: number; lines?: Array<{ content: string }> }>,
   /* SNIPCODE-HOOK end */
 }));
 
@@ -46,7 +46,7 @@ vi.mock('../../../lib/utils/highlighter', () => {
 vi.mock('../../../lib/utils/highlight-worker-client', () => ({
   warmHighlightWorker: () => {},
   highlightWorkerBatch: (lines: unknown[], _lang: string, _theme: string, signal: AbortSignal) => highlighterState.workerEnabled
-    ? new Promise<string[]>(resolve => highlighterState.workerPending.push({ resolve, signal, length: lines.length }))
+    ? new Promise<string[]>(resolve => highlighterState.workerPending.push({ resolve, signal, length: lines.length, lines: lines as Array<{ content: string }> }))
     : Promise.resolve(undefined),
 }));
 
@@ -297,6 +297,52 @@ describe('FileDiffView lifecycle', () => {
       expect(view.container.querySelectorAll('.diff-line').length).toBe(500);
     });
     expect(view.container.querySelectorAll('[data-highlighted]').length).toBe(0);
+  });
+
+  it('completes pipelined progressive reveal when worker highlighting is active', async () => {
+    highlighterState.workerEnabled = true;
+    highlighterState.lang = 'typescript';
+    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    const rows = () => view.container.querySelectorAll('.diff-line').length;
+    const workerLines = () => view.container.querySelectorAll('[data-worker-line="true"]');
+    const task = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    // First step renders synchronously locally (60 rows in test environment)
+    await task();
+    const firstStep = rows();
+    expect(firstStep).toBeGreaterThan(0);
+    expect(firstStep).toBeLessThan(500);
+    // Locally highlighted first step rows do not have the worker tag
+    expect(workerLines()).toHaveLength(0);
+
+    // Assert prefetch: the next batch was already requested from the worker while yielding
+    expect(highlighterState.workerPending.length).toBe(1);
+    const firstPrefetch = highlighterState.workerPending[0];
+    expect(firstPrefetch.lines).toBeDefined();
+    expect(firstPrefetch.lines![0].content).toBe(`const value${firstStep} = ${firstStep};`);
+
+    // Consume batches one by one via pipelined worker responses with identifiable content
+    while (rows() < 500) {
+      await waitFor(() => expect(highlighterState.workerPending.length).toBeGreaterThan(0));
+      const p = highlighterState.workerPending.shift()!;
+      expect(p.signal.aborted).toBe(false);
+      expect(p.lines).toBeDefined();
+      p.resolve(p.lines!.map(l => `<span data-highlighted="true" data-worker-line="true" data-line-content="${l.content}">${l.content}</span>`));
+      await task();
+    }
+
+    expect(rows()).toBe(500);
+    // Tail rows must have been produced by the worker
+    expect(workerLines()).toHaveLength(500 - firstStep);
+
+    // Verify full tail row content and sequential order integrity
+    expect([...workerLines()].map(node => node.textContent)).toEqual(
+      Array.from({ length: 500 - firstStep }, (_, i) =>
+        `const value${firstStep + i} = ${firstStep + i};`
+      )
+    );
+
+    highlighterState.workerEnabled = false;
   });
 
   // A same-file re-push (stage/unstage) must not collapse the reveal back to
