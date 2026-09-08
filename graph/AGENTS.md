@@ -227,8 +227,10 @@ Release / marketplace / workflow edits: follow **`../AGENTS.md`**.
 A visual change under `webview-ui/**` is not done until it has been **rendered
 and looked at**: the webview vitest project runs on happy-dom, which computes no
 layout, so `getBoundingClientRect` is all zeros and a positioning bug passes
-every test. The committed harness and the method are
-`docs/research/2026-09-06-ui-audit/render.md` + the `harness/` folder beside it.
-Assert geometry with numbers, not by eyeballing the screenshot. (A
-`verify-webview-ui` skill wraps this flow but lives outside this repo — the
-harness is the part a clone actually gets.)
+every test. For Diff rendering, highlighting, worker, or lifecycle changes,
+read `../docs/testing/diff-webview-regressions.md` and verify both browser geometry
+and performance reports against the current build. Run performance checks alone,
+without concurrent builds/test suites; report cold and warm samples separately.
+Prove new regression checks fail when the relevant guard/layout fix is removed,
+then restore it and require green. Browser checks supplement actual VS Code UI
+acceptance; they do not prove native host startup or every embedded view works.

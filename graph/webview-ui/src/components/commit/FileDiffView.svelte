@@ -415,7 +415,7 @@
      "what is on screen right now". */
   // .diff-line is min-height 20px; this only sizes the first step, never layout.
   const ROW_PX = 20;
-  // 優化後續批次顆粒至 100 行，單次主執行緒任務控制在 25ms 內，兼顧高吞吐量與低互動延遲
+  // Smaller tail batches yield more often; measure actual long tasks on the target host.
   const STEP = 100;
   // One viewport of rows plus slack, so the first frame is a full screen on a
   // tall monitor too. Clamped: a hidden/zero-height webview must still reveal.
