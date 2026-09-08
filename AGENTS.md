@@ -66,6 +66,14 @@ Snipcode-only edits inside `graph/` must be fenced with
   `cd graph && npx vitest run` (and prefer a single file when iterating).
 - Judge pass/fail by the `pass N, fail 0` / `Tests …` text.
 
+**Before every commit, after the final edits, run `npm run test:precommit` from
+this root and require exit code 0.** It rebuilds the current Webview and runs
+host/graph tests, real-browser layout and performance gates, and worker parity.
+Missing Chrome, timeouts, failed budgets, or omitted required checks block the
+commit; do not bypass checks or relax budgets to obtain green. Diagnose failures
+and report intentional suite skips separately. The check scope, prerequisites,
+metrics and reports are defined in `docs/testing/diff-webview-regressions.md`.
+
 **A green test is not a spec.** Suites here have repeatedly locked the CURRENT
 (buggy) behavior into their expectations — e.g. PR open/copy asserting symbolic
 refs, pull asserting an unconditional stash pop — so a correct fix turns them

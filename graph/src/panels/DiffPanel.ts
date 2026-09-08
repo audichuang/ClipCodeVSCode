@@ -297,7 +297,7 @@ export class DiffPanel {
           // Notify first: posting to a webview the user closed mid-op throws and
           // would otherwise swallow the notification too.
           void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
-          if (this.panel === panel) {
+          if (this.panel === panel && this.isCurrentTarget(repoPath, file)) {
             panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageLines', message, ...(operationId === undefined ? {} : { operationId }) } });
             /* SNIPCODE-HOOK start: stale fingerprint recovery */
             // The webview is rendering an outdated diff — re-push the fresh one
@@ -330,7 +330,7 @@ export class DiffPanel {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         void vscode.window.showErrorMessage(`Stage/Unstage 失敗：${message}`);
-        if (this.panel === panel) {
+        if (this.panel === panel && this.isCurrentTarget(repoPath, file)) {
           panel.webview.postMessage({ type: 'error', payload: { source: 'diffStageHunk', message, ...(operationId === undefined ? {} : { operationId }) } });
           /* SNIPCODE-HOOK start: stale fingerprint recovery */
           if (err instanceof StaleDiffError) { this.refreshIfCurrent(String(repoPath), String(file)); }

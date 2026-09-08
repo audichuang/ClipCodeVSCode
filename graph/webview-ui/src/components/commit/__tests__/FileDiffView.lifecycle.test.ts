@@ -1,10 +1,12 @@
 /* SNIPCODE-HOOK start: Batch C diff-view lifecycle/performance regressions. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import type { DiffData } from '../../../lib/types';
 
 const highlighterState = vi.hoisted(() => ({
   calls: 0,
+  ensureLanguageCalls: 0,
   delayFromCall: Number.POSITIVE_INFINITY,
   pending: [] as Array<(value: unknown) => void>,
   /* SNIPCODE-HOOK start: perf — progressive reveal: '' = "no grammar" path */
@@ -12,7 +14,7 @@ const highlighterState = vi.hoisted(() => ({
   theme: 'dark-plus',
   onHighlight: undefined as undefined | (() => void),
   workerEnabled: false,
-  workerPending: [] as Array<{ resolve: (html: string[]) => void; signal: AbortSignal }>,
+  workerPending: [] as Array<{ resolve: (html: string[]) => void; signal: AbortSignal; length: number }>,
   /* SNIPCODE-HOOK end */
 }));
 
@@ -29,7 +31,7 @@ vi.mock('../../../lib/utils/highlighter', () => {
   return {
     activeShikiTheme: () => highlighterState.theme,
     detectLanguage: () => highlighterState.lang,
-    ensureLanguage: () => Promise.resolve(true),
+    ensureLanguage: () => { highlighterState.ensureLanguageCalls++; return Promise.resolve(true); },
     escapeHtml,
     getHighlighter: () => {
       highlighterState.calls++;
@@ -43,12 +45,23 @@ vi.mock('../../../lib/utils/highlighter', () => {
 
 vi.mock('../../../lib/utils/highlight-worker-client', () => ({
   warmHighlightWorker: () => {},
-  highlightWorkerBatch: (_lines: unknown, _lang: string, _theme: string, signal: AbortSignal) => highlighterState.workerEnabled
-    ? new Promise<string[]>(resolve => highlighterState.workerPending.push({ resolve, signal }))
+  highlightWorkerBatch: (lines: unknown[], _lang: string, _theme: string, signal: AbortSignal) => highlighterState.workerEnabled
+    ? new Promise<string[]>(resolve => highlighterState.workerPending.push({ resolve, signal, length: lines.length }))
     : Promise.resolve(undefined),
 }));
 
 import FileDiffView from '../FileDiffView.svelte';
+
+async function changeToLightTheme(): Promise<void> {
+  const delivered = new Promise<void>(resolve => {
+    const observer = new MutationObserver(() => { observer.disconnect(); resolve(); });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  });
+  highlighterState.theme = 'light-plus';
+  document.body.classList.add('vscode-light');
+  await delivered;
+  await tick();
+}
 
 function oneLineDiff(file: string, content: string): DiffData {
   return {
@@ -113,6 +126,7 @@ function manyHunkDiff(count: number): DiffData {
 
 beforeEach(() => {
   highlighterState.calls = 0;
+  highlighterState.ensureLanguageCalls = 0;
   highlighterState.delayFromCall = Number.POSITIVE_INFINITY;
   highlighterState.pending.length = 0;
   highlighterState.lang = 'typescript';
@@ -127,6 +141,12 @@ afterEach(() => {
   for (const resolve of highlighterState.pending.splice(0)) resolve({});
   for (const pending of highlighterState.workerPending.splice(0)) pending.resolve([]);
   cleanup();
+  // Reset the shared DOM/mock inputs after observers have been disconnected;
+  // otherwise a queued MutationObserver callback can affect the next test.
+  document.body.classList.remove('vscode-light');
+  highlighterState.theme = 'dark-plus';
+  highlighterState.onHighlight = undefined;
+  highlighterState.workerEnabled = false;
 });
 
 describe('FileDiffView lifecycle', () => {
@@ -148,14 +168,25 @@ describe('FileDiffView lifecycle', () => {
   it('does not reuse old-theme tail entries when a theme pass is interrupted by refresh', async () => {
     const view = render(FileDiffView, { diff: manyLineDiff(600) });
     await waitFor(() => expect(view.container.querySelectorAll('[data-theme="dark-plus"]')).toHaveLength(600));
-    highlighterState.onHighlight = () => {
-      highlighterState.onHighlight = undefined;
-      queueMicrotask(() => { void view.rerender({ diff: manyLineDiff(600) }); });
-    };
-    highlighterState.theme = 'light-plus';
-    document.body.classList.add('vscode-light');
+
+    highlighterState.workerEnabled = true;
+    await changeToLightTheme();
+    await waitFor(() => expect(highlighterState.workerPending.length).toBe(1));
+    const interrupted = highlighterState.workerPending[0];
+    const partial = view.container.querySelectorAll('[data-theme="light-plus"]').length;
+    expect(partial).toBeGreaterThan(0);
+    expect(partial).toBeLessThan(600);
+
+    highlighterState.workerEnabled = false;
+    const refreshed = manyLineDiff(600);
+    refreshed.hunks[0].lines[599].content = 'const refreshedTail = 599;';
+    await view.rerender({ diff: refreshed });
+    expect(interrupted.signal.aborted).toBe(true);
+    interrupted.resolve(Array(interrupted.length).fill('<span data-stale-theme-pass>obsolete</span>'));
     await waitFor(() => expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600));
     expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
+    expect(view.container.querySelector('[data-stale-theme-pass]')).toBeNull();
+    expect(view.container.textContent).toContain('const refreshedTail = 599;');
   });
 
   it('drops a late worker batch after navigating to another file', async () => {
@@ -169,6 +200,41 @@ describe('FileDiffView lifecycle', () => {
     pending.resolve(Array(200).fill('<span data-stale="true">old worker</span>'));
     await waitFor(() => expect(view.container.querySelector('.line-content')?.textContent).toBe('new file'));
     expect(view.container.querySelector('[data-stale]')).toBeNull();
+  });
+
+  it('does not paint after the view is unmounted while highlighting is pending', async () => {
+    highlighterState.delayFromCall = 1;
+    let tokenized = 0;
+    highlighterState.onHighlight = () => { tokenized++; };
+    const view = render(FileDiffView, { diff: manyLineDiff(600) });
+    await waitFor(() => expect(highlighterState.pending.length).toBe(1));
+
+    view.unmount();
+    highlighterState.pending.shift()!({});
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(highlighterState.ensureLanguageCalls).toBe(0);
+    expect(tokenized).toBe(0);
+  });
+
+  it('aborts a worker batch when the theme changes and keeps old-theme output out', async () => {
+    highlighterState.workerEnabled = true;
+    const view = render(FileDiffView, { diff: manyLineDiff(600) });
+    await waitFor(() => expect(highlighterState.workerPending.length).toBe(1));
+    const oldBatch = highlighterState.workerPending[0];
+
+    // Prevent the replacement pass from adding another unresolved worker
+    // request while the MutationObserver/Svelte effect transition settles.
+    highlighterState.workerEnabled = false;
+    await changeToLightTheme();
+    expect(oldBatch.signal.aborted).toBe(true);
+
+    oldBatch.resolve(Array(oldBatch.length).fill('<span data-theme="dark-plus">stale</span>'));
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600);
+    });
+    expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
   });
 
   it('never shows the previous file highlight while a reused view loads the next file', async () => {

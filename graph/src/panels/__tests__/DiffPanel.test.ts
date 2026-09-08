@@ -140,6 +140,25 @@ describe('DiffPanel', () => {
     expect(wb.fileDiffData).not.toHaveBeenCalled();
   });
 
+  it('replays only the latest navigation when A→B happens before the handshake', async () => {
+    const wb = makeWorkbench();
+    const dp = DiffPanel.register(extUri, wb as unknown as ChangesWorkbench);
+
+    dp.show('/repo-a', 'a.ts');
+    dp.show('/repo-b', 'b.ts');
+    expect(wb.fileDiffData).not.toHaveBeenCalled();
+
+    await H.messageHandler!({ type: 'diffReady' });
+    await flush();
+
+    expect(wb.fileDiffData).toHaveBeenCalledTimes(2);
+    expect(wb.fileDiffData).toHaveBeenNthCalledWith(1, '/repo-b', 'b.ts', 'staged');
+    expect(wb.fileDiffData).toHaveBeenNthCalledWith(2, '/repo-b', 'b.ts', 'unstaged');
+    expect(diffShows().map((message) => message.payload.file)).toEqual(['b.ts']);
+    expect(diffShows()[0].payload.repoPath).toBe('/repo-b');
+    expect((dp as any).current).toMatchObject({ repoPath: '/repo-b', file: 'b.ts' });
+  });
+
   it('refreshIfCurrent re-pushes only for the file still shown', async () => {
     const wb = makeWorkbench();
     const dp = await shownPanel(wb);
@@ -327,6 +346,28 @@ describe('DiffPanel', () => {
     expect(posted().filter((message) => message.type === 'imageData')).toHaveLength(1);
   });
 
+  it('drops an image reply that finishes after navigation to another file', async () => {
+    const wb = makeWorkbench();
+    let releaseImage!: (base64: string) => void;
+    wb.imageBase64.mockImplementationOnce(() => new Promise<string>(resolve => { releaseImage = resolve; }));
+    const dp = await shownPanel(wb);
+    const oldGeneration = diffShows()[0].payload.generation;
+    H.panel!.webview.postMessage.mockClear();
+
+    const oldRequest = H.messageHandler!({
+      type: 'getImageAtRef',
+      payload: { repoPath: '/r', generation: oldGeneration, ref: ':0', path: 'a.ts' },
+    });
+    await flush();
+    dp.show('/r', 'b.ts');
+    await flush();
+    releaseImage('OLD');
+    await oldRequest;
+
+    expect(posted().filter((message) => message.type === 'imageData')).toHaveLength(0);
+    expect(diffShows().map((message) => message.payload.file)).toEqual(['b.ts']);
+  });
+
   it('serves getImageAtRef ref:working from the working tree, dropping requests for any other file', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'diffpanel-'));
     await writeFile(join(repo, 'img.png'), 'abc');
@@ -380,6 +421,79 @@ describe('DiffPanel', () => {
     await expect(pending).resolves.toBeUndefined(); // no unhandled throw
     expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Stage/Unstage 失敗：patch does not apply');
     expect(H.panel!.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not post a late stage failure into the next file after navigation', async () => {
+    const wb = makeWorkbench();
+    let rejectStage!: (error: Error) => void;
+    wb.stageHunks.mockImplementationOnce(() => new Promise((_, reject) => { rejectStage = reject; }));
+    const dp = await shownPanel(wb);
+    const pending = H.messageHandler!({
+      type: 'diffStageHunk',
+      payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp', operationId: 'op-a' },
+    });
+    await flush();
+
+    H.panel!.webview.postMessage.mockClear();
+    dp.show('/r', 'b.ts');
+    await flush();
+    H.panel!.webview.postMessage.mockClear();
+
+    rejectStage(new Error('A failed after navigation'));
+    await pending;
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Stage/Unstage 失敗：A failed after navigation');
+    expect(posted().filter((message) => message.type === 'error')).toHaveLength(0);
+  });
+
+  it.each([
+    ['hunk', 'diffStageHunk'],
+    ['lines', 'diffStageLines'],
+  ] as const)('drops a late %s failure after navigation', async (_kind, messageType) => {
+    const wb = makeWorkbench();
+    let rejectStage!: (error: Error) => void;
+    const mutation = messageType === 'diffStageHunk' ? wb.stageHunks : wb.stageLines;
+    mutation.mockImplementationOnce(() => new Promise((_, reject) => { rejectStage = reject; }));
+    const dp = await shownPanel(wb);
+    const payload = messageType === 'diffStageHunk'
+      ? { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp', operationId: 'op-a' }
+      : { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, lineIndices: [0], fingerprint: 'rendered-fp', operationId: 'op-a' };
+    const pending = H.messageHandler!({ type: messageType, payload });
+    await flush();
+
+    H.panel!.webview.postMessage.mockClear();
+    dp.show('/r', 'b.ts');
+    await flush();
+    H.panel!.webview.postMessage.mockClear();
+    rejectStage(new Error('late failure after navigation'));
+    await pending;
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Stage/Unstage 失敗：late failure after navigation');
+    expect(posted().filter((message) => message.type === 'error')).toHaveLength(0);
+  });
+
+  it('keeps a late failure for the same file after a same-target refresh', async () => {
+    const wb = makeWorkbench();
+    let rejectStage!: (error: Error) => void;
+    wb.stageHunks.mockImplementationOnce(() => new Promise((_, reject) => { rejectStage = reject; }));
+    const dp = await shownPanel(wb);
+    const pending = H.messageHandler!({
+      type: 'diffStageHunk',
+      payload: { repoPath: '/r', file: 'a.ts', side: 'unstaged', hunkIndex: 0, fingerprint: 'rendered-fp', operationId: 'op-a' },
+    });
+    await flush();
+
+    // A same-file tree click changes the generation, but the webview still has
+    // op-a busy. Its matching failure must be delivered to release that gate.
+    dp.show('/r', 'a.ts');
+    await flush();
+    H.panel!.webview.postMessage.mockClear();
+    rejectStage(new Error('same-file failure'));
+    await pending;
+
+    expect(posted().filter((message) => message.type === 'error')).toEqual([
+      { type: 'error', payload: { source: 'diffStageHunk', message: 'same-file failure', operationId: 'op-a' } },
+    ]);
   });
 
   /* SNIPCODE-HOOK start: stale fingerprint recovery */

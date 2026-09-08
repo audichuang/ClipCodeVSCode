@@ -1,0 +1,7 @@
+{
+  "cold": { "firstMs": 1000, "fullMs": 2000, "maxLongTaskMs": 250 },
+  "small": { "firstMs": 250, "fullMs": 750, "maxLongTaskMs": 150 },
+  "large": { "firstMs": 250, "fullMs": 2000, "maxLongTaskMs": 150 },
+  "refresh": { "firstMs": 250, "fullMs": 1000, "maxLongTaskMs": 150 },
+  "theme": { "firstMs": 500, "fullMs": 1500, "maxLongTaskMs": 150 }
+}
