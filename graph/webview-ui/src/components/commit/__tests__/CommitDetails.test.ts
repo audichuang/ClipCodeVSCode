@@ -1448,6 +1448,32 @@ describe('CommitDetails — M12 files toolbar (tree/flat, expand/collapse all)',
     expect(container.querySelector('.files-view-btn.active')?.textContent?.toLowerCase()).toContain('tree');
   });
 
+  it('compacts directory chains, preserves branches and full file paths', async () => {
+    const files = [
+      { path: 'src/main/java/cub/inv/svc/bfs/query/dto/CustLogfReq.java', status: 'M' },
+      { path: 'src/main/java/cub/inv/svc/bfs/query/service/impl/QueryServiceImpl.java', status: 'M' },
+      { path: 'src/main/resources/sql/mssql/get/GetCustLogf.sql', status: 'M' },
+      { path: 'src/main/resources/sql/mssql/get/GetCustomerLogFQueryParam.sql', status: 'A' },
+      { path: 'src/test/java/cub/inv/svc/bfs/query/service/QueryTest.java', status: 'M' },
+      { path: 'src/README.md', status: 'M' },
+    ];
+    const { container } = await openChanges(files);
+    const names = () => Array.from(container.querySelectorAll('.dir-name')).map(el => el.textContent);
+    expect(names()).toEqual([
+      'src', 'main', 'java/cub/inv/svc/bfs/query', 'dto', 'service/impl',
+      'resources/sql/mssql/get', 'test/java/cub/inv/svc/bfs/query/service',
+    ]);
+    const file = Array.from(container.querySelectorAll<HTMLButtonElement>('.file-item'))
+      .find(el => el.textContent?.includes('QueryServiceImpl.java'))!;
+    await fireEvent.click(file);
+    expect(globalThis.__postedMessages.some(m =>
+      (m.data as any).type === 'getFileDiff' && (m.data as any).payload.file === files[1].path)).toBe(true);
+    await fireEvent.click(container.querySelector('.files-toolbar-actions button:nth-child(2)')!);
+    expect(names()).toEqual(['src']);
+    await fireEvent.click(container.querySelector('.files-toolbar-actions button:nth-child(1)')!);
+    expect(container.querySelectorAll('.file-item')).toHaveLength(files.length);
+  });
+
   it('Flat view lists full paths with no directory nodes', async () => {
     const { container } = await openChanges([
       { path: 'src/a.ts', status: 'M' },
@@ -1462,6 +1488,23 @@ describe('CommitDetails — M12 files toolbar (tree/flat, expand/collapse all)',
       const names = Array.from(container.querySelectorAll('.file-name')).map(el => el.textContent);
       expect(names).toEqual(['src/a.ts', 'src/b.ts']);
     });
+  });
+
+  it('compacts staged and unstaged paths independently', async () => {
+    const { container } = render(CommitDetails, { commit: commit({ hash: 'UNCOMMITTED' }) });
+    deliverUncommittedDiff(
+      [{ path: 'src/main/java/A.java', status: 'M' }],
+      [{ path: 'src/main/java/A.java', status: 'M' }, { path: 'src/main/resources/app.properties', status: 'M' }],
+    );
+    const names = () => Array.from(container.querySelectorAll('.dir-name')).map(el => el.textContent);
+    await waitFor(() => expect(names()).toEqual(['src/main/java']));
+    await fireEvent.click(Array.from(container.querySelectorAll('.top-tab'))
+      .find(el => /unstaged/i.test(el.textContent ?? ''))!);
+    expect(names()).toEqual(['src/main', 'java', 'resources']);
+    await fireEvent.click(container.querySelector('.files-toolbar-actions button:nth-child(2)')!);
+    expect(container.querySelectorAll('.file-item')).toHaveLength(0);
+    await fireEvent.click(container.querySelector('.files-toolbar-actions button:nth-child(1)')!);
+    expect(container.querySelectorAll('.file-item')).toHaveLength(2);
   });
 
   it('Collapse all hides file rows, Expand all brings them back', async () => {

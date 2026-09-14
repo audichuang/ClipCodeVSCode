@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.47
+
+- Compact single-child directory chains in the Changes tree, keeping separate
+  levels only where paths branch. Applies to commit details, commit comparisons,
+  and staged/unstaged changes. File selection, diff paths, and expand/collapse
+  actions retain their existing behavior.
+
 ## 0.3.45
 
 The Snipcode Git sidebar's recent-commit list was deliberately inert: you could
