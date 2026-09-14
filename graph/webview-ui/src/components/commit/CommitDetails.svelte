@@ -499,6 +499,14 @@
         return a.name.localeCompare(b.name);
       });
       for (const n of nodes) {
+        /* SNIPCODE-HOOK start: compact directory chains until a real branch */
+        while (!n.isFile && n.children.length === 1 && !n.children[0].isFile) {
+          const child = n.children[0];
+          n.name += '/' + child.name;
+          n.path = child.path;
+          n.children = child.children;
+        }
+        /* SNIPCODE-HOOK end */
         if (!n.isFile) sortTree(n.children);
       }
       return nodes;
