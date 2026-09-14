@@ -90,16 +90,23 @@ it: `docs/research/2026-07-10-vscode-git-operations-audit.md`.
 
 ## Release
 
-Pushing a `v<version>` tag runs `.github/workflows/publish.yml` (test → build →
-e2e → `vsce publish`). **A release is not done when CI goes green** — the
-Marketplace verifies and indexes the upload minutes later, so poll
-`vsce show audichuang.clipcode-vscode --json` until `.versions[0].version` is the
-new one before telling anyone it shipped (measured lag on real releases: 5–8
-minutes after the publish step succeeded). Bump `package.json` **and**
-`package-lock.json` — `npm ci` does not check the version field, so a stale
-lockfile ships silently. Open VSX is not set up yet (namespace unclaimed) — VS
-Code Marketplace only for now. (A `vscode-extension-release` skill automates
-this, but it lives outside this repo.)
+**Run `scripts/release.sh <version>`.** It preflights (on `main`, clean tree, in
+sync with origin, `package.json` **and** `package-lock.json` at that version, tag
+unused), tags, pushes, waits for `.github/workflows/publish.yml` (test → build →
+e2e → `vsce publish`), then polls the Marketplace until it actually serves the new
+version and the VSIX downloads. It prints one line — `OK v0.3.48 live: <url>` or
+`FAIL: <reason>` — and exits 0 only when live.
+
+**A release is not done when CI goes green** — the Marketplace verifies and indexes
+the upload 5–8 minutes later (measured on real releases). That lag is the whole
+reason the script exists: the poll was documented here in prose and got skipped
+anyway, shipping a "released" claim for a version nobody could install yet. Don't
+hand-roll the tag-and-hope sequence. `npm ci` does not check the version field, so a
+stale lockfile ships silently — the script refuses rather than let that through.
+
+Open VSX is not set up yet (namespace unclaimed) — VS Code Marketplace only for now.
+(A `vscode-extension-release` skill covers the same ground, but it lives outside this
+repo and is not guaranteed to load.)
 
 ## Where to start in the code
 
