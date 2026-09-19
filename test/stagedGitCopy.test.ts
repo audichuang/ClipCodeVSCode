@@ -80,3 +80,38 @@ test('staged Git copy preserves index bytes plus deleted and renamed labels', as
   ]);
   assert.deepEqual(workspaceReads, []);
 });
+
+test('an unreadable index entry is left out, never replaced by the working tree', async () => {
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: {
+      indexChanges: [
+        { uri: new Uri('/repo/ok.ts'), status: 'INDEX_MODIFIED' },
+        { uri: new Uri('/repo/broken.ts'), status: 'INDEX_MODIFIED' },
+      ],
+    },
+    show: async (_ref: string, file: string) => {
+      // readRefContent tries the repo-relative spelling and then the absolute one.
+      if (file.endsWith('broken.ts')) throw new Error('index read failed');
+      return 'index:ok';
+    },
+  };
+  const selected = ['ok.ts', 'broken.ts'].map(file => ({ uriKey: `/repo/${file}`, staged: true }));
+
+  const { collectGitPayloadFiles } = await extensionModule;
+  workspaceReads.length = 0;
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, {
+    ...defaultSettings,
+    setMaxFileCount: false,
+  });
+
+  // It used to emit `broken.ts` with `working:/repo/broken.ts` — unstaged bytes under a
+  // staged label, with nothing in the payload or the notification saying so. Dropping it
+  // was no better: the file just went missing in silence. The marker is visible, and the
+  // restore planners refuse to write it over a real file.
+  assert.deepEqual(result.files, [
+    { path: 'ok.ts', content: 'index:ok', changeType: 'MODIFIED' },
+    { path: 'broken.ts', content: '// Unable to read file content', changeType: 'MODIFIED' }
+  ]);
+  assert.deepEqual(workspaceReads, []);
+});

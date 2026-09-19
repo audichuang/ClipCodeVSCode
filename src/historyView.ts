@@ -5,7 +5,7 @@ import { type HistoryRepo, readFileAtCommit } from './gitHistory.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
 import { notifyCopied } from './notify.js';
-import { toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 
 interface GitExtension { readonly enabled: boolean; readonly onDidChangeEnablement: vscode.Event<boolean>; getAPI(version: 1): GitAPI; }
@@ -88,7 +88,13 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
   const roots = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
 
   const collected: FileNode[] = [];
-  for (const node of sources) collected.push(...await provider.getFilesForNode(node));
+  try {
+    for (const node of sources) collected.push(...await provider.getFilesForNode(node));
+  } catch (error) {
+    // The shallow-clone guard refuses here rather than copy the whole repository tree.
+    vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    return;
+  }
   const files = dedupeFilesKeepNewest(collected);
 
   const payloadFiles: PayloadFile[] = [];
@@ -99,7 +105,7 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
     const clipboardPath = toClipboardPathFromRoots(roots.length ? roots : [f.repoRoot], absPath);
     if (settings.useFilters && !fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath)) continue;
 
-    const content = await readFileAtCommit(provider.repo!, f.commit.hash, f.change);
+    const content = await readFileAtCommit(provider.repo!, f.commit.hash, f.change, f.commit.parents);
     if (content === undefined) continue;
     if (f.changeType === 'DELETED') usesFallback = true;
 
@@ -111,7 +117,9 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
   }
 
   if (payloadFiles.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
-  const opts = { headerFormat: settings.headerFormat, preText: settings.preText, postText: settings.postText, addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles, files: payloadFiles };
+  // Same single-root rule as every other copy path — without it this entry's payload
+  // carries no `// clipcode-root:` line and Paste & Restore cannot align folder levels.
+  const opts = { headerFormat: settings.headerFormat, preText: settings.preText, postText: settings.postText, addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles, files: payloadFiles, sourceRoot: sourceRootName(roots) };
   const payload = usesFallback ? buildGitPayload(opts) : buildPayload(opts);
   await vscode.env.clipboard.writeText(payload);
   if (settings.showCopyNotification) {

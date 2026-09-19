@@ -23,19 +23,32 @@ test('normalizeFsPath trims trailing separator so /repo/ matches /repo', () => {
   assert.equal(repoRelativePath('/repo/', '/repo/src/a.ts'), 'src/a.ts');
 });
 
-test('readRefContent tries show then buffer and skips binary', async () => {
-  const repo = {
-    rootUri: { fsPath: '/repo' },
-    show: async (_ref: string, p: string) => (p === 'src/a.ts' ? 'CONTENT' : Promise.reject(new Error('no'))),
-  };
-  assert.equal(await readRefContent(repo, 'abc123', '/repo/src/a.ts'), 'CONTENT');
-
+test('readRefContent checks the bytes before it trusts the Git API string', async () => {
   const bufRepo = {
     rootUri: { fsPath: '/repo' },
-    show: async () => { throw new Error('no show'); },
+    show: async () => 'SHOULD_NOT_BE_USED',
     buffer: async () => new TextEncoder().encode('FROM_BUFFER'),
   };
   assert.equal(await readRefContent(bufRepo, 'abc123', '/repo/src/a.ts'), 'FROM_BUFFER');
+
+  // The real VS Code Git API decodes leniently: these Big5 bytes come back from show() as
+  // the string '\uFFFD\u991F'. Asking show() first accepted that, and Paste & Restore wrote
+  // the mojibake over the real file — the disk copy path has refused it all along.
+  let showCalls = 0;
+  const lenient = {
+    rootUri: { fsPath: '/repo' },
+    show: async () => { showCalls++; return '\uFFFD\u991F'; },
+    buffer: async () => new Uint8Array([0xa4, 0xe9, 0xa5, 0xbb]),
+  };
+  assert.equal(await readRefContent(lenient, 'abc123', '/repo/src/a.ts'), undefined);
+  assert.equal(showCalls, 0, 'with bytes in hand the decoded string must not be consulted');
+
+  // show() alone stays supported — a string carries no bytes to validate.
+  const showOnly = {
+    rootUri: { fsPath: '/repo' },
+    show: async (_ref: string, p: string) => (p === 'src/a.ts' ? 'CONTENT' : Promise.reject(new Error('no'))),
+  };
+  assert.equal(await readRefContent(showOnly, 'abc123', '/repo/src/a.ts'), 'CONTENT');
 });
 
 test('non-UTF-8 bytes are skipped, never decoded to mojibake', () => {

@@ -75,3 +75,18 @@ test('truncated output leaves remaining paths unresolved without throwing', () =
   assert.equal(map.get('ok.ts'), 'abcd');
   assert.equal(map.get('truncated.ts'), undefined);
 });
+
+test('a non-UTF-8 blob is skipped by the batch reader, never decoded to mojibake', () => {
+  // This reader is the NORMAL path for Graph/PR/commit copies — readRefContent's strict
+  // decode is only the spawn-failure fallback. Buffer.toString('utf8') decodes leniently,
+  // so these Big5 bytes came back as U+FFFD soup that Paste & Restore wrote over the real
+  // file, while the very same commit copied through History was correctly refused.
+  const big5 = Buffer.from([0xa4, 0xe9, 0xa5, 0xbb]);
+  const stdout = Buffer.concat([
+    Buffer.from(`aaa blob ${big5.length}\n`, 'utf8'), big5, Buffer.from('\n', 'utf8'),
+    Buffer.from('bbb blob 2\n', 'utf8'), Buffer.from('ok', 'utf8'), Buffer.from('\n', 'utf8')
+  ]);
+  const result = parseCatFileBatch(stdout, ['bad.ts', 'good.ts']);
+  assert.equal(result.get('bad.ts'), undefined, 'undecodable bytes must not become a string');
+  assert.equal(result.get('good.ts'), 'ok');
+});

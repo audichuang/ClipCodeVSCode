@@ -108,20 +108,24 @@ test('accepts absolute restore paths under known roots', async () => {
   });
 });
 
-test('rejects write targets through symlinked path components', async () => {
+test('write targets may follow a symlink that stays inside, never one that escapes', async () => {
   await withTempDir(async parent => {
     const root = path.join(parent, 'project');
     const outside = path.join(parent, 'outside');
-    await mkdir(root, { recursive: true });
+    await mkdir(path.join(root, 'packages', 'ui'), { recursive: true });
     await mkdir(outside, { recursive: true });
+    await mkdir(path.join(root, 'node_modules'), { recursive: true });
     await symlink(outside, path.join(root, 'linked'), 'dir');
+    // pnpm's node_modules layout is exactly this: a link that never leaves the workspace.
+    await symlink(path.join(root, 'packages', 'ui'), path.join(root, 'node_modules', 'ui'), 'dir');
 
-    const resolved = resolveWriteTarget([root], 'linked/escape.ts');
+    const escaping = resolveWriteTarget([root], 'linked/escape.ts');
+    assert.equal(escaping.ok, false);
+    if (!escaping.ok) assert.equal(escaping.reason, 'unsafe path');
 
-    assert.equal(resolved.ok, false);
-    if (!resolved.ok) {
-      assert.equal(resolved.reason, 'unsafe path');
-    }
+    // Refusing every symlink component locked these users out of restore entirely, and
+    // disagreed with IntelliJ, which resolves the same path happily.
+    assert.equal(resolveWriteTarget([root], 'node_modules/ui/index.ts').ok, true);
   });
 });
 
@@ -133,3 +137,118 @@ async function withTempDir(run: (root: string) => Promise<void>): Promise<void> 
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test('an external root keeps its identity through cross-machine suffix matching', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-multiroot-'));
+  try {
+    const app = path.join(base, 'dest', 'app');
+    const shared = path.join(base, 'dest', 'shared-lib');
+    // The primary repo also contains a same-named folder — that collision is what made
+    // the label ambiguous and pushed resolution onto the suffix path in the first place.
+    await mkdir(path.join(app, 'shared-lib'), { recursive: true });
+    await mkdir(shared, { recursive: true });
+
+    // A payload copied on another machine carries the external file's absolute path.
+    const resolution = resolveWriteTarget([app, shared], '/source/shared-lib/new.ts');
+
+    assert.equal(resolution.ok, true, 'must resolve, not fall through');
+    if (!resolution.ok) return;
+    assert.equal(
+      path.resolve(resolution.absolutePath),
+      path.join(shared, 'new.ts'),
+      'must land in the external root, not be written over the primary repo'
+    );
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('deletion must not escape the workspace through a directory symlink', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-symdel-'));
+  try {
+    const repo = path.join(base, 'repo');
+    const outside = path.join(base, 'outside');
+    await mkdir(repo, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'keep.txt'), 'must survive');
+    await symlink(outside, path.join(repo, 'link'), 'dir');
+
+    // The write resolver already refused this; deletion had no check at all and really
+    // removed the file outside the workspace.
+    const del = resolveDeleteTarget([repo], 'link/keep.txt');
+    assert.equal(del.ok, false, 'must refuse to delete outside the workspace');
+
+    // A path that stays inside the workspace is still deletable.
+    await writeFile(path.join(repo, 'inside.txt'), 'x');
+    assert.equal(resolveDeleteTarget([repo], 'inside.txt').ok, true);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a relative leaf symlink is resolved against its REAL parent, not the way in', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-lexical-'));
+  try {
+    const ws = path.join(base, 'ws');
+    const outside = path.join(base, 'outside');
+    await mkdir(path.join(ws, 'sub'), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'x'), 'must survive');
+    // Walking IN through a directory symlink and then following a RELATIVE leaf link:
+    // resolving the link text against the walked-in path fabricates an in-workspace answer
+    // and the write lands outside. Only a real resolve gets this right — this exact layout
+    // was refused by the old "any symlink component" rule and must stay refused.
+    await symlink(ws, path.join(ws, 'sub', 'dirlink'), 'dir');
+    await symlink(path.join('..', 'outside', 'x'), path.join(ws, 'file'));
+
+    assert.equal(resolveWriteTarget([ws], 'sub/dirlink/file').ok, false, 'must not write outside');
+    assert.equal(resolveDeleteTarget([ws], 'sub/dirlink/file').ok, false, 'must not delete outside');
+
+    // Same shape, but the leaf link dangles — the target does not exist yet.
+    await symlink(path.join('..', 'outside', 'brand-new.txt'), path.join(ws, 'newfile'));
+    assert.equal(resolveWriteTarget([ws], 'sub/dirlink/newfile').ok, false, 'must not create outside');
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('containment holds however many missing levels sit under an escaping link', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-deep-'));
+  try {
+    const repo = path.join(base, 'repo');
+    const outside = path.join(base, 'outside');
+    await mkdir(repo, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await symlink(outside, path.join(repo, 'link'), 'dir');
+
+    // A fixed iteration budget counted MISSING ANCESTORS, so a path with more levels than
+    // the budget gave up before reaching the link above them — and gave up by ALLOWING.
+    const deep = ['link', ...Array(42).fill('d'), 'new.txt'].join('/');
+    assert.equal(resolveWriteTarget([repo], deep).ok, false, 'depth must not buy a way out');
+    assert.equal(resolveWriteTarget([repo], 'link/new.txt').ok, false);
+
+    // And a deep path that stays inside is still writable.
+    const inside = [...Array(42).fill('d'), 'new.txt'].join('/');
+    assert.equal(resolveWriteTarget([repo], inside).ok, true);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a literal backslash in a real directory name is not read as a separator', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-backslash-'));
+  try {
+    const repo = path.join(base, 'repo');
+    // A POSIX directory whose NAME contains a backslash. Slash-normalising the resolved
+    // path rewrote it to `repo/outside`, which reads as being inside `repo` — and the
+    // write landed in this sibling instead.
+    const sibling = path.join(base, 'repo\\outside');
+    await mkdir(repo, { recursive: true });
+    await mkdir(sibling, { recursive: true });
+    await symlink(sibling, path.join(repo, 'backlink'), 'dir');
+
+    assert.equal(resolveWriteTarget([repo], 'backlink/new.txt').ok, false);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});

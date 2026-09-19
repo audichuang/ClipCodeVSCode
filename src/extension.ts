@@ -8,12 +8,13 @@ import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type 
 import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
+import { targetEncoding } from './fileSystem.js';
 import { mapInOrder } from './concurrency.js';
 import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
-import { DELETED_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
+import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
-import { toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, planRestore } from './restore.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 import { registerBlame } from './blame/index.js';
@@ -151,6 +152,9 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
     readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
     readBatch: (repoRootFsPath, hash, relativePaths) =>
       readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths, gitEnv),
+    // The same list Paste & Restore resolves against, so a multi-repo payload is labelled
+    // the one way the restore side can read back.
+    workspaceRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
     settings,
   };
 }
@@ -176,7 +180,9 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}`;
+    const unreadable = result.skippedUnreadableCount > 0
+      ? ` ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.` : '';
+    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}${unreadable}`;
     // Offer the actual skipped paths/sizes behind a button so the toast stays short.
     // Goes through notifyCopied so an oversized copy still gets its warning/error colour.
     notifyCopied(message, result.text, result.skippedFiles.length > 0 ? {
@@ -244,7 +250,13 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    notifyCopied(`${result.copiedFileCount} file(s) copied${suffix}.`, result.payload);
+    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
+    // Files dropped as binary/non-UTF-8/unreadable were counted and then thrown away, so
+    // they still went missing in silence — which is the whole complaint this counter exists
+    // to answer.
+    const unreadable = result.skippedUnreadableCount > 0
+      ? ` ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.` : '';
+    notifyCopied(`${result.copiedFileCount} file(s) copied${suffix}.${limit}${unreadable}`, result.payload);
   }
 }
 
@@ -258,13 +270,23 @@ async function copyAllOpenEditors(): Promise<void> {
   const settings = readSettings();
   const files: CopyTextFile[] = [];
   const seen = new Set<string>();
+  let unreadable = 0;
 
   for (const tabGroup of vscode.window.tabGroups.all) {
     for (const tab of tabGroup.tabs) {
       if (!(tab.input instanceof vscode.TabInputText)) continue;
       const document = await vscode.workspace.openTextDocument(tab.input.uri);
-      if (document.isUntitled || document.uri.scheme !== 'file' || document.getText() === '') continue;
+      // An empty buffer is a real file: `getText() === ''` dropped every open 0-byte
+      // __init__.py / .gitkeep before it could reach collectCopyTextFiles, which copies it.
+      if (document.isUntitled || document.uri.scheme !== 'file') continue;
       const absolutePath = document.uri.fsPath;
+      // The editor hands back an already-decoded string, so a UTF-16 file copied cleanly
+      // from here while every other path in both tools refused it. Judge the BYTES on
+      // disk, then still copy the buffer's (possibly unsaved) text.
+      if (await targetEncoding(absolutePath) === 'other') {
+        unreadable++;
+        continue;
+      }
       if (seen.has(absolutePath)) continue;
       seen.add(absolutePath);
       files.push({
@@ -283,7 +305,12 @@ async function copyAllOpenEditors(): Promise<void> {
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.`, result.payload);
+    // fileLimitReached was computed and thrown away here: files went missing with nothing
+    // said. IntelliJ raises a dedicated "File Limit Reached" notification.
+    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
+    const dropped = result.skippedUnreadableCount + unreadable;
+    const unreadableSuffix = dropped > 0 ? ` ${dropped} skipped: not UTF-8 text or unreadable.` : '';
+    notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.${limit}${unreadableSuffix}`, result.payload);
   }
 }
 
@@ -317,7 +344,7 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
     files: result.files,
     // Single-root only: multi-root paths carry per-root labels, so a single
     // source-root basename would be wrong for files from other roots.
-    sourceRoot: roots.length === 1 ? folderName(roots[0]) : undefined
+    sourceRoot: sourceRootName(roots)
   };
   const payload = result.usesRegularSpacing
     ? buildPayload(payloadOptions)
@@ -641,9 +668,17 @@ async function readGitChangeContent(
   }
 
   if (forceIndexContent) {
-    const targetUri = change.renameUri ?? change.uri;
-    return await readRefContent(repository, '', targetUri.fsPath) ??
-      await readWorkspaceText(targetUri);
+    // Staged content was ASKED for. Falling back to the working tree handed back unstaged
+    // bytes under a staged label with nothing to say so — the user copies what they are
+    // about to commit and gets what they are not. Dropping the file instead was no better:
+    // it just went missing in silence. The placeholder is visible in the payload, and both
+    // restore planners refuse to write it over a real file.
+    // IntelliJ is NOT identical here: GitClipboardPayloadBuilder still falls back to the
+    // working-tree text first and only then emits this same marker. Which of the two is
+    // right is an open product question — what is settled is that neither silence nor a
+    // silent substitution is acceptable.
+    return await readRefContent(repository, '', (change.renameUri ?? change.uri).fsPath) ??
+      UNREADABLE_FILE_MARKER;
   }
 
   return readWorkspaceText(change.renameUri ?? change.uri);

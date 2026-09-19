@@ -32,7 +32,34 @@ TS-side pins for the shared invariants:
   paths containing them, even in this tool's own round-trip.
 - The `// clipcode-root:` line is emitted only for a **single-root copy context**
   (one workspace / source root, or a single-repo graph copy) — not merely "one
-  VS Code window".
+  VS Code window". Every copy entry point owes it, the History view included.
+- `GENERIC_FILE_HEADER` spells the token out as `[Ff][Ii][Ll][Ee]:` instead of using
+  `/i`: Kotlin's `IGNORE_CASE` folds the Turkish dotless `ı` (U+0131) onto `i` and JS
+  refuses to, so `// fıle: x.ts` was content here and a header in IntelliJ.
+- The builder emits `POST_TEXT_MARKER` (`// clipcode-end`) before a non-empty post text
+  and the parser stops there. Do NOT reintroduce a `postText` parameter on
+  `parseClipboard` — see the work-root `AGENTS.md` for why reconstructing the footer from
+  the receiver's setting silently deletes real content.
+- No `String.trim()` in the parse path — `asciiTrim` only, `restore.ts isPlaceholderBody`
+  included.
+- Git-revision reads go through `repo.buffer` + the strict decoder FIRST (`gitContent.ts
+  readRefContent`); `repo.show` returns an already-decoded string, so asking it first
+  skips the UTF-8 guard and hands back U+FFFD mojibake. **`catFile.ts` is the other half**
+  — it is the NORMAL path for Graph/PR/commit copies (`readRefContent` is only the
+  spawn-failure fallback), so it must use `decodeUtf8OrSkip`, never
+  `Buffer.toString('utf8')`.
+- Filtering uses `PreparedFile.filterPath` / the clipboard path from
+  `toClipboardPathFromRoots`, never a repo-relative header, and `matchesRule` refuses a
+  relative PATH rule when that path is absolute — see the work-root `AGENTS.md`. The graph
+  surface labels a MULTI-repo payload through the workspace roots for the same reason:
+  prefixing every repo with its basename is a spelling restore cannot read back
+  (`alpha/secret.txt` resolved to `alpha/alpha/secret.txt`).
+- `listFilesRecursive` walks a directory symlink only when it IS the selected input, never
+  during recursion. Right-clicking a linked folder used to copy nothing; following links
+  everywhere is worse — a cross-linked tree (pnpm's `.pnpm`, Bazel) has a path count that
+  grows like a sum of falling factorials, and with the default 30-file limit the copy
+  becomes 30 aliases of the same few files while the real tree is dropped. IntelliJ's
+  own walker has that hazard; do not import it.
 
 Beyond the frozen fixtures, round-trip is guarded by `test/clipboardFormat.test.ts`
 and the e2e `test-e2e/suite/roundtrip.test.ts`.

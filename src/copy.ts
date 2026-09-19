@@ -3,7 +3,7 @@ import { buildPayload, type PayloadFile } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
 import { directoryExcluded, fileMatchesFilters } from './filterMatcher.js';
 import { fileSize, listFilesRecursive, readTextFile } from './fileSystem.js';
-import { toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 /**
@@ -85,6 +85,8 @@ export interface CopyResult {
   payload: string;
   copiedFileCount: number;
   skippedFileSizeCount: number;
+  /** Not decodable as UTF-8, binary, or unreadable — dropped, and previously in silence. */
+  skippedUnreadableCount: number;
   fileLimitReached: boolean;
 }
 
@@ -97,6 +99,7 @@ export interface CopyTextFile {
 interface CopyState {
   copiedFileCount: number;
   skippedFileSizeCount: number;
+  skippedUnreadableCount: number;
   fileLimitReached: boolean;
 }
 
@@ -112,6 +115,7 @@ export async function collectCopyFiles(
   const state: CopyState = {
     copiedFileCount: 0,
     skippedFileSizeCount: 0,
+    skippedUnreadableCount: 0,
     fileLimitReached: false
   };
   const roots = normalizeRoots(workspaceRoots);
@@ -134,8 +138,15 @@ export async function collectCopyFiles(
     const read = mapInOrder(pending, READ_CONCURRENCY, async candidate => {
       // Stat first and read only what fits — the size guard exists to avoid pulling
       // a multi-GB file into memory.
-      const size = await fileSize(candidate.absolutePath);
-      return { candidate, size, content: size > sizeLimit ? undefined : await readTextFile(candidate.absolutePath) };
+      // Per-file catch: mapInOrder is Promise.all, so ONE EACCES or a dangling symlink
+      // (which listFilesRecursive does yield) rejected out of collectCopyFiles and the
+      // whole copy produced nothing at all. IntelliJ skips the file and copies the rest.
+      try {
+        const size = await fileSize(candidate.absolutePath);
+        return { candidate, size, content: size > sizeLimit ? undefined : await readTextFile(candidate.absolutePath) };
+      } catch {
+        return { candidate, size: 0, content: undefined };
+      }
     });
     for await (const { candidate, size, content } of read) {
       if (settings.setMaxFileCount && state.copiedFileCount >= settings.fileCountLimit) {
@@ -147,7 +158,10 @@ export async function collectCopyFiles(
         files.push({ path: candidate.relativePath, skippedReason: `size exceeds limit (${size} bytes)` });
         continue;
       }
-      if (!content) continue;
+      // `undefined`, not falsy: a 0-byte file is content. `!content` dropped every empty
+      // __init__.py / .gitkeep, which IntelliJ copies (it checks `file.length == 0L`
+      // explicitly) — so the same folder produced different file sets in the two tools.
+      if (content === undefined) { state.skippedUnreadableCount++; continue; }
       files.push({ path: candidate.relativePath, content });
       state.copiedFileCount++;
     }
@@ -156,7 +170,7 @@ export async function collectCopyFiles(
 
   inputLoop:
   for (const inputPath of inputPaths) {
-    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory)) {
+    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory, true, () => { state.skippedUnreadableCount++; })) {
       // The limit check needs an exact copiedFileCount, so drain first whenever the
       // buffered candidates could still push the count up to the limit. Below that
       // watermark no batch can trip it, so the walk keeps buffering.
@@ -205,6 +219,7 @@ export async function collectCopyTextFiles(
   const state: CopyState = {
     copiedFileCount: 0,
     skippedFileSizeCount: 0,
+    skippedUnreadableCount: 0,
     fileLimitReached: false
   };
   const roots = normalizeRoots(workspaceRoots);
@@ -269,7 +284,11 @@ async function appendCopyCandidate(options: {
   }
 
   const content = await options.content();
-  if (!content) return true;
+  // `undefined` means unreadable/non-UTF-8. An empty string is a real, copyable file.
+  if (content === undefined) {
+    options.state.skippedUnreadableCount++;
+    return true;
+  }
 
   options.files.push({ path: relativePath, content });
   options.state.copiedFileCount++;
@@ -292,10 +311,11 @@ function buildCopyResult(
       files,
       // Only a single-root copy has an unambiguous source root; multi-root paths
       // carry per-root labels, so omit metadata there.
-      sourceRoot: roots.length === 1 ? path.basename(roots[0]) : undefined
+      sourceRoot: sourceRootName(roots)
     }),
     copiedFileCount: state.copiedFileCount,
     skippedFileSizeCount: state.skippedFileSizeCount,
+    skippedUnreadableCount: state.skippedUnreadableCount,
     fileLimitReached: state.fileLimitReached
   };
 }

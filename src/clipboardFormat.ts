@@ -35,9 +35,14 @@ const LABELS: ChangeTypeLabel[] = ['NEW', 'MODIFIED', 'DELETED', 'MOVED'];
 const ASCII_WS = ' \\t\\n\\x0B\\f\\r';
 const LABEL_PATTERN = new RegExp(`\\[(${LABELS.join('|')})\\]`, 'g');
 const LEADING_LABEL_PATTERN = new RegExp(`^(?:\\[(${LABELS.join('|')})\\][${ASCII_WS}]*)+`);
+// The `file:` token is spelled out per-character instead of relying on the /i flag.
+// Kotlin's RegexOption.IGNORE_CASE is CASE_INSENSITIVE|UNICODE_CASE, which folds the
+// Turkish dotless i (U+0131) onto `i`; JavaScript's /i explicitly refuses that fold. A
+// content line "// fıle: phantom.ts" was therefore plain content here and a header in
+// IntelliJ, so this payload pasted into ClipCode was truncated and grew a phantom file.
+// ASCII case folding is all this token ever needed — keep both sides spelled out.
 const GENERIC_FILE_HEADER = new RegExp(
-  `^[${ASCII_WS}]*(?:(\\/\\/|#|\\/\\*)[${ASCII_WS}]*)?file:[${ASCII_WS}]*(.+?)[${ASCII_WS}]*(?:\\*\\/)?$`,
-  'i'
+  `^[${ASCII_WS}]*(?:(\\/\\/|#|\\/\\*)[${ASCII_WS}]*)?[Ff][Ii][Ll][Ee]:[${ASCII_WS}]*(.+?)[${ASCII_WS}]*(?:\\*\\/)?$`
 );
 // Scheme A marker — MUST match the Kotlin side byte-for-byte (see notes).
 // Distinctive enough that a real source line virtually never starts with it, so
@@ -50,11 +55,33 @@ const ESCAPE_MARKER = '//clipcode-esc: ';
 // pre-header text; only extractSourceRoot() reads it (from line 1).
 const SOURCE_ROOT_MARKER = '// clipcode-root: ';
 
+// Terminates the last file's body. Without it NOTHING on the wire says where the file
+// content stops and the configured footer starts, so the footer was accumulated INTO that
+// file — which also made a size-skipped placeholder body multi-line and walked straight
+// past the placeholder guard, overwriting a real 1100-byte file with a 58-byte stub.
+// Reconstructing the footer from the RECEIVER's setting (the first attempt) cannot work:
+// the two tools do not share settings, so it missed exactly when it mattered, and when it
+// did fire on a foreign payload it silently deleted a real closing line. An explicit
+// marker is receiver-independent. Escaped like any other line when it appears in real
+// content, so it round-trips. MUST be byte-identical to the Kotlin mirror.
+const POST_TEXT_MARKER = '// clipcode-end';
+
+// ASCII-only trim, never String.trim(). Kotlin's trim is Character.isWhitespace ∪
+// isSpaceChar and JS's is the ECMAScript WhiteSpace set; they disagree on U+001C-U+001F
+// and U+FEFF. That disagreement is not cosmetic — it decided whether a header path kept a
+// trailing control char (so the two tools wrote DIFFERENT filenames), whether a line
+// counted as blank, and, through isPlaceholderBody, whether a real file got overwritten.
+// One ASCII class on both sides removes the whole class of divergence.
+const ASCII_WS_TRIM = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
+export function asciiTrim(value: string): string {
+  return value.replace(ASCII_WS_TRIM, '');
+}
+
 /** Read the source-root metadata from the first line, if present. */
 export function extractSourceRoot(clipboardText: string): string | undefined {
   const firstLine = clipboardText.slice(0, clipboardText.indexOf('\n') === -1 ? undefined : clipboardText.indexOf('\n'));
   if (!firstLine.startsWith(SOURCE_ROOT_MARKER)) return undefined;
-  const value = firstLine.slice(SOURCE_ROOT_MARKER.length).trim();
+  const value = asciiTrim(firstLine.slice(SOURCE_ROOT_MARKER.length));
   return value || undefined;
 }
 
@@ -100,7 +127,19 @@ function buildPayloadInternal(options: BuildPayloadOptions, includeEmptyWrappers
     if (options.addExtraLineBetweenFiles) lines.push('');
   }
 
-  if (includeEmptyWrappers || options.postText) lines.push(escapeContent(options.postText, customRegex));
+  if (includeEmptyWrappers || options.postText) {
+    // Only when there IS a footer — an empty wrapper slot needs no terminator, and this
+    // keeps every postText-free payload byte-identical to the previous format.
+    // Suppressed when the configured header would swallow the marker line, exactly as the
+    // `clipcode-root` line is: under `// $FILE_PATH` the marker IS a valid header for a
+    // file named `clipcode-end`, so emitting it would make that real file unrepresentable.
+    // Without the terminator the footer glues onto the last file, which is what payloads
+    // from before this marker already do — a known, documented fallback.
+    if (options.postText && findHeaderPath(POST_TEXT_MARKER, customRegex) === undefined) {
+      lines.push(POST_TEXT_MARKER);
+    }
+    lines.push(escapeContent(options.postText, customRegex));
+  }
   return lines.join('\n');
 }
 
@@ -120,6 +159,8 @@ function escapeContent(text: string, customRegex?: RegExp): string {
 // that matches everything — so we don't mark every single content line.
 function needsEscape(line: string, customRegex?: RegExp): boolean {
   if (line.startsWith(ESCAPE_MARKER)) return true;
+  // A real content line that IS the end marker must not terminate its own file.
+  if (line === POST_TEXT_MARKER || line === POST_TEXT_MARKER + '\r') return true;
   // escapeContent splits on '\n', but the parser splits on /\r?\n/ and drops the \r.
   // Test what the PARSER will see, or a CRLF line that is a header slips through
   // unescaped and becomes a phantom file on restore. The marker is still prefixed to
@@ -149,16 +190,33 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
   // turn it into a phantom file. extractSourceRoot() reads it separately.
   if (lines[0]?.startsWith(SOURCE_ROOT_MARKER)) lines.shift();
 
+  const flush = () => {
+    if (currentPath === undefined) return;
+    entries.push({
+      path: currentPath,
+      content: unescapeContent(joinContent(currentContent)),
+      changeTypes: currentLabels
+    });
+    currentPath = undefined;
+    currentLabels = new Set();
+    currentContent.length = 0;
+  };
+
   for (const line of lines) {
     const rawPath = findHeaderPath(line, customRegex);
+    // The HEADER wins. Under a permissive format such as `// $FILE_PATH` this very line is
+    // the header of a real file named `clipcode-end`, and treating it as the terminator
+    // first discarded that file and its body outright. The builder suppresses the marker
+    // for exactly those formats, so the two rules never fight over the same line.
+    if (rawPath === undefined && line === POST_TEXT_MARKER) {
+      // Ends the CURRENT file's body — the footer follows. NOT the whole parse: two
+      // payloads pasted back to back is an ordinary thing to do, and stopping here dropped
+      // every file in the second one without a word.
+      flush();
+      continue;
+    }
     if (rawPath !== undefined) {
-      if (currentPath !== undefined) {
-        entries.push({
-          path: currentPath,
-          content: unescapeContent(joinContent(currentContent)),
-          changeTypes: currentLabels
-        });
-      }
+      flush();
       currentLabels = extractLeadingLabels(rawPath);
       currentPath = stripLeadingLabels(rawPath);
       currentContent.length = 0;
@@ -188,8 +246,8 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
 function joinContent(lines: string[]): string {
   let start = 0;
   let end = lines.length;
-  while (start < end && /^\s*$/.test(lines[start])) start++;
-  while (end > start && /^\s*$/.test(lines[end - 1])) end--;
+  while (start < end && asciiTrim(lines[start]) === '') start++;
+  while (end > start && asciiTrim(lines[end - 1]) === '') end--;
   return lines.slice(start, end).join('\n');
 }
 
@@ -202,7 +260,7 @@ export function extractLeadingLabels(path: string): Set<ChangeTypeLabel> {
 }
 
 export function stripLeadingLabels(path: string): string {
-  return path.replace(LEADING_LABEL_PATTERN, '').trim();
+  return asciiTrim(path.replace(LEADING_LABEL_PATTERN, ''));
 }
 
 function findHeaderPath(line: string, customRegex?: RegExp): string | undefined {
@@ -219,7 +277,7 @@ function findHeaderPath(line: string, customRegex?: RegExp): string | undefined 
 }
 
 function isLikelyBareFileHeaderPath(rawPath: string): boolean {
-  const path = stripLeadingLabels(rawPath).trim();
+  const path = asciiTrim(stripLeadingLabels(rawPath));
   if (!path) return false;
   if (path.startsWith('"') || path.startsWith("'")) return false;
   if (path.endsWith(',') || path.endsWith(';')) return false;

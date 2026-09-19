@@ -1,7 +1,8 @@
 import { stat } from 'node:fs/promises';
 import { mapInOrder } from './concurrency.js';
-import { deleteFile, pathExists, writeTextFile } from './fileSystem.js';
-import { resolveDeleteTarget, resolveWriteTarget } from './pathResolver.js';
+import { deleteFile, mustNotOverwrite, pathExists, writeTextFile } from './fileSystem.js';
+import { asciiTrim } from './clipboardFormat.js';
+import { escapesAllRoots, resolveDeleteTarget, resolveWriteTarget } from './pathResolver.js';
 
 export interface RestoreEntry {
   path: string;
@@ -14,6 +15,8 @@ export interface CreateOperation {
   absolutePath: string;
   content: string;
   existed: boolean;
+  /** The root this target was validated against — re-checked immediately before writing. */
+  rootPath: string;
 }
 
 export interface DeleteOperation {
@@ -24,10 +27,16 @@ export interface DeleteOperation {
 export interface SkippedOperation {
   rawPath: string;
   relativePath?: string;
-  reason: 'ALREADY_ABSENT' | 'UNRESOLVED_PATH' | 'AMBIGUOUS_PATH' | 'PLACEHOLDER_BODY';
+  /**
+   * NON_UTF8_TARGET: the file on disk is not UTF-8. Writing UTF-8 over it would change its
+   * encoding silently — the wire carries none, so we cannot put back what was there.
+   */
+  reason: 'ALREADY_ABSENT' | 'UNRESOLVED_PATH' | 'AMBIGUOUS_PATH' | 'PLACEHOLDER_BODY' | 'NON_UTF8_TARGET';
 }
 
 export interface RestorePlan {
+  /** Every workspace root the plan was validated against — re-checked before each write. */
+  roots: string[];
   createOperations: CreateOperation[];
   deleteOperations: DeleteOperation[];
   skippedOperations: SkippedOperation[];
@@ -85,15 +94,25 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
       continue;
     }
 
+    if (await mustNotOverwrite(resolution.absolutePath)) {
+      skippedOperations.push({
+        rawPath: entry.path,
+        relativePath: resolution.relativePath,
+        reason: 'NON_UTF8_TARGET'
+      });
+      continue;
+    }
+
     createOperations.push({
       relativePath: resolution.relativePath,
       absolutePath: resolution.absolutePath,
       content: entry.content,
-      existed: resolution.existed || await pathExists(resolution.absolutePath)
+      existed: resolution.existed || await pathExists(resolution.absolutePath),
+      rootPath: resolution.rootPath
     });
   }
 
-  return { createOperations, deleteOperations, skippedOperations };
+  return { roots, createOperations, deleteOperations, skippedOperations };
 }
 
 /**
@@ -104,11 +123,19 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
  * Producers: clipboardFormat.ts buildPayloadInternal ("File skipped"), gitCopy/graphCopy.
  */
 function isPlaceholderBody(content: string): boolean {
-  const body = content.trim();
-  if (body.includes('\n')) return false;
-  return body.startsWith('// File skipped: ') ||
-    body === '// Unable to read file content' ||
-    body === '// Error reading file content';
+  // The FIRST line, not the whole body. Every producer emits the placeholder as exactly
+  // one line, so anything after it is trailing noise — and requiring a single-line body
+  // meant any such noise (a configured footer, a stray line from a hand-edited payload)
+  // switched the guard off and let a ~50-byte stub overwrite the real file. Testing the
+  // first line is receiver-independent: no setting, no sender, no tool can turn it off. The accepted cost: a real file whose FIRST line is one of these three markers is now skipped. `// File skipped: ` is a string this tool invents, but `// Unable to read file content` and `// Error reading file content` are plausible human comments — that part is a real, if narrow, false positive.
+  // asciiTrim, not String.trim(): the two stdlibs disagree on U+001C-U+001F and U+FEFF,
+  // and here that disagreement decided whether a destructive write happened.
+  const body = asciiTrim(content);
+  const break_ = body.indexOf('\n');
+  const first = asciiTrim(break_ < 0 ? body : body.slice(0, break_));
+  return first.startsWith('// File skipped: ') ||
+    first === '// Unable to read file content' ||
+    first === '// Error reading file content';
 }
 
 export async function executeRestorePlan(
@@ -131,7 +158,9 @@ export async function executeRestorePlan(
   // that rare case so the outcome is deterministic; otherwise both would race.
   const paths = plan.createOperations.map(op => op.absolutePath);
   const concurrency = hasPathDependencies(paths) ? 1 : 16;
-  for await (const outcome of mapInOrder(plan.createOperations, concurrency, runCreate(options))) {
+  // The plan's FULL root set, not just the roots that happen to appear on create ops:
+  // narrowing it refused a legitimate multi-root write that plan time had allowed.
+  for await (const outcome of mapInOrder(plan.createOperations, concurrency, runCreate(plan.roots, options))) {
     switch (outcome.kind) {
       case 'created': result.createdCount++; break;
       case 'overwritten': result.overwrittenCount++; break;
@@ -141,6 +170,12 @@ export async function executeRestorePlan(
   }
 
   for (const operation of plan.deleteOperations) {
+    // Same window, more destructive op: a symlink appearing between plan and execute must
+    // not turn a contained target into one outside the workspace.
+    if (escapesAllRoots(plan.roots, operation.absolutePath)) {
+      result.errors.push(`${operation.relativePath}: unsafe path`);
+      continue;
+    }
     try {
       if (await pathExists(operation.absolutePath)) {
         await deleteFile(operation.absolutePath);
@@ -174,10 +209,25 @@ type CreateOutcome =
   | { kind: 'error'; message: string };
 
 function runCreate(
+  roots: string[],
   options: { overwriteExisting: boolean; skipExisting: boolean }
 ): (operation: CreateOperation) => Promise<CreateOutcome> {
   return async operation => {
     try {
+      // Containment was checked when the plan was built, and the user then clicked through
+      // two or three modal dialogs. A symlink that appeared in between turned an allowed
+      // target into one outside the workspace, and the write followed it. Re-check at the
+      // last possible moment; the plan-time check stays, so a refusal here is only ever a
+      // race.
+      if (escapesAllRoots(roots, operation.absolutePath)) {
+        return { kind: 'error', message: `${operation.relativePath}: unsafe path` };
+      }
+      // Re-check the encoding too. A plan-time verdict is a verdict on the bytes that were
+      // there THEN; the user has clicked through modal dialogs since, and the file may have
+      // been replaced in between.
+      if (await mustNotOverwrite(operation.absolutePath)) {
+        return { kind: 'skipped' };
+      }
       const existing = await existingKind(operation.absolutePath);
       if (existing === 'directory') {
         return { kind: 'skipped' };

@@ -2,7 +2,10 @@ import type { ChangeTypeLabel, PayloadFile } from './clipboardFormat.js';
 import { buildGitPayload } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
 import { DELETED_FILE_MARKER, mapGitStatusToChangeType } from './gitCopy.js';
+import { fileMatchesFilters } from './filterMatcher.js';
+import type { FilterRule } from './settings.js';
 import { readRefContent, type ContentRepo } from './gitContent.js';
+import { toClipboardPathFromRoots } from './pathResolver.js';
 
 // Each file's content comes from one `git show` subprocess; fan them out so a
 // large selection doesn't run them strictly one-at-a-time.
@@ -32,6 +35,14 @@ export interface GraphCopySettings {
   maxFileSizeKB: number;
   fileCountLimit: number;
   setMaxFileCount: boolean;
+  // The ordinary filters. This surface had no filter fields at all, so an
+  // `EXCLUDE PATH secrets.env` rule held on the SCM and History entries and silently did
+  // nothing here — the same rule, the same repo, a different answer depending on which
+  // view the user copied from. Optional so existing callers keep compiling with filters off.
+  useFilters?: boolean;
+  useIncludeFilters?: boolean;
+  useExcludeFilters?: boolean;
+  filterRules?: FilterRule[];
 }
 
 export interface GraphCopyDeps {
@@ -44,6 +55,13 @@ export interface GraphCopyDeps {
   // show() calls. Returns relativePath -> content (undefined for missing/binary).
   // Optional: when absent (or on spawn failure) the per-file reader is used.
   readBatch?(repoRootFsPath: string, hash: string, relativePaths: string[]): Promise<Map<string, string | undefined>>;
+  /**
+   * The workspace folders, in order — the same list Paste & Restore resolves against.
+   * A payload spanning repositories must label its paths the way THIS list says, because
+   * that is the only labelling the restore side can read back. Optional; without it a
+   * multi-repo payload falls back to repo basenames, which restore cannot align.
+   */
+  workspaceRoots?: string[];
   settings: GraphCopySettings;
 }
 
@@ -51,6 +69,8 @@ export interface GraphCopyResult {
   text: string;
   copiedFileCount: number;
   skippedFileSizeCount: number;
+  /** Binary, non-UTF-8 or unreadable — dropped, and previously without a word. */
+  skippedUnreadableCount: number;
   // The files dropped for exceeding maxFileSizeKB, so the caller can list them
   // instead of only showing a count.
   skippedFiles: Array<{ path: string; bytes: number }>;
@@ -64,6 +84,27 @@ function joinFsPath(root: string, relativePath: string): string {
 
 interface PreparedFile {
   clipboardPath: string;
+  /**
+   * The path relative to ITS OWN repo, kept separate from clipboardPath because a
+   * multi-repo payload prefixes the latter with the repo basename. Joining that prefixed
+   * path onto the repo root produced `<root>/<repoName>/<path>`, a path that exists
+   * nowhere, so every absolute-path filter rule silently stopped matching.
+   */
+  relativePath: string;
+  /**
+   * What the FILTER rules are matched against — always workspace-relative, and therefore
+   * NOT the same string as clipboardPath.
+   *
+   * The two were one field, so a single-repo graph copy filtered against the repo-relative
+   * header (`secret.txt`) while SCM and History filter against the workspace-relative path
+   * (`beta/secret.txt`): an `EXCLUDE PATH beta/secret.txt` rule held everywhere except
+   * here. The header must stay repo-relative — the `clipcode-root` line names that repo and
+   * the two have to describe the same base — so the filter needs its own path. IntelliJ has
+   * always kept them apart (CopyPathFormatter.relativeFilterPath vs toClipboardPath).
+   */
+  filterPath: string;
+  /** Carried so dedupe is per repo — two repos legitimately hold the same relative path. */
+  repoRootFsPath: string;
   changeType: ChangeTypeLabel;
   kind: 'deleted' | 'missing' | 'content';
   content?: string;
@@ -75,6 +116,40 @@ function batchKey(repoRootFsPath: string, relativePath: string): string {
 
 function baseNameOf(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? '';
+}
+
+/**
+ * The clipboard path for a payload that spans repositories.
+ *
+ * Prefixing EVERY repo with its basename — the first attempt at the same-name collision —
+ * produced a labelling no other surface uses and restore cannot read: with workspace roots
+ * `[alpha, beta]`, `alpha/secret.txt` resolved to `alpha/alpha/secret.txt`, and an
+ * `EXCLUDE PATH secret.txt` rule that held on the SCM and History entries missed it here.
+ * Every other surface — those two, and IntelliJ's GitClipboardPayloadBuilder — labels via
+ * the workspace roots: the PRIMARY root's files stay unlabelled, the others carry their
+ * label. Use the same function they do. Single-repo payloads keep their repo-relative
+ * paths (and their `clipcode-root` line, which names that repo) untouched.
+ */
+function multiRepoClipboardPath(
+  workspaceRoots: string[] | undefined,
+  repoRootFsPath: string,
+  relativePath: string
+): string {
+  if (!workspaceRoots?.length) return `${baseNameOf(repoRootFsPath)}/${relativePath}`;
+  return workspaceRelativePath(workspaceRoots, repoRootFsPath, relativePath);
+}
+
+/**
+ * The workspace-relative spelling every other copy surface filters against. Falls back to
+ * the repo-relative path only when there is no workspace to anchor on.
+ */
+function workspaceRelativePath(
+  workspaceRoots: string[] | undefined,
+  repoRootFsPath: string,
+  relativePath: string
+): string {
+  if (!workspaceRoots?.length) return relativePath;
+  return toClipboardPathFromRoots(workspaceRoots, joinFsPath(repoRootFsPath, relativePath));
 }
 
 // The repo folder name shared by every file, or undefined if they span repos.
@@ -127,14 +202,42 @@ async function prepareFile(
   deps: GraphCopyDeps,
   payload: GraphCopyPayload,
   file: GraphCopyFile,
-  batch: Map<string, string | undefined>
+  batch: Map<string, string | undefined>,
+  multiRepo: boolean
 ): Promise<PreparedFile> {
   // §5.0:R/C 帶相似度時截到字首後再對應
   const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
-  const clipboardPath = file.relativePath;
+  const repoRootFsPath = file.repoRootFsPath;
+  // Two repositories legitimately hold the same relative path. Emitting both as a bare
+  // `a.txt` produced two identical headers, and restore then pointed both at one
+  // destination — the second repository's file was never written. IntelliJ labels the
+  // non-primary root (`other/b.ts`); do the same when the payload spans repositories.
+  const clipboardPath = multiRepo
+    ? multiRepoClipboardPath(deps.workspaceRoots, repoRootFsPath, file.relativePath)
+    : file.relativePath;
+  const filterPath = workspaceRelativePath(deps.workspaceRoots, repoRootFsPath, file.relativePath);
 
   if (changeType === 'DELETED') {
-    return { clipboardPath, changeType, kind: 'deleted' };
+    // The PRE-DELETION content, not a bare marker: that is what IntelliJ puts on the
+    // clipboard on every path, and what this tool's own SCM path does. The marker stays as
+    // the fallback when the parent revision cannot be read (a root commit, a shallow
+    // boundary). Restore is unaffected either way — a [DELETED] label discards the body.
+    const repo = deps.resolveRepo(repoRootFsPath);
+    // EVERY parent, not just the first. A merge can delete a file that only the second
+    // parent ever had, and asking `hash^` alone then found nothing and fell back to the
+    // marker — while the History surface, which tries all parents, returned the body.
+    const parentRefs = payload.hash === UNCOMMITTED_HASH
+      ? ['HEAD']
+      : [`${payload.hash}^1`, `${payload.hash}^2`, `${payload.hash}^3`];
+    let before: string | undefined;
+    if (repo) {
+      const absolute = joinFsPath(repoRootFsPath, file.relativePath);
+      for (const ref of parentRefs) {
+        before = await readRefContent(repo, ref, absolute);
+        if (before !== undefined) break;
+      }
+    }
+    return { clipboardPath, filterPath, relativePath: file.relativePath, repoRootFsPath, changeType, kind: 'deleted', content: before };
   }
 
   const absolutePath = joinFsPath(file.repoRootFsPath, file.relativePath);
@@ -151,11 +254,11 @@ async function prepareFile(
     // doesn't know this repo, there's nothing left to try → missing.
     const repo = deps.resolveRepo(file.repoRootFsPath);
     if (!repo) {
-      return { clipboardPath, changeType, kind: 'missing' };
+      return { clipboardPath, filterPath, relativePath: file.relativePath, repoRootFsPath, changeType, kind: 'missing' };
     }
     content = await readRefContent(repo, payload.hash, absolutePath); // fallback: `git show <hash>:<path>`
   }
-  return { clipboardPath, changeType, kind: 'content', content };
+  return { clipboardPath, filterPath, relativePath: file.relativePath, repoRootFsPath, changeType, kind: 'content', content };
 }
 
 export async function buildGraphCopyPayload(
@@ -165,6 +268,7 @@ export async function buildGraphCopyPayload(
   const { settings } = deps;
   const files: PayloadFile[] = [];
   const skippedFiles: Array<{ path: string; bytes: number }> = [];
+  let skippedUnreadableCount = 0;
   let copiedFileCount = 0;
   let skippedFileSizeCount = 0;
   let missingRepoCount = 0;
@@ -177,16 +281,25 @@ export async function buildGraphCopyPayload(
   // ponytail: when the file-count limit trips mid-batch, the cat-file already read
   // every blob (cheap) — only fallback per-file reads are wasted, bounded to one
   // READ_CONCURRENCY window.
+  const multiRepo = new Set(payload.files.map(f => f.repoRootFsPath)).size > 1;
   const batch = await prefetchBatch(deps, payload);
-  const prepared = mapInOrder(payload.files, READ_CONCURRENCY, file => prepareFile(deps, payload, file, batch));
+  const prepared = mapInOrder(payload.files, READ_CONCURRENCY, file => prepareFile(deps, payload, file, batch, multiRepo));
+  // The SCM path and IntelliJ both dedupe by path; this one did not, so a path selected in
+  // both the staged and the unstaged tree landed in the payload twice. Keyed by REPO +
+  // path: a multi-repo payload legitimately holds two `src/index.ts`, and keying on the
+  // relative path alone would silently drop one of them.
+  const seen = new Set<string>();
   for await (const file of prepared) {
+    const key = `${file.repoRootFsPath}\u0000${file.clipboardPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
       fileLimitReached = true;
       break;
     }
 
     if (file.kind === 'deleted') {
-      files.push({ path: file.clipboardPath, content: DELETED_FILE_MARKER, changeType: file.changeType });
+      files.push({ path: file.clipboardPath, content: file.content ?? DELETED_FILE_MARKER, changeType: file.changeType });
       copiedFileCount++;
       continue;
     }
@@ -196,8 +309,25 @@ export async function buildGraphCopyPayload(
       continue;
     }
 
+    if (settings.useFilters && !fileMatchesFilters(
+      file.filterPath,
+      settings.filterRules ?? [],
+      settings.useIncludeFilters === true,
+      settings.useExcludeFilters === true,
+      // The file's OWN relative path — clipboardPath carries the repo-basename prefix in
+      // a multi-repo payload, and joining that produced `<root>/<repoName>/<path>`.
+      joinFsPath(file.repoRootFsPath, file.relativePath)
+    )) {
+      continue;
+    }
+
     const content = file.content;
-    if (content === undefined) continue; // 二進位/讀取失敗 → 跳過
+    if (content === undefined) {
+      // Binary, non-UTF-8 or unreadable. Counting it is the difference between "this file
+      // could not be copied" and the file simply not being there.
+      skippedUnreadableCount++;
+      continue;
+    }
 
     const size = Buffer.byteLength(content, 'utf8');
     if (size > settings.maxFileSizeKB * 1024) {
@@ -223,5 +353,5 @@ export async function buildGraphCopyPayload(
     sourceRoot: singleRepoRoot(payload.files)
   });
 
-  return { text, copiedFileCount, skippedFileSizeCount, skippedFiles, fileLimitReached, missingRepoCount };
+  return { text, copiedFileCount, skippedFileSizeCount, skippedUnreadableCount, skippedFiles, fileLimitReached, missingRepoCount };
 }

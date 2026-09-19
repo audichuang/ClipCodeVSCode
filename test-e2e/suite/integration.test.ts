@@ -84,7 +84,13 @@ describe('Snipcode × git-graph-plus integration', () => {
     assert.match(clip, /\/\/ file: \[MODIFIED\] a\.ts/, 'modified header');
     assert.match(clip, /export const a = 2;/, 'modified content at commit B');
     assert.match(clip, /\[DELETED\] del\.ts/, 'deleted header');
-    assert.match(clip, /This file has been deleted/, 'deleted marker');
+    // Deliberately inverted: a deleted file now carries its PRE-DELETION content, which is
+    // what IntelliJ has always put on the clipboard and what this tool's SCM path already
+    // did — only Graph, PR and History emitted the bare marker, so the same deletion looked
+    // different depending on which surface copied it. The marker is the fallback for when
+    // no parent still has the file (a root commit, a shallow boundary).
+    assert.match(clip, /export const del = true;/, 'deleted file carries its pre-deletion content');
+    assert.doesNotMatch(clip, /This file has been deleted/, 'the marker is only a fallback');
     assert.match(clip, /\[MOVED\] new\.ts/, 'moved header');
     assert.match(clip, /\[NEW\] added\.ts/, 'new header');
   });
