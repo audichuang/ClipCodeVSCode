@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { asciiTrim } from './clipboardFormat.js';
 
 export interface ResolvedRestoreTarget {
   ok: true;
@@ -29,6 +30,29 @@ interface TargetCandidate {
   root: RootEntry;
   target: string;
   rootRelativePath: string;
+}
+
+/**
+ * The `// clipcode-root:` value: the basename of the base the PATHS in this payload are
+ * relative to.
+ *
+ * Its only job is to let Paste & Restore line folder levels up, which works precisely when
+ * the name and the paths describe the same base. Naming the git repository root instead —
+ * while the headers stayed workspace-relative — broke exactly that: with the workspace
+ * opened at `repo/src`, a payload said root `repo` and path `a.txt`, so restoring into
+ * `repo` saw the name already matching and offered no adjustment, landing the file at
+ * `repo/a.txt` instead of `repo/src/a.txt`. The graph surface is consistent the other way
+ * round — it emits repo-relative paths AND the repo root — and keeps its own rule.
+ *
+ * Multiple roots means the paths are labelled per root, so no single name describes them
+ * and none is emitted. Mirror of ClipboardPathResolver.singleRootName.
+ */
+export function sourceRootName(roots: string[]): string | undefined {
+  return roots.length === 1 ? basenameOf(roots[0]) : undefined;
+}
+
+function basenameOf(fsPath: string): string | undefined {
+  return normalizeSystemPath(fsPath).split('/').filter(Boolean).pop();
 }
 
 export function toClipboardPath(workspaceRoot: string, absolutePath: string): string {
@@ -138,6 +162,11 @@ class PathResolver {
       return this.resolveWriteCandidate(absoluteCandidate, absoluteCandidate.rootRelativePath);
     }
 
+    const suffixCandidate = this.crossMachineSuffixCandidate(rawPath);
+    if (suffixCandidate) {
+      return this.resolveWriteCandidate(suffixCandidate, suffixCandidate.rootRelativePath);
+    }
+
     const relativePath = this.toRelativeProjectPath(rawPath);
     if (!relativePath) {
       return { ok: false, reason: 'unsafe path' };
@@ -184,12 +213,29 @@ class PathResolver {
     }, relativePath, false);
   }
 
+  private resolveDeleteCandidate(
+    candidate: TargetCandidate,
+    relativePath: string
+  ): RestoreTargetResolution {
+    if (escapesAllRoots(this.orderedRoots.map(root => root.path), candidate.target)) {
+      return { ok: false, reason: 'unsafe path', relativePath };
+    }
+    return resolvedTarget(candidate, relativePath, true);
+  }
+
   resolveDeleteTarget(rawPath: string): RestoreTargetResolution {
     const absoluteCandidate = this.absoluteRootCandidate(rawPath);
     if (absoluteCandidate) {
       return isExistingFile(absoluteCandidate.target)
-        ? resolvedTarget(absoluteCandidate, absoluteCandidate.rootRelativePath, true)
+        ? this.resolveDeleteCandidate(absoluteCandidate, absoluteCandidate.rootRelativePath)
         : { ok: false, reason: 'missing path', relativePath: absoluteCandidate.rootRelativePath };
+    }
+
+    const suffixCandidate = this.crossMachineSuffixCandidate(rawPath);
+    if (suffixCandidate) {
+      return isExistingFile(suffixCandidate.target)
+        ? this.resolveDeleteCandidate(suffixCandidate, suffixCandidate.rootRelativePath)
+        : { ok: false, reason: 'missing path', relativePath: suffixCandidate.rootRelativePath };
     }
 
     const relativePath = this.toRelativeProjectPath(rawPath);
@@ -204,7 +250,7 @@ class PathResolver {
     if (explicitCandidates.length === 1) {
       const candidate = explicitCandidates[0];
       return isExistingFile(candidate.target)
-        ? resolvedTarget(candidate, candidate.rootRelativePath, true)
+        ? this.resolveDeleteCandidate(candidate, candidate.rootRelativePath)
         : { ok: false, reason: 'missing path', relativePath: candidate.rootRelativePath };
     }
 
@@ -218,7 +264,7 @@ class PathResolver {
       return ambiguous(relativePath, existingCandidates);
     }
 
-    return resolvedTarget(existingCandidates[0], relativePath, true);
+    return this.resolveDeleteCandidate(existingCandidates[0], relativePath);
   }
 
   private toRelativeProjectPath(rawPath: string): string | undefined {
@@ -317,7 +363,19 @@ class PathResolver {
       .some(rootName => segmentsMatch(rootName, firstSegment, isWindowsStylePath(relativePath)));
   }
 
-  private crossMachineSuffixRelativePath(absolutePath: string): string | undefined {
+  /**
+   * The suffix match already determines a UNIQUE target root. Returning only a relative
+   * path threw that away, so the caller resolved it against the PRIMARY root: an external
+   * root's file was written over the primary repo's same-named file and the real target
+   * was never created. Both resolvers take this candidate; the string form stays in
+   * toRelativeProjectPath for its own label and ambiguity fallbacks.
+   */
+  private crossMachineSuffixCandidate(rawPath: string): TargetCandidate | undefined {
+    // Absolute only — this is the "payload came from another machine" fallback. Without
+    // the guard an ordinary relative path whose first segment happens to be a root name
+    // short-circuits the explicit-label and restore-base logic (Kotlin guards on it).
+    const absolutePath = normalizeSystemPath(rawPath);
+    if (!absolutePath || !isAbsolutePath(absolutePath)) return undefined;
     const segments = absolutePath.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '').split('/').filter(Boolean);
     const candidates: TargetCandidate[] = [];
     const windowsStylePath = isWindowsStylePath(absolutePath) ||
@@ -340,8 +398,16 @@ class PathResolver {
 
     const targetKeys = new Set(candidates.map(candidate => pathKey(candidate.target)));
     if (targetKeys.size !== 1) return undefined;
-    return candidates.find(candidate => candidate.root.isPrimary)?.rootRelativePath ??
-      candidates[0]?.rootRelativePath;
+    return candidates.find(candidate => candidate.root.isPrimary) ?? candidates[0];
+  }
+
+  private crossMachineSuffixRelativePath(absolutePath: string): string | undefined {
+    const winner = this.crossMachineSuffixCandidate(absolutePath);
+    if (!winner) return undefined;
+    if (!winner.root.isPrimary && winner.root.clipboardLabel && !winner.root.hasAmbiguousLabel) {
+      return `${winner.root.clipboardLabel}/${winner.rootRelativePath}`;
+    }
+    return winner.rootRelativePath;
   }
 
   private resolveWriteCandidate(
@@ -349,7 +415,7 @@ class PathResolver {
     relativePath: string,
     existed: boolean = isExistingFile(candidate.target)
   ): RestoreTargetResolution {
-    if (hasSymlinkComponent(candidate.root.path, candidate.target)) {
+    if (escapesAllRoots(this.orderedRoots.map(root => root.path), candidate.target)) {
       return { ok: false, reason: 'unsafe path', relativePath };
     }
     return resolvedTarget(candidate, relativePath, existed);
@@ -380,7 +446,11 @@ function ambiguous(relativePath: string, candidates: TargetCandidate[]): Rejecte
 }
 
 function sanitizeRelativePath(value: string): string | undefined {
-  const normalized = value.trim().replaceAll('\\', '/').replace(/\/+/g, '/').replace(/^\/+/, '');
+// asciiTrim, not String.trim(): the two stdlibs disagree on U+001C-U+001F and U+FEFF, and
+// here that disagreement decided the FILENAME each tool wrote — `// file: a.txt\u001C`
+// restored as `a.txt` in one and `a.txt\u001C` in the other. The parsers were aligned
+// first; without this the divergence just moved one layer down.
+  const normalized = asciiTrim(value).replaceAll('\\', '/').replace(/\/+/g, '/').replace(/^\/+/, '');
   if (!normalized || isAbsolutePath(normalized)) return undefined;
   const segments = normalized.split('/').filter(segment => segment && segment !== '.');
   if (segments.length === 0) return undefined;
@@ -389,7 +459,7 @@ function sanitizeRelativePath(value: string): string | undefined {
 }
 
 function normalizeSystemPath(value: string): string {
-  return trimTrailingSlash(value.trim().replaceAll('\\', '/').replace(/\/+/g, '/'));
+  return trimTrailingSlash(asciiTrim(value).replaceAll('\\', '/').replace(/\/+/g, '/'));
 }
 
 function trimTrailingSlash(value: string): string {
@@ -443,21 +513,104 @@ function isExistingFile(filePath: string): boolean {
   }
 }
 
-function hasSymlinkComponent(rootPath: string, targetPath: string): boolean {
-  const relativePath = path.relative(rootPath, targetPath);
-  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) return false;
+/**
+ * True when the target's REAL location is no longer inside any workspace root — i.e. a
+ * directory symlink inside the workspace points out of it. Deletion had no check at all,
+ * so `[DELETED] link/keep.txt` really removed a file outside the workspace; writes refused
+ * ANY symlink component, which locked out every pnpm-style workspace and disagreed with
+ * IntelliJ. Containment is the property that matters: it stops the escape without refusing
+ * links that stay inside. Both sides of the ROOT are resolved too — a workspace reached
+ * through a symlinked path (macOS /var and /tmp, automounted homes) would otherwise read
+ * as an escape from itself and refuse everything. Mirror of
+ * ClipboardPathResolver.escapesAllRoots.
+ */
+export function escapesAllRoots(roots: string[], targetPath: string): boolean {
+  const real = containmentTarget(targetPath);
+  // undefined means containment could not be established — refuse. Failing OPEN here is
+  // how a 42-level path stepped over the symlink above it and wrote outside the workspace.
+  if (real === undefined) return true;
+  return !roots.map(realOrSelf).some(root => isContained(real, root));
+}
 
-  const segments = relativePath.split(path.sep).filter(Boolean);
-  let current = rootPath;
-  for (const segment of segments) {
-    current = path.join(current, segment);
-    try {
-      if (lstatSync(current).isSymbolicLink()) return true;
-    } catch {
-      return false;
-    }
+/**
+ * Containment on NATIVE paths, via path.relative — never on slash-normalised strings.
+ * normalizeSystemPath rewrites `\` to `/`, which is right for clipboard paths and wrong
+ * here: a backslash is an ordinary filename character on POSIX, so a real sibling
+ * directory named `repo\outside` was rewritten into `repo/outside` and read as being
+ * inside `repo`. The write then landed in the sibling.
+ */
+function isContained(realTarget: string, realRoot: string): boolean {
+  const relative = path.relative(realRoot, realTarget);
+  if (relative === '') return true;
+  if (path.isAbsolute(relative)) return false;
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`);
+}
+
+/**
+ * Where this path REALLY lands, with every symlink on it resolved, or `undefined` when
+ * that cannot be established.
+ *
+ * realpath does the whole job when the path exists, and the kernel is the only thing that
+ * gets symlink resolution right. When it does not exist — a file about to be created — the
+ * deepest existing ancestor is resolved and the remaining names appended, and the first
+ * name below it, which may be a DANGLING symlink, is read relative to that RESOLVED parent.
+ *
+ * Three things here were each wrong once. Skipping the leaf link meant
+ * `[DELETED] link/keep.txt` really removed a file outside the workspace. Resolving the
+ * link text against the path we walked IN by — rather than against the link's real parent
+ * — fabricated an in-workspace answer whenever a directory symlink was on the way in.
+ * And counting MISSING ANCESTORS against a fixed budget meant a path with more missing
+ * levels than the budget gave up before reaching the link above them, and gave up by
+ * ALLOWING: 42 nonexistent directories under an escaping link wrote a whole tree outside
+ * the workspace. The ancestor walk is therefore unbounded — it terminates at the
+ * filesystem root on its own — and only symlink HOPS are capped, because only they can
+ * cycle.
+ */
+function containmentTarget(targetPath: string, hops = 0): string | undefined {
+  const target = path.resolve(targetPath);
+  try {
+    return realpathSync(target);
+  } catch {
+    // Does not exist yet — resolve what does.
   }
-  return false;
+  if (hops > 40) return undefined; // pathological symlink nest: cannot establish, so refuse
+
+  const missing: string[] = [];
+  let probe = target;
+  for (;;) {
+    const parent = path.dirname(probe);
+    // Nothing on the path exists at all — not even a root — so there is no symlink to
+    // traverse and nothing to escape through.
+    if (!parent || parent === probe) return target;
+    missing.unshift(path.basename(probe));
+    probe = parent;
+    let realProbe: string;
+    try {
+      realProbe = realpathSync(probe);
+    } catch {
+      continue;
+    }
+    // Only the FIRST name below the deepest existing ancestor can be a dangling symlink;
+    // anything deeper does not exist at all.
+    const first = path.join(realProbe, missing[0]);
+    try {
+      if (lstatSync(first).isSymbolicLink()) {
+        const linked = path.resolve(realProbe, readlinkSync(first));
+        return containmentTarget(path.join(linked, ...missing.slice(1)), hops + 1);
+      }
+    } catch {
+      // Not a link, or unreadable — the appended names are the answer.
+    }
+    return path.join(realProbe, ...missing);
+  }
+}
+
+function realOrSelf(value: string): string {
+  try {
+    return realpathSync(path.resolve(value));
+  } catch {
+    return path.resolve(value);
+  }
 }
 
 function countValues(values: string[]): Map<string, number> {

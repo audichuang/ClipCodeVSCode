@@ -52,9 +52,16 @@ export function overlapsDirectory(directoryPath: string, rulePath: string): bool
 
 function matchesRule(relativePath: string, rule: FilterRule, absolutePath?: string): boolean {
   if (rule.type === 'PATH') {
-    return isAbsolutePath(rule.value) && absolutePath
-      ? matchesPath(absolutePath, rule.value)
-      : matchesPath(relativePath, rule.value);
+    if (isAbsolutePath(rule.value) && absolutePath) return matchesPath(absolutePath, rule.value);
+    // A file that lands outside every workspace root has NO relative identity — the callers
+    // pass its absolute path through as `relativePath` because that is what
+    // toClipboardPathFromRoots returns for it. normalizePath strips the leading `/`, so
+    // `/repo/secret.txt` used to satisfy a relative rule `repo/secret.txt` by coincidence.
+    // IntelliJ never could: CopyPathFormatter.relativeFilterPath returns null for an
+    // absolute path and the rule is skipped. Mirror that, in the one place all three copy
+    // surfaces (SCM, History, Graph) route through.
+    if (isAbsolutePath(relativePath)) return false;
+    return matchesPath(relativePath, rule.value);
   }
   return matchesPattern(fileName(relativePath), rule.value);
 }

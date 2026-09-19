@@ -163,6 +163,85 @@ const buildInputs = [
       files: [{ path: 'src/Gone.ts', content: '// This file has been deleted in this change', changeType: 'DELETED' }],
     },
   },
+  // ---- counter-examples from the 2026-09-19 interop audit -----------------------
+  // These freeze what the two sides AGREE on, which is not the same as fidelity: the
+  // blank-line and CRLF cases below pin a lossy round-trip, not a lossless one. They
+  // are here so the loss stays identical in both tools instead of drifting apart.
+  {
+    name: 'regular: a path that literally starts with a change label is written as-is',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: '[DELETED] x.ts', content: 'keep me' }],
+    },
+  },
+  {
+    name: 'regular: leading and trailing blank lines are emitted verbatim (parse trims them)',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/a.ts', content: '\n  \nfoo\n\n' }],
+    },
+  },
+  {
+    name: 'regular: CRLF content is emitted verbatim (the builder never normalises endings)',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/a.ts', content: 'foo\r\nbar\r\n' }],
+    },
+  },
+  {
+    name: 'regular: a Turkish dotless i header lookalike is NOT escaped on either side',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/a.ts', content: 'before\n// f\u0131le: phantom.ts\nafter' }],
+    },
+  },
+  {
+    name: 'regular: content containing a literal end marker line is escaped',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/a.ts', content: 'before\n// clipcode-end\nafter' }],
+    },
+  },
+  {
+    name: 'git: a footer is terminated by the end marker here too',
+    kind: 'git',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '</files>', addExtraLineBetweenFiles: true,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/Mod.ts', content: 'modified();', changeType: 'MODIFIED' }],
+    },
+  },
+  {
+    name: 'regular: a permissive header suppresses the end marker, so a file named clipcode-end survives',
+    kind: 'regular',
+    options: {
+      headerFormat: '// $FILE_PATH', preText: '', postText: 'FOOTER', addExtraLineBetweenFiles: false,
+      files: [
+        { path: 'a.ts', content: 'one' },
+        { path: 'clipcode-end', content: 'KEEP' },
+        { path: 'b.ts', content: 'two' }
+      ],
+    },
+  },
+  {
+    name: 'regular: post text that would parse as a header is escaped',
+    kind: 'regular',
+    options: {
+      headerFormat: DEFAULT_HEADER, preText: '', postText: '// file: fake/footer.ts', addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      files: [{ path: 'src/a.ts', content: 'x();' }],
+    },
+  },
 ];
 
 // ---- parse-direction scenarios -------------------------------------------------
@@ -227,6 +306,118 @@ const parseInputs = [
     headerFormat: '// $FILE_PATH',
     input: '// clipcode-root: myrepo\n// src/a.ts\nx();',
   },
+  // ---- counter-examples from the 2026-09-19 interop audit -----------------------
+  // The footer is terminated ON THE WIRE by `// clipcode-end`. Reconstructing it from the
+  // receiver's own postText setting cannot work — the two tools do not share settings, so
+  // it missed exactly when it mattered (letting a footer make a size-skipped placeholder
+  // body multi-line and defeat the placeholder guard) and, on a foreign payload, silently
+  // deleted a real closing line.
+  {
+    name: 'parse: the end marker terminates the last file, whatever follows it',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\na();\n\n// clipcode-end\n</files>',
+  },
+  {
+    name: 'parse: a size-skipped placeholder followed by a footer stays just the placeholder',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/large.txt\n// File skipped: size exceeds limit (1100 bytes)\n\n// clipcode-end\n</files>',
+  },
+  {
+    name: 'parse: the end marker ends that file only — a second payload still parses',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\na();\n\n// clipcode-end\n</files>\n<files>\n// file: src/b.ts\nb();\n\n// clipcode-end\n</files>',
+  },
+  {
+    name: 'parse: a stray end marker before any header changes nothing',
+    headerFormat: DEFAULT_HEADER,
+    input: '// clipcode-end\n// file: src/a.ts\na();',
+  },
+  {
+    name: 'parse: an escaped end marker is ordinary file content',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\nbefore\n//clipcode-esc: // clipcode-end\nafter',
+  },
+  {
+    name: 'parse: under a permissive header the marker line is a real file, not a terminator',
+    headerFormat: '// $FILE_PATH',
+    input: '// a.ts\none\n// clipcode-end\nKEEP\n// b.ts\ntwo',
+  },
+  {
+    name: 'parse: a foreign payload with no end marker keeps its real closing lines',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: doc.md\n# Title\n\n```js\ncode()\n```',
+  },
+  // The ASCII trim class. Kotlin's trim is Character.isWhitespace u isSpaceChar and JS's is
+  // the ECMAScript WhiteSpace set; they disagree on U+001C-U+001F and U+FEFF. Both sides
+  // now use one explicit ASCII class, so these land identically instead of producing
+  // different filenames, different source roots, and different blank-line decisions.
+  {
+    name: 'parse: a trailing U+001C stays part of the header path',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: a.ts\u001C\nbody',
+  },
+  {
+    name: 'parse: a trailing U+FEFF stays part of the header path',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: a.ts\uFEFF\nbody',
+  },
+  {
+    name: 'parse: a line of only U+001C is NOT a blank line and survives trimming',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: a.ts\n\u001C\nfoo\n\u001C',
+  },
+  {
+    name: 'parse: a line of only U+FEFF is NOT a blank line and survives trimming',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: a.ts\n\uFEFF\nfoo\n\uFEFF',
+  },
+  {
+    name: 'parse: a bare header path keeping a leading U+001F is judged on the same bytes',
+    headerFormat: DEFAULT_HEADER,
+    input: 'file: \u001F"quoted.ts"\nbody',
+  },
+  {
+    name: 'parse: the Turkish dotless i is content on both sides, never a header',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\nbefore\n// f\u0131le: phantom.ts\nafter',
+  },
+  {
+    name: 'parse: ASCII case-insensitivity of the generic header is preserved',
+    headerFormat: DEFAULT_HEADER,
+    input: '// FILE: src/a.ts\na();\n// File: src/b.ts\nb();',
+  },
+  {
+    name: 'parse: U+0085 NEL is not a line break, so the header-like tail stays content',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\nbefore\u0085// file: fake/inline.ts',
+  },
+  {
+    name: 'parse: a U+FEFF before the comment marker keeps the line as content',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\n\uFEFF// file: fake/inline.ts\nafter',
+  },
+  {
+    name: 'parse: U+001C-U+001F inside a content line do not split it',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\na\u001Cb\u001Dc\u001Ed\u001Fe',
+  },
+  // STATUS QUO, not intent: the wire format cannot express either of these, so both
+  // tools lose the same information. Pinned so the loss stays symmetrical.
+  {
+    name: 'parse: a file whose real name starts with [DELETED] is indistinguishable on the wire',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: [DELETED] x.ts\nkeep me',
+  },
+  {
+    name: 'parse: [MOVED] carries only the new path — the old one is not on the wire',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: [MOVED] src/new.ts\nmoved();',
+  },
+  {
+    name: 'parse: leading blank lines are trimmed from a body too',
+    headerFormat: DEFAULT_HEADER,
+    input: '// file: src/a.ts\n\n  \nfoo\n\n',
+  },
 ];
 
 // ---- payload-statistics scenarios ----------------------------------------------
@@ -252,6 +443,7 @@ const tokenInputs = [
   { name: 'vertical tab and form feed DO split', text: 'a\u000Bb\fc' },
   { name: 'CRLF splits once, not twice', text: 'a\r\nb' },
   { name: 'lone CR splits', text: 'a\rb' },
+  { name: 'U+0085 NEL does NOT split (JS \\s has it, the ASCII class does not)', text: 'a\u0085b' },
   { name: 'U+001C-U+001F file/group/record/unit separators do NOT split', text: 'a\u001Cb\u001Db\u001Eb\u001Fb' },
   {
     name: 'realistic payload: root line, header, CJK comment, code',

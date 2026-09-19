@@ -1,6 +1,13 @@
 import type { ChangeTypeLabel } from './clipboardFormat.js';
 
 export const DELETED_FILE_MARKER = '// This file has been deleted in this change';
+/**
+ * Stands in for content the requested revision could not supply. IntelliJ emits the same
+ * string (GitClipboardPayloadBuilder), and both restore planners recognise it and refuse
+ * to write it over a real file — so the file is VISIBLY absent rather than silently
+ * missing, and never replaced by content from somewhere else.
+ */
+export const UNREADABLE_FILE_MARKER = '// Unable to read file content';
 
 const NEW_STATUSES = new Set([1, 4, 7, 9]);
 const DELETED_STATUSES = new Set([2, 6, 14, 15, 17]);

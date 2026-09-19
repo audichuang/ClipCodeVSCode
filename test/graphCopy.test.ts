@@ -269,3 +269,150 @@ test('uncommitted copy works via readWorking even when resolveRepo cannot match'
   assert.equal(r.copiedFileCount, 1);
   assert.match(r.text, /WORKING/);
 });
+
+test('two repositories with the same relative path keep their identities', async () => {
+  const r1 = fakeRepo('/r1', { 'a.txt': 'ONE' });
+  const r2 = fakeRepo('/r2', { 'a.txt': 'TWO' });
+  const deps: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/r1' ? r1 : root === '/r2' ? r2 : undefined),
+    workspaceRoots: ['/r1', '/r2'],
+    settings
+  };
+
+  // Emitting both as a bare `a.txt` produced two identical headers, and restore then
+  // pointed both at one destination — the second repository's file was never written.
+  const result = await buildGraphCopyPayload(deps, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/r1', relativePath: 'a.txt', status: 'M' },
+      { repoRootFsPath: '/r2', relativePath: 'a.txt', status: 'M' }
+    ]
+  });
+
+  // Deliberately inverted: labelling EVERY repo fixed the collision with a scheme no
+  // other surface uses and restore cannot read back — `r1/a.txt` resolved to
+  // `/r1/r1/a.txt`. The workspace-root rule the other copy paths use leaves the PRIMARY
+  // root unlabelled and labels the rest: no collision, and it round-trips.
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] a\.txt/);
+  assert.doesNotMatch(result.text, /\[MODIFIED\] r1\/a\.txt/);
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] r2\/a\.txt/);
+  assert.equal(result.copiedFileCount, 2);
+});
+
+test('a SINGLE-repo graph copy filters against the workspace-relative path, like SCM', async () => {
+  // The header here is repo-relative (`secret.txt`) and must stay that way — the
+  // `clipcode-root` line names that repo, and the name and the paths have to describe the
+  // same base. But the user's rules are written against what every other surface shows
+  // them, which is workspace-relative (`beta/secret.txt`). Filtering on the header meant an
+  // EXCLUDE rule for a non-primary root silently did nothing on this one surface.
+  const beta = fakeRepo('/r2', { 'secret.txt': 'SECRET', 'a.txt': 'ok' });
+  const filtered: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/r2' ? beta : undefined),
+    workspaceRoots: ['/r1', '/r2'],
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: 'r2/secret.txt', enabled: true }]
+    }
+  };
+
+  const result = await buildGraphCopyPayload(filtered, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/r2', relativePath: 'secret.txt', status: 'M' },
+      { repoRootFsPath: '/r2', relativePath: 'a.txt', status: 'M' }
+    ]
+  });
+
+  assert.doesNotMatch(result.text, /SECRET/);
+  assert.equal(result.copiedFileCount, 1);
+  // The header stays repo-relative, and the root line still names the repo.
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] a\.txt/);
+  assert.match(result.text, /\/\/ clipcode-root: r2/);
+});
+
+test('a relative PATH rule matches on the graph surface exactly as it does on SCM', async () => {
+  // The real divergence: SCM/History label via the workspace roots, which leave the PRIMARY
+  // root's files UNLABELLED (`secret.txt`), while the graph surface prefixed every repo
+  // (`r1/secret.txt`). An `EXCLUDE PATH secret.txt` rule therefore held everywhere except
+  // here — the same rule, the same repo, the secret on the clipboard.
+  const r1 = fakeRepo('/r1', { 'secret.txt': 'SECRET', 'a.txt': 'ok' });
+  const r2 = fakeRepo('/r2', { 'a.txt': 'ok' });
+  const filtered: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/r1' ? r1 : root === '/r2' ? r2 : undefined),
+    workspaceRoots: ['/r1', '/r2'],
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: 'secret.txt', enabled: true }]
+    }
+  };
+
+  const result = await buildGraphCopyPayload(filtered, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/r1', relativePath: 'secret.txt', status: 'M' },
+      { repoRootFsPath: '/r1', relativePath: 'a.txt', status: 'M' },
+      { repoRootFsPath: '/r2', relativePath: 'a.txt', status: 'M' }
+    ]
+  });
+
+  assert.doesNotMatch(result.text, /SECRET/);
+  assert.equal(result.copiedFileCount, 2);
+});
+
+test('an absolute-path filter rule still matches in a multi-repo payload', async () => {
+  // The absolute path handed to the filter was built from clipboardPath, which carries the
+  // repo-basename prefix once a payload spans repositories — so the rule was tested against
+  // `/r1/r1/secrets.env`, a path that exists nowhere, and every absolute PATH rule silently
+  // stopped matching exactly where the prefix appears.
+  const r1 = fakeRepo('/r1', { 'secrets.env': 'SECRET', 'a.txt': 'ok' });
+  const r2 = fakeRepo('/r2', { 'a.txt': 'ok' });
+  const filtered: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/r1' ? r1 : root === '/r2' ? r2 : undefined),
+    workspaceRoots: ['/r1', '/r2'],
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: '/r1/secrets.env', enabled: true }]
+    }
+  };
+
+  const result = await buildGraphCopyPayload(filtered, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/r1', relativePath: 'secrets.env', status: 'M' },
+      { repoRootFsPath: '/r1', relativePath: 'a.txt', status: 'M' },
+      { repoRootFsPath: '/r2', relativePath: 'a.txt', status: 'M' }
+    ]
+  });
+
+  assert.doesNotMatch(result.text, /SECRET/);
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] a\.txt/);
+  assert.match(result.text, /r2\/a\.txt/);
+  assert.equal(result.copiedFileCount, 2);
+});
+
+test('the graph surface honours the ordinary exclude filters', async () => {
+  const repo = fakeRepo('/repo', { 'secrets.env': 'SECRET', 'src/a.ts': 'ok' });
+  const filtered: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/repo' ? repo : undefined),
+    // The same rule held on the SCM and History entries and silently did nothing here.
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: 'secrets.env', enabled: true }]
+    }
+  };
+
+  const result = await buildGraphCopyPayload(filtered, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/repo', relativePath: 'secrets.env', status: 'M' },
+      { repoRootFsPath: '/repo', relativePath: 'src/a.ts', status: 'M' }
+    ]
+  });
+
+  assert.doesNotMatch(result.text, /SECRET/);
+  assert.match(result.text, /src\/a\.ts/);
+  assert.equal(result.copiedFileCount, 1);
+});

@@ -79,6 +79,10 @@ test('builds payload with pre text, post text, extra lines, and skipped markers'
     ]
   });
 
+  // `// clipcode-end` terminates the last file's body on the wire. Without it the parser
+  // has nothing to tell file content from the footer, so `</files>` was accumulated into
+  // src/b.ts — which also made that placeholder body multi-line and disarmed the guard
+  // that stops a stub overwriting the real file.
   assert.equal(payload, `<files>
 // file: src/a.ts
 one
@@ -86,7 +90,27 @@ one
 // file: src/b.ts
 // File skipped: size exceeds limit (999 bytes)
 
+// clipcode-end
 </files>`);
+
+  // Round-trips: the footer is not content, and the marker is not a file.
+  const entries = parseClipboard(payload, '// file: $FILE_PATH');
+  assert.deepEqual(entries.map(e => e.path), ['src/a.ts', 'src/b.ts']);
+  assert.equal(entries[1].content, '// File skipped: size exceeds limit (999 bytes)');
+});
+
+test('a content line that IS the end marker round-trips as content', () => {
+  const payload = buildPayload({
+    headerFormat: '// file: $FILE_PATH',
+    preText: '',
+    postText: 'FOOTER',
+    addExtraLineBetweenFiles: false,
+    files: [{ path: 'doc.md', content: 'before\n// clipcode-end\nafter' }]
+  });
+  assert.ok(payload.includes('//clipcode-esc: // clipcode-end'), 'the literal marker must be escaped');
+  const entries = parseClipboard(payload, '// file: $FILE_PATH');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].content, 'before\n// clipcode-end\nafter', 'a real marker line must survive');
 });
 
 test('regular copy payload keeps empty pre and post slots like IntelliJ', () => {
@@ -267,4 +291,15 @@ test('git payload skips empty wrappers but keeps labels and deleted marker', () 
   assert.equal(payload, `// file: [DELETED] src/old.ts
 ${DELETED_FILE_MARKER}
 `);
+});
+
+test('the Turkish dotless i is not a header on either side', () => {
+  // Kotlin IGNORE_CASE == CASE_INSENSITIVE|UNICODE_CASE folds U+0131 onto `i`; JS /i does
+  // not. This exact line used to be content here and a header in ClipCode, so a Snipcode
+  // payload pasted into ClipCode lost everything after it into a phantom file.
+  const line = '// f\u0131le: phantom.ts';
+  assert.deepEqual(parseClipboard(line, '// file: $FILE_PATH'), [], 'must not parse as a header');
+  // ASCII case-insensitivity is preserved.
+  assert.equal(parseClipboard('// FILE: a.ts\nbody', '// file: $FILE_PATH')[0]?.path, 'a.ts');
+  assert.equal(parseClipboard('// File: b.ts\nbody', '// file: $FILE_PATH')[0]?.path, 'b.ts');
 });

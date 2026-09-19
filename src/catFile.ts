@@ -1,3 +1,5 @@
+import { decodeUtf8OrSkip } from './fileSystem.js';
+
 // Read many committed blobs in ONE `git cat-file --batch` process instead of one
 // `git show` per file. The vscode.git API serializes per-repo operations, so
 // firing N concurrent show() calls still runs roughly serially — batching into a
@@ -42,7 +44,12 @@ export function parseCatFileBatch(stdout: Buffer, relativePaths: string[]): Map<
 
     const body = stdout.subarray(offset, offset + size);
     offset += size + 1; // skip the content bytes and the trailing LF git appends
-    result.set(path, body.includes(0x00) ? undefined : body.toString('utf8'));
+    // decodeUtf8OrSkip, never Buffer.toString('utf8'): toString decodes leniently, so a
+    // Big5/Shift_JIS blob came back as U+FFFD mojibake that Paste & Restore then wrote over
+    // the real file. This batch reader is the NORMAL path for Graph/PR/commit copies —
+    // readRefContent's strict decode is only the spawn-failure fallback — so the guard the
+    // disk path enforces was being skipped by exactly the entry points that copy blobs.
+    result.set(path, decodeUtf8OrSkip(body));
   }
 
   return result;
