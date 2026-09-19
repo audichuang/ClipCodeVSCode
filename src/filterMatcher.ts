@@ -68,7 +68,7 @@ function matchesPattern(name: string, pattern: string): boolean {
     const regexPattern = pattern.includes('*') || pattern.includes('?')
       ? pattern.replaceAll('.', '\\.').replaceAll('*', '.*').replaceAll('?', '.')
       : pattern;
-    return new RegExp(`^${regexPattern}$`).test(name);
+    return new RegExp(`^(?:${regexPattern})$`).test(name);
   } catch {
     return name.includes(pattern);
   }

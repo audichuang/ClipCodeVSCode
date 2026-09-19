@@ -24,7 +24,7 @@ export interface DeleteOperation {
 export interface SkippedOperation {
   rawPath: string;
   relativePath?: string;
-  reason: 'ALREADY_ABSENT' | 'UNRESOLVED_PATH' | 'AMBIGUOUS_PATH';
+  reason: 'ALREADY_ABSENT' | 'UNRESOLVED_PATH' | 'AMBIGUOUS_PATH' | 'PLACEHOLDER_BODY';
 }
 
 export interface RestorePlan {
@@ -70,6 +70,11 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
       continue;
     }
 
+    if (isPlaceholderBody(entry.content)) {
+      skippedOperations.push({ rawPath: entry.path, relativePath: undefined, reason: 'PLACEHOLDER_BODY' });
+      continue;
+    }
+
     const resolution = resolveWriteTarget(roots, entry.path);
     if (!resolution.ok) {
       skippedOperations.push({
@@ -89,6 +94,21 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
   }
 
   return { createOperations, deleteOperations, skippedOperations };
+}
+
+/**
+ * The copy side substitutes a one-line comment for a file it could not embed (over the
+ * size limit, or unreadable). That comment is not file content: restoring it would replace
+ * the real file with a few dozen bytes, and writeTextFile offers no undo. Mirror of
+ * RestorePlan.kt isPlaceholderBody — keep the two in step.
+ * Producers: clipboardFormat.ts buildPayloadInternal ("File skipped"), gitCopy/graphCopy.
+ */
+function isPlaceholderBody(content: string): boolean {
+  const body = content.trim();
+  if (body.includes('\n')) return false;
+  return body.startsWith('// File skipped: ') ||
+    body === '// Unable to read file content' ||
+    body === '// Error reading file content';
 }
 
 export async function executeRestorePlan(

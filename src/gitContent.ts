@@ -1,3 +1,5 @@
+import { decodeUtf8OrSkip } from './fileSystem.js';
+
 export interface ContentRepo {
   rootUri: { fsPath: string };
   show?: (ref: string, path: string) => Promise<string>;
@@ -17,8 +19,9 @@ export function repoRelativePath(repoRootFsPath: string, fileFsPath: string): st
 }
 
 export function decodeText(bytes: Uint8Array): string | undefined {
-  if (bytes.includes(0)) return undefined;
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  // Shared with readTextFile: a non-UTF-8 blob is skipped, never decoded to U+FFFD mojibake
+  // and then written back over the real file on restore.
+  return decodeUtf8OrSkip(bytes);
 }
 
 export function isTextContent(content: string | undefined): content is string {
