@@ -17,6 +17,26 @@ test('formats default and labeled headers like IntelliJ ClipCode', () => {
   assert.equal(formatHeader('$FILE_PATH -> $FILE_PATH', 'src/main.ts'), 'src/main.ts -> src/main.ts');
 });
 
+test('escapes a CRLF content line that would parse as a custom header', () => {
+  const format = '### $FILE_PATH';
+  // buildPayload escapes via split('\n'), so the line still carries its \r; the parser
+  // splits on /\r?\n/ and would see it as a header unless it is escaped.
+  const payload = buildPayload({
+    headerFormat: format,
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: false,
+    files: [{ path: 'src/main.kt', content: '### src/a.kt\r\nreal body line' }]
+  });
+  assert.ok(payload.includes('//clipcode-esc: ### src/a.kt'), `CRLF header-looking line must be escaped: ${payload}`);
+
+  const entries = parseClipboard(payload, format);
+  assert.equal(entries.length, 1, `a phantom file must not appear: ${entries.map(e => e.path).join(',')}`);
+  assert.equal(entries[0].path, 'src/main.kt');
+  assert.ok(entries[0].content.includes('### src/a.kt'));
+  assert.ok(entries[0].content.includes('real body line'));
+});
+
 test('parses custom and generic file headers', () => {
   const custom = parseClipboard('### src/a.ts\none', '### $FILE_PATH');
   assert.deepEqual(custom, [{ path: 'src/a.ts', content: 'one', changeTypes: new Set() }]);

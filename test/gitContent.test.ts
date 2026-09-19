@@ -37,3 +37,14 @@ test('readRefContent tries show then buffer and skips binary', async () => {
   };
   assert.equal(await readRefContent(bufRepo, 'abc123', '/repo/src/a.ts'), 'FROM_BUFFER');
 });
+
+test('non-UTF-8 bytes are skipped, never decoded to mojibake', () => {
+  // Big5 for \u65e5\u672c\u8a9e-ish bytes: invalid as UTF-8. Decoding with fatal:false used to
+  // yield U+FFFD soup, which Paste & Restore then wrote back over the real file.
+  const big5 = new Uint8Array([0xa4, 0xe9, 0xa5, 0xbb, 0xbb, 0x79]);
+  assert.equal(decodeText(big5), undefined);
+  // Valid UTF-8 still decodes, BOM included.
+  assert.equal(decodeText(new TextEncoder().encode('hello \u20ac')), 'hello \u20ac');
+  // A NUL byte is still treated as binary.
+  assert.equal(decodeText(new Uint8Array([0x61, 0x00, 0x62])), undefined);
+});

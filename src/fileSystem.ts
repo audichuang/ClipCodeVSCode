@@ -24,8 +24,22 @@ export async function fileSize(filePath: string): Promise<number> {
 
 export async function readTextFile(filePath: string): Promise<string | undefined> {
   const bytes = await readFile(filePath);
+  return decodeUtf8OrSkip(bytes);
+}
+
+/**
+ * A non-UTF-8 text file (Big5, Shift_JIS, latin-1) used to decode with fatal:false, so every
+ * undecodable byte became U+FFFD and Paste & Restore wrote that mojibake back over the real
+ * file. Skipping such a file is strictly better than destroying it: undefined is the same
+ * "not copyable as text" signal binary files already use.
+ */
+export function decodeUtf8OrSkip(bytes: Uint8Array): string | undefined {
   if (bytes.includes(0)) return undefined;
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function* listFilesRecursive(

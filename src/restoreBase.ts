@@ -54,6 +54,12 @@ function baseNameOf(p: string): string {
 
 // Deterministic alignment when the clipboard carries the source root name.
 // `rels` is every plain relative path (any depth, may be empty).
+/** True when `rel`'s parent directory already exists under `primaryRoot`. */
+function parentExists(primaryRoot: string, rel: string, probe: DirProbe): boolean {
+  const slash = rel.lastIndexOf('/');
+  return slash >= 0 && probe.isDir(joinPath(primaryRoot, rel.slice(0, slash)));
+}
+
 function suggestFromSourceRoot(
   primaryRoot: string,
   rels: string[],
@@ -69,13 +75,24 @@ function suggestFromSourceRoot(
   // own folder name as a redundant leading segment) → strip it.
   const multi = rels.filter(p => p.includes('/'));
   const firstSegments = new Set(multi.map(p => p.slice(0, p.indexOf('/'))));
+  // A name match alone is not evidence: only relocate when it actually resolves MORE paths
+  // than leaving them where they are. Without this, a flat-layout repo (requests/requests,
+  // proj/proj) restored into a differently-named checkout gets every already-correct path
+  // nested one level deeper into a shadow tree. Mirror of RestoreBase.kt.
+  // Relocating is only safe when the paths do NOT already land somewhere here. In a
+  // flat-layout repo (requests/requests, proj/proj) the same-named folder always exists,
+  // so a name match alone used to nest every already-correct path one level deeper into a
+  // shadow tree, leaving the real files stale. Mirror of RestoreBase.kt.
+  const alreadyAnchored = rels.some(p => parentExists(primaryRoot, p, probe));
   if (multi.length > 0 && firstSegments.size === 1 && [...firstSegments][0] === targetName) {
+    if (alreadyAnchored) return undefined;
     return { base: { kind: 'strip', segment: targetName }, label: `remove the leading "${targetName}/"`, matched: rels.length, total: rels.length };
   }
 
   // The bundle was copied with the repo as root, and that repo folder exists here
   // (workspace opened one level up) → nest everything under it.
   if (probe.isDir(`${primaryRoot.replace(/\/+$/, '')}/${sourceRoot}`)) {
+    if (alreadyAnchored) return undefined;
     return { base: { kind: 'add', prefix: sourceRoot }, label: `place everything under "${sourceRoot}/"`, matched: rels.length, total: rels.length };
   }
 
@@ -101,12 +118,12 @@ export function suggestRestoreBase(
   const multi = rels.filter(p => p.includes('/'));
   if (multi.length < 2) return undefined;
 
-  const parentExists = (rel: string): boolean => {
+  const parentExistsLocal = (rel: string): boolean => {
     const slash = rel.lastIndexOf('/');
     return slash >= 0 && probe.isDir(joinPath(primaryRoot, rel.slice(0, slash)));
   };
   const scoreBase = (base: RestoreBase | undefined): number =>
-    multi.filter(p => parentExists(base ? applyRestoreBase(base, p) : p)).length;
+    multi.filter(p => parentExistsLocal(base ? applyRestoreBase(base, p) : p)).length;
 
   const identityScore = scoreBase(undefined);
 

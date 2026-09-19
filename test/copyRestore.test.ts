@@ -236,3 +236,25 @@ async function withTempDir(run: (root: string) => Promise<void>): Promise<void> 
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test('placeholder bodies are skipped instead of overwriting the real file', async () => {
+  await withTempDir(async root => {
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await writeFile(path.join(root, 'src', 'big.log'), 'the real 1.2 MB file');
+
+    const entries: RestoreEntry[] = [
+      { path: 'src/big.log', content: '// File skipped: size exceeds limit (1234567 bytes)', changeTypes: new Set() },
+      { path: 'src/unreadable.ts', content: '// Unable to read file content', changeTypes: new Set() },
+      { path: 'src/failed.ts', content: '// Error reading file content', changeTypes: new Set() },
+      { path: 'src/real.ts', content: '// File skipped: size exceeds limit (1 bytes)\nbut there is real content too', changeTypes: new Set() }
+    ];
+
+    const plan = await planRestore(root, entries);
+    assert.deepEqual(plan.createOperations.map(o => o.relativePath), ['src/real.ts']);
+    assert.equal(plan.skippedOperations.length, 3);
+    assert.ok(plan.skippedOperations.every(o => o.reason === 'PLACEHOLDER_BODY'));
+
+    await executeRestorePlan(plan, { overwriteExisting: true, skipExisting: false });
+    assert.equal(await readFile(path.join(root, 'src', 'big.log'), 'utf8'), 'the real 1.2 MB file');
+  });
+});

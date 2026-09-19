@@ -33,3 +33,13 @@ test('absolute path rules match against the absolute path when provided', () => 
     false
   );
 });
+
+test('PATTERN alternation is anchored as a whole, like IntelliJ String.matches', () => {
+  // `^foo|bar$` parses as `(^foo)|(bar$)`, so without the (?:) group `foobaz` and
+  // `bazbar` matched here but not in ClipCode. Both tools must agree on the file set.
+  const rules = [{ enabled: true, action: 'EXCLUDE' as const, type: 'PATTERN' as const, value: 'foo|bar' }];
+  assert.equal(fileMatchesFilters('foo', rules, false, true), false, 'exact left alternative is excluded');
+  assert.equal(fileMatchesFilters('bar', rules, false, true), false, 'exact right alternative is excluded');
+  assert.equal(fileMatchesFilters('foobaz', rules, false, true), true, 'prefix match must NOT be excluded');
+  assert.equal(fileMatchesFilters('bazbar', rules, false, true), true, 'suffix match must NOT be excluded');
+});

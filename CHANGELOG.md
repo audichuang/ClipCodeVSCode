@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.48
+
+- Restore no longer overwrites a real file with the placeholder comment the copy
+  side substitutes for a file it could not embed (over the size limit, or
+  unreadable). Those entries are reported as skipped and left untouched.
+- Non-UTF-8 text files (Big5, Shift_JIS, latin-1) are skipped instead of being
+  decoded to U+FFFD mojibake and written back over the original on restore.
+- Copying a commit from a shallow clone no longer treats a grafted boundary
+  commit as a root commit and copy the entire repository tree; it reports that
+  the history is shallow.
+- A CRLF content line that would parse as a custom file header is now escaped,
+  so it no longer becomes a phantom file that swallows the real file's content.
+- Paste & Restore no longer relocates files that already land correctly in the
+  target workspace. A flat-layout repository (requests/requests, proj/proj)
+  restored into a differently-named checkout used to nest every correct path one
+  level deeper into a shadow tree.
+- A PATTERN filter rule containing `|` is anchored as a whole, so `foo|bar` no
+  longer also excludes `foobaz` and `bazbar`. This matches ClipCode.
+- The clipboard wire format is unchanged: every existing payload still restores
+  byte-for-byte as before.
+
 ## 0.3.47
 
 - Compact single-child directory chains in the Changes tree, keeping separate

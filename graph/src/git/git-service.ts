@@ -1623,6 +1623,17 @@ export class GitService {
   }
   /* SNIPCODE-HOOK end */
 
+  /* SNIPCODE-HOOK start: shallow detection */
+  private async isShallowRepository(): Promise<boolean> {
+    try {
+      const raw = await this.exec(['rev-parse', '--is-shallow-repository'], { silent: true });
+      return raw.trim() === 'true';
+    } catch {
+      return false;
+    }
+  }
+  /* SNIPCODE-HOOK end */
+
   private async commitParents(hash: string): Promise<string[]> {
     try {
       const raw = await this.exec(['log', '-1', '--format=%P', hash], { silent: true });
@@ -1703,6 +1714,17 @@ export class GitService {
 
   private async showCommitFilesWithParents(hash: string, parents: string[]): Promise<Array<{ path: string; status: string; oldPath?: string }>> {
     if (parents.length === 0) {
+      /* SNIPCODE-HOOK start: shallow boundary is not a root commit */
+      // A shallow clone grafts boundary commits so `log --format=%P` reports no parents.
+      // Treating one as a root commit copies the ENTIRE repository tree as "this commit's
+      // change". Refuse instead. Mirrors ClipCode GitContentResolver.isShallowRepository.
+      if (await this.isShallowRepository()) {
+        throw new Error(
+          `Repository history is shallow, so the parent of ${hash} is not available locally. ` +
+          `Run 'git fetch --unshallow' and try again.`
+        );
+      }
+      /* SNIPCODE-HOOK end */
       // Root commit has no parent - --root compares against empty tree
       const raw = await this.exec(['diff-tree', '-M', '-z', '--no-commit-id', '--name-status', '-r', '--root', hash]);
       return this.parseNameStatusZ(raw);

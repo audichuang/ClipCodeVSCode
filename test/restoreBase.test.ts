@@ -127,3 +127,11 @@ test('requires a majority match, not a single coincidental hit', () => {
   const s = suggestRestoreBase('/work', ['src/a.ts', 'lib/b.ts', 'app/c.ts', 'web/d.ts'], p);
   assert.equal(s, undefined);
 });
+
+test('metadata: does NOT nest when the paths already land here (flat-layout repo)', () => {
+  // requests/requests, proj/proj, pkg/pkg: the same-named folder always exists, so a name
+  // match alone used to nest every already-correct path one level deeper.
+  const p = probe(['/t/mypkg-2/mypkg', '/t/mypkg-2/mypkg/sub', '/t/mypkg-2/tests'], ['mypkg', 'tests']);
+  const s = suggestRestoreBase('/t/mypkg-2', ['mypkg/sub/core.py', 'tests/test_core.py', 'setup.py'], p, 'mypkg');
+  assert.equal(s, undefined, 'already-anchored paths must be left alone');
+});

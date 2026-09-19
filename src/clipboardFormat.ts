@@ -120,8 +120,13 @@ function escapeContent(text: string, customRegex?: RegExp): string {
 // that matches everything — so we don't mark every single content line.
 function needsEscape(line: string, customRegex?: RegExp): boolean {
   if (line.startsWith(ESCAPE_MARKER)) return true;
-  if (findHeaderPath(line, customRegex) === undefined) return false;
-  return findHeaderPath(ESCAPE_MARKER + line, customRegex) === undefined;
+  // escapeContent splits on '\n', but the parser splits on /\r?\n/ and drops the \r.
+  // Test what the PARSER will see, or a CRLF line that is a header slips through
+  // unescaped and becomes a phantom file on restore. The marker is still prefixed to
+  // the original line, so the payload's line endings are untouched.
+  const asParsed = line.endsWith('\r') ? line.slice(0, -1) : line;
+  if (findHeaderPath(asParsed, customRegex) === undefined) return false;
+  return findHeaderPath(ESCAPE_MARKER + asParsed, customRegex) === undefined;
 }
 
 // Inverse of escapeContent: strip exactly one leading marker per line.
