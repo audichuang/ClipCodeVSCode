@@ -1272,30 +1272,93 @@ describe('CommitDetails — large diff render cap', () => {
 
   it('renders all lines and no banner when under the cap', async () => {
     const { container } = await selectFileWithDiff(bigDiff('small.ts', 100));
-    await waitFor(() => container.querySelectorAll('.diff-content .diff-line').length === 100);
+    /* SNIPCODE-HOOK start: this wait returned a BOOLEAN. testing-library resolves
+       waitFor on any non-throwing return, so it never retried and asserted
+       nothing — the row count could have been 0 and the test still passed. Make
+       it throw. 100 rows is TWO hops, not one: firstStep() = 60 under happy-dom
+       then +STEP=80 clamped to 100 (FileDiffView.svelte:429,432). Unlike
+       FileDiffView.lifecycle.test.ts this file installs NO highlighter mock and
+       100 <= MAX_HIGHLIGHT_LINES, so the second hop waits on the REAL Shiki
+       path. Measured 0.275s alone but 0.797s under full-suite load — against
+       waitFor's bare 1s default that is a ~1.25x margin, i.e. making this
+       assertion real also made it able to go red from scheduling alone. The
+       explicit 4000 sits below the untouched 5000ms test default, so the
+       assertion still loses first and reports "expected 60 to be 100". */
+    await waitFor(() => {
+      expect(container.querySelectorAll('.diff-content .diff-line').length).toBe(100);
+    }, { timeout: 4000 });
+    /* SNIPCODE-HOOK end */
     expect(container.querySelector('.diff-truncated-banner')).toBeNull();
   });
 
+  /* SNIPCODE-HOOK start: perf — rows reveal in steps, so wait for the cap.
+     The real constants: STEP = 80 rows per hop (FileDiffView.svelte:429) and
+     firstStep() = 60 under happy-dom (innerHeight 768 → ceil(768/20)+20 = 59,
+     so the 60 floor wins), i.e. ~38 serialized setTimeout(0) hops to the cap —
+     far past waitFor's 1s default AND past vitest's 5000ms test default, which
+     is why the failure text was literally "Test timed out in 5000ms".
+     (a) childElementCount, not querySelectorAll: happy-dom invalidates its
+         selector cache on every mutation, so a descendant-selector scan
+         re-walks the whole revealed prefix once per batch — O(n^2/STEP), the
+         same shape a243ffa removed from the component, resurrected here inside
+         the assertion. Measured: 1347ms of a 2539ms wait was spent inside
+         querySelectorAll. Re-query .diff-hunk INSIDE the callback (~0.7ms per
+         step); do not hoist it out.
+     (b) the "- 1" is the single unconditional .diff-hunk-header
+         (FileDiffView.svelte:895). Every other child of .diff-hunk is a row.
+     (c) this is NOT the perf budget for this path. That is the real-Chrome
+         "singleHunk" entry in scripts/diff-performance-budgets.json, added by
+         a243ffa for exactly this shape. This test asserts the cap, not speed.
+     (d) the waitFor timeout must stay BELOW the enclosing test's timeout
+         (20000 < 30000): the inner wait then loses first, so a genuinely broken
+         cap reports "expected 3500 to be 3000" instead of an opaque timeout. */
   it('caps rendered lines and shows the banner when over the cap', async () => {
     const { container } = await selectFileWithDiff(bigDiff('huge.ts', MAX_RENDER_LINES + 500));
-    await waitFor(() => container.querySelector('.diff-truncated-banner'));
-    /* SNIPCODE-HOOK start: perf — rows reveal in steps, so wait for the cap.
-       The default 1s is not enough here: at the cap this is 15 reveal steps,
-       each its own task, and each tokenises its 200 lines before publishing. */
+    // Must THROW, like every wait below: a callback returning Element|null resolves
+    // on the first check, so this was the only thing behind "and shows the banner"
+    // and it asserted nothing.
+    await waitFor(() => expect(container.querySelector('.diff-truncated-banner')).not.toBeNull());
     await waitFor(() => {
-      expect(container.querySelectorAll('.diff-content .diff-line').length).toBe(MAX_RENDER_LINES);
-    }, { timeout: 15000 });
-    /* SNIPCODE-HOOK end */
-  });
+      const hunk = container.querySelector('.diff-content .diff-hunk');
+      expect(hunk!.childElementCount - 1).toBe(MAX_RENDER_LINES);
+    }, { timeout: 20000 });
+  }, 30000);
+  /* SNIPCODE-HOOK end */
 
-  it('renders every line after clicking "show full diff"', async () => {
+  /* SNIPCODE-HOOK start: renamed, and the row assertion RESTORED as an O(1) probe.
+     It used to claim it rendered every row while asserting nothing — that wait
+     returned a BOOLEAN, and testing-library resolves waitFor on any non-throwing
+     return, so it never retried.
+     An earlier draft dropped the row count entirely and delegated it to
+     FileDiffView.lifecycle.test.ts. That delegation is FALSE and must not come
+     back: that test renders manyLineDiff(3000), and diffTruncated is
+     `totalDiffLines > MAX_RENDER_LINES` with MAX_RENDER_LINES = 3000
+     (FileDiffView.svelte:333,384) — 3000 > 3000 is false, so it never truncates,
+     never shows a banner and never sets showFullDiff. NOTHING else in the repo
+     covers reveal-AFTER-untruncation.
+     The hole that leaves: break the paint effect's dependency on renderHunks and
+     the banner still vanishes and .reversible still turns on (both are $derived
+     and flip synchronously), while rows 3001-3500 never mount — a permanently
+     half-rendered "full" diff, whole suite green. So assert the rows too, with
+     the same childElementCount probe as the sibling above.
+     .reversible is `(canReverse || canStage) && isHunkComplete(hunkIdx)`
+     (FileDiffView.svelte:894) — NOT isHunkComplete alone. The conjunction can
+     only cause a false FAIL, never a false pass, so it is sound as a second
+     assertion; the row count is the one that carries the guarantee. */
+  it('un-truncates after clicking "show full diff"', async () => {
     const total = MAX_RENDER_LINES + 500;
     const { container } = await selectFileWithDiff(bigDiff('huge.ts', total));
-    await waitFor(() => container.querySelector('.diff-truncated-banner'));
+    await waitFor(() => expect(container.querySelector('.diff-truncated-banner')).not.toBeNull());
     await fireEvent.click(container.querySelector<HTMLButtonElement>('.diff-truncated-banner button')!);
-    await waitFor(() => container.querySelectorAll('.diff-content .diff-line').length === total);
+    expect(container.querySelector('.diff-content .diff-hunk')!.classList.contains('reversible')).toBe(true);
     expect(container.querySelector('.diff-truncated-banner')).toBeNull();
-  });
+    // The paint pass must RESUME past the old cap, not merely stop truncating.
+    await waitFor(() => {
+      const hunk = container.querySelector('.diff-content .diff-hunk');
+      expect(hunk!.childElementCount - 1).toBe(total);
+    }, { timeout: 20000 });
+  }, 30000);
+  /* SNIPCODE-HOOK end */
 });
 
 describe('CommitDetails — markdown toggle', () => {
