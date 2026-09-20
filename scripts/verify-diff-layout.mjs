@@ -103,19 +103,31 @@ await access(join(assets, 'diff.js'));
 const chrome = process.env.CHROME_BIN || findChrome();
 
 function findChrome() {
+  const { PROGRAMFILES, LOCALAPPDATA } = process.env;
+  // Neither Chrome nor Edge adds itself to PATH on a stock Windows install, so probing
+  // `where` alone finds NEITHER — the same "works on my machine" hole this function was
+  // written to close on Linux, just moved one platform over. Probe the install dirs first.
+  const winDirs = [PROGRAMFILES, process.env['ProgramFiles(x86)'], LOCALAPPDATA].filter(Boolean);
   const candidates = process.platform === 'darwin'
     ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
        '/Applications/Chromium.app/Contents/MacOS/Chromium', 'google-chrome', 'chromium']
     : process.platform === 'win32'
-      ? ['chrome.exe', 'msedge.exe']
+      ? [...winDirs.map(dir => join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+         ...winDirs.map(dir => join(dir, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+         'chrome.exe', 'msedge.exe']
       : ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'chrome'];
   for (const candidate of candidates) {
-    if (candidate.includes(sep)) { if (existsSync(candidate)) return candidate; continue; }
+    // Either separator, plus a drive letter: not `sep`, so the branch for one platform stays
+    // checkable by simulation from another — which is how this gap was found.
+    if (/[\\/]/.test(candidate) || /^[A-Za-z]:/.test(candidate)) {
+      if (existsSync(candidate)) return candidate;
+      continue;
+    }
     const found = spawnSync(process.platform === 'win32' ? 'where' : 'which', [candidate], { encoding: 'utf8' });
     if (found.status === 0 && found.stdout.trim()) return found.stdout.trim().split(/\r?\n/)[0];
   }
-  // Nothing found: fall through to the historical name so the failure names a browser.
-  return candidates[0];
+  // Nothing found: fall through to a real browser name so the failure names one.
+  return candidates[candidates.length - 1];
 }
 const profile = await mkdtemp(join(tmpdir(), 'snipcode-layout-'));
 let complete, browser, timer, stderr = '';
