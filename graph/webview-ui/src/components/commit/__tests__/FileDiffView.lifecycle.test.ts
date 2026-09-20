@@ -63,6 +63,29 @@ async function changeToLightTheme(): Promise<void> {
   await tick();
 }
 
+const task = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+async function nextWorkerBatch() {
+  for (let i = 0; i < 50 && highlighterState.workerPending.length === 0; i++) await task();
+  expect(highlighterState.workerPending.length).toBeGreaterThan(0);
+  return highlighterState.workerPending.shift()!;
+}
+
+async function finishWorkerReveal(isComplete: () => boolean): Promise<void> {
+  for (let i = 0; i < 20 && !isComplete(); i++) {
+    if (highlighterState.workerPending.length === 0) {
+      await task();
+      continue;
+    }
+    const batch = highlighterState.workerPending.shift()!;
+    expect(batch.signal.aborted).toBe(false);
+    expect(batch.lines).toBeDefined();
+    batch.resolve(batch.lines!.map(line => `<span data-highlighted="true" data-worker-line="true">${line.content}</span>`));
+    await task();
+  }
+  expect(isComplete()).toBe(true);
+}
+
 function oneLineDiff(file: string, content: string): DiffData {
   return {
     file,
@@ -124,6 +147,34 @@ function manyHunkDiff(count: number): DiffData {
 }
 /* SNIPCODE-HOOK end */
 
+function replacementDiff(count: number): DiffData {
+  const lines: DiffData['hunks'][number]['lines'] = [
+    ...Array.from({ length: count }, (_, i) => ({
+      type: 'delete' as const,
+      content: `old-${i}`,
+      oldLineNumber: i + 1,
+    })),
+    ...Array.from({ length: count }, (_, i) => ({
+      type: 'add' as const,
+      content: `new-${i}`,
+      newLineNumber: i + 1,
+    })),
+  ];
+  return {
+    file: 'src/rewrite.ts',
+    isBinary: false,
+    isImage: false,
+    hunks: [{
+      header: `@@ -1,${count} +1,${count} @@`,
+      oldStart: 1,
+      oldLines: count,
+      newStart: 1,
+      newLines: count,
+      lines,
+    }],
+  };
+}
+
 beforeEach(() => {
   highlighterState.calls = 0;
   highlighterState.ensureLanguageCalls = 0;
@@ -150,18 +201,8 @@ afterEach(() => {
 });
 
 describe('FileDiffView lifecycle', () => {
-  // Budget note (measured on a 12-core Linux box, happy-dom 20.9 / svelte 5.55):
-  // inline 3000 lines finishes in ~1s, side-by-side in ~20s, and the cost is
-  // super-quadratic (sbs 750/1500/3000 → 0.8/4.3/23s). It is the component, not
-  // the DOM shim: the same 3000 lines split into 300 small hunks runs sbs in
-  // ~3.5s. `manyLineDiff` is ONE hunk, so every reveal step re-slices it
-  // (FileDiffView.svelte paintHunks), which misses the `lines`-keyed sbsCache
-  // WeakMap, rebuilds fresh SbsRow wrappers for every already-revealed row, and
-  // makes the three unkeyed `{#each sbsRows[hunkIdx] as row}` loops re-evaluate
-  // the whole revealed prefix once per step — O(n²/STEP). Inline is spared
-  // because slicing preserves DiffLine identity. The old 15s/20s budget passed
-  // only on a fast machine; it is a CPU-speed assumption, not a guard, so it is
-  // sized generously here. The real assertion is `firstRowReads` below.
+  // Keep enough rows to cross many reveal steps. Deterministic assertions measure
+  // repeated row work; this timeout only catches a hung lifecycle test.
   it.each(['inline', 'side-by-side'] as const)('does not repeatedly read old rows as new batches arrive (%s)', async mode => {
     const key = JSON.stringify(['src/large.ts', 1, 0, 'const value0 = 0;']);
     const original = Map.prototype.get;
@@ -172,10 +213,93 @@ describe('FileDiffView lifecycle', () => {
     });
     try {
       const view = render(FileDiffView, { diff: manyLineDiff(3000), diffMode: mode });
-      await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(mode === 'inline' ? 3000 : 6000), { timeout: 90000 });
+      await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(mode === 'inline' ? 3000 : 6000), { timeout: 20000 });
       expect(firstRowReads).toBeLessThanOrEqual(10);
     } finally { spy.mockRestore(); }
-  }, 120000);
+  }, 30000);
+
+  it('does not rebuild already revealed side-by-side rows on each batch', async () => {
+    const diff = manyLineDiff(600);
+    let typeReads = 0;
+    for (const line of diff.hunks[0].lines) {
+      const type = line.type;
+      Object.defineProperty(line, 'type', { get: () => { typeReads++; return type; } });
+    }
+
+    const view = render(FileDiffView, { diff, diffMode: 'side-by-side' });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(1200));
+
+    // Each source line is paired once and rendered once per pane. Re-reading the
+    // entire revealed prefix per batch is the previous quadratic behavior.
+    expect(typeReads).toBeLessThan(600 * 12);
+  }, 15000);
+
+  it('keeps replacement pairs stable when a reveal boundary falls inside the block', async () => {
+    const stagedLines = vi.fn();
+    const view = render(FileDiffView, {
+      diff: replacementDiff(100),
+      diffMode: 'side-by-side',
+      onStageHunk: () => {},
+      onStageLines: stagedLines,
+    });
+    const leftRows = () => [...view.container.querySelectorAll('.sbs-left .diff-line')];
+    const rightRows = () => [...view.container.querySelectorAll('.sbs-right .diff-line')];
+
+    await waitFor(() => expect(leftRows().length).toBeGreaterThan(0));
+    const firstLeft = leftRows()[0];
+    const firstRight = rightRows()[0];
+    expect(firstLeft.textContent).toContain('old-0');
+    expect(firstRight.textContent).toContain('new-0');
+
+    await waitFor(() => expect(leftRows().length).toBeGreaterThan(60));
+    expect(leftRows()[0]).toBe(firstLeft);
+    expect(rightRows()[0]).toBe(firstRight);
+    expect(firstRight.textContent).toContain('new-0');
+
+    await waitFor(() => {
+      expect(leftRows()).toHaveLength(100);
+      expect(rightRows()).toHaveLength(100);
+    });
+
+    const stageBlockButton = view.container.querySelector<HTMLButtonElement>('.sbs-block-stage-btn')!;
+    stageBlockButton.focus();
+    const refreshed = replacementDiff(100);
+    refreshed.hunks[0].lines[0] = { ...refreshed.hunks[0].lines[0], content: 'old-0 refreshed' };
+    await view.rerender({ diff: refreshed, diffMode: 'side-by-side', onStageHunk: () => {}, onStageLines: stagedLines });
+    expect(view.container.querySelector('.sbs-block-stage-btn')).toBe(stageBlockButton);
+    expect(document.activeElement).toBe(stageBlockButton);
+    expect(leftRows()[0].textContent).toContain('old-0 refreshed');
+
+    stageBlockButton.click();
+    expect(stagedLines).toHaveBeenCalledWith({ file: 'src/rewrite.ts', hunkIndex: 0, lineIndices: Array.from({ length: 200 }, (_, i) => i) });
+  });
+
+  it('stops the side-by-side worker pass after every paired row is revealed', async () => {
+    highlighterState.workerEnabled = true;
+    const view = render(FileDiffView, { diff: replacementDiff(100), diffMode: 'side-by-side' });
+    const leftRows = () => view.container.querySelectorAll('.sbs-left .diff-line').length;
+    const rightRows = () => view.container.querySelectorAll('.sbs-right .diff-line').length;
+    const task = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    try {
+      while (leftRows() < 100) {
+        await waitFor(() => expect(highlighterState.workerPending.length).toBeGreaterThan(0));
+        const batch = highlighterState.workerPending.shift()!;
+        expect(batch.length).toBeGreaterThan(0);
+        batch.resolve(batch.lines!.map(line => `<span data-worker-line="true">${line.content}</span>`));
+        await task();
+      }
+      await task();
+
+      expect(rightRows()).toBe(100);
+      expect(highlighterState.workerPending).toHaveLength(0);
+    } finally {
+      // If the loop regresses and queues an empty batch after completion, leave
+      // it unresolved until the effect is cancelled so cleanup cannot spin it.
+      view.unmount();
+      highlighterState.workerEnabled = false;
+    }
+  }, 15000);
 
   it('does not reuse old-theme tail entries when a theme pass is interrupted by refresh', async () => {
     const view = render(FileDiffView, { diff: manyLineDiff(600) });
@@ -249,6 +373,45 @@ describe('FileDiffView lifecycle', () => {
     expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
   });
 
+  it('keeps the reveal position when switching inline and side-by-side', async () => {
+    highlighterState.workerEnabled = true;
+    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    const firstProgress = view.container.querySelectorAll('.diff-content .diff-line').length;
+    expect(firstProgress).toBeGreaterThan(0);
+    expect(firstProgress).toBeLessThan(500);
+    const oldBatch = await nextWorkerBatch();
+
+    view.container.querySelectorAll<HTMLButtonElement>('.diff-mode-toggle button')[1].click();
+    await tick();
+    expect(oldBatch.signal.aborted).toBe(true);
+    expect(view.container.querySelectorAll('.sbs-left .diff-line')).toHaveLength(firstProgress);
+    expect(view.container.querySelectorAll('.sbs-right .diff-line')).toHaveLength(firstProgress);
+
+    await finishWorkerReveal(() => view.container.querySelectorAll('.sbs-left .diff-line').length === 500
+      && view.container.querySelectorAll('.sbs-right .diff-line').length === 500);
+
+    view.container.querySelectorAll<HTMLButtonElement>('.diff-mode-toggle button')[0].click();
+    await tick();
+    expect(view.container.querySelectorAll('.diff-content .diff-line')).toHaveLength(500);
+    oldBatch.resolve(Array(oldBatch.length).fill('<span data-stale-mode>obsolete</span>'));
+    expect(view.container.querySelector('[data-stale-mode]')).toBeNull();
+  });
+
+  it('aborts pending inline worker work and reveals stable side-by-side rows after a mode switch', async () => {
+    highlighterState.workerEnabled = true;
+    const view = render(FileDiffView, { diff: manyLineDiff(600) });
+    const staleBatch = await nextWorkerBatch();
+
+    view.container.querySelectorAll<HTMLButtonElement>('.diff-mode-toggle button')[1].click();
+    await tick();
+
+    expect(staleBatch.signal.aborted).toBe(true);
+    await finishWorkerReveal(() => view.container.querySelectorAll('.sbs-left .diff-line').length === 600
+      && view.container.querySelectorAll('.sbs-right .diff-line').length === 600);
+    staleBatch.resolve(Array(staleBatch.length).fill('<span data-stale-mode>obsolete</span>'));
+    expect(view.container.querySelector('[data-stale-mode]')).toBeNull();
+  });
+
   it('never shows the previous file highlight while a reused view loads the next file', async () => {
     highlighterState.delayFromCall = 2;
     const view = render(FileDiffView, { diff: oneLineDiff('src/old.ts', 'old source') });
@@ -302,11 +465,15 @@ describe('FileDiffView lifecycle', () => {
 
   // A grammar-less file must still reveal its whole tail — the pass used to
   // return early there, which was harmless when nothing waited on it.
-  it('reveals every row of a file it cannot highlight', async () => {
+  it.each(['inline', 'side-by-side'] as const)('reveals every row of a file it cannot highlight (%s)', async mode => {
     highlighterState.lang = '';
-    const view = render(FileDiffView, { diff: manyHunkDiff(500) });
+    const view = render(FileDiffView, { diff: manyHunkDiff(500), diffMode: mode });
     await waitFor(() => {
-      expect(view.container.querySelectorAll('.diff-line').length).toBe(500);
+      if (mode === 'inline') expect(view.container.querySelectorAll('.diff-content .diff-line').length).toBe(500);
+      else {
+        expect(view.container.querySelectorAll('.sbs-left .diff-line').length).toBe(500);
+        expect(view.container.querySelectorAll('.sbs-right .diff-line').length).toBe(500);
+      }
     });
     expect(view.container.querySelectorAll('[data-highlighted]').length).toBe(0);
   });
