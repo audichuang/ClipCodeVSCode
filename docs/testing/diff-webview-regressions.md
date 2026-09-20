@@ -64,8 +64,10 @@ commit policy and a command, not an installed Git hook.
 
 The browser performance gate uses deterministic SQL payloads through the production
 message listener. It measures one fresh-page sample plus three samples each for
-small navigation (14 hunks), large navigation (144 hunks), same-file refresh, and
-large-file theme changes. Each sample requires the expected nonempty line count,
+small navigation (14 hunks), large navigation (144 hunks), same-file refresh,
+large-file theme changes, and a newly added file with one 3,000-line hunk.
+The single-hunk case uses the same budgets as large navigation and catches work
+that repeated small hunks can hide. Each sample requires the expected nonempty line count,
 current fixture marker and real syntax spans. Theme changes must replace every old
 line's highlighted HTML. It waits for a subsequent animation frame before declaring
 completion. Long Tasks API support and a deliberate blocking probe are required;

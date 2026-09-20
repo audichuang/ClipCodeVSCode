@@ -353,6 +353,7 @@
     if (diff && diff.file !== paintFile) {
       paintFile = diff.file;
       paintBudget = firstStep();
+      sbsPaintBudget = firstStep();
     }
     /* SNIPCODE-HOOK end */
   });
@@ -364,6 +365,15 @@
      `internalMode`. Template/toggle below use `mode` exclusively. */
   let internalMode = $state<'inline' | 'side-by-side'>('inline');
   const mode = $derived(diffModeProp ?? internalMode);
+  let previousPaintMode = untrack(() => mode);
+  $effect(() => {
+    const nextMode = mode;
+    if (nextMode === previousPaintMode) return;
+    const revealed = untrack(() => nextMode === 'side-by-side' ? paintBudget : sbsPaintBudget);
+    if (nextMode === 'side-by-side') sbsPaintBudget = Math.max(sbsPaintBudget, revealed);
+    else paintBudget = Math.max(paintBudget, revealed);
+    previousPaintMode = nextMode;
+  });
   /* SNIPCODE-HOOK end */
 
   let totalDiffLines = $derived(
@@ -424,6 +434,7 @@
     return Math.min(240, Math.max(60, rows + 20));
   }
   let paintBudget = $state(firstStep());
+  let sbsPaintBudget = $state(firstStep());
   // Deliberately the INITIAL file (untrack silences state_referenced_locally):
   // the per-diff reset effect above compares against it to spot a file change.
   let paintFile = untrack(() => diff?.file);
@@ -478,7 +489,7 @@
     return rows;
   }
 
-  /* SNIPCODE-HOOK start: perf — rows follow the reveal, not the full render set */
+  /* SNIPCODE-HOOK start: perf — pair stable rows once, then reveal stable batches */
   const EMPTY_SBS_ROWS: SbsRow[] = [];
   const sbsCache = new WeakMap<DiffLine[], SbsRow[]>();
   function getCachedSbsRows(lines: DiffLine[]): SbsRow[] {
@@ -490,7 +501,39 @@
     }
     return cached;
   }
-  const sbsRows = $derived(paintHunks.map(hunk => getCachedSbsRows(hunk.lines)));
+  const sbsRows = $derived(renderHunks.map(hunk => getCachedSbsRows(hunk.lines)));
+
+  interface SbsGroup { rows: SbsRow[]; lineEnd: number; startRow: number }
+  function groupSbsRows(rowsByHunk: SbsRow[][]): SbsGroup[][] {
+    const groups = rowsByHunk.map(() => [] as SbsGroup[]);
+    let pending = new Map<number, { rows: SbsRow[]; startRow: number }>();
+    let linesInBatch = 0;
+    let lineEnd = 0;
+    let lineLimit = firstStep();
+    const flush = () => {
+      if (pending.size === 0) return;
+      for (const [hunkIndex, batch] of pending) groups[hunkIndex].push({ ...batch, lineEnd });
+      pending = new Map();
+      linesInBatch = 0;
+      lineLimit = STEP;
+    };
+
+    rowsByHunk.forEach((rows, hunkIndex) => {
+      rows.forEach((row, rowIndex) => {
+        const lineCount = row.left === row.right ? 1 : Number(!!row.left) + Number(!!row.right);
+        if (linesInBatch > 0 && linesInBatch + lineCount > lineLimit) flush();
+        const batch = pending.get(hunkIndex) ?? { rows: [], startRow: rowIndex };
+        batch.rows.push(row);
+        pending.set(hunkIndex, batch);
+        linesInBatch += lineCount;
+        lineEnd += lineCount;
+      });
+    });
+    flush();
+    return groups;
+  }
+  const sbsGroups = $derived(groupSbsRows(sbsRows));
+  const visibleSbsGroups = $derived(sbsGroups.map(groups => groups.filter(group => group.lineEnd <= sbsPaintBudget)));
   /* SNIPCODE-HOOK end */
   /* SNIPCODE-HOOK end */
 
@@ -583,12 +626,14 @@
     if (!diff || diff.isBinary) return;
     const target = diff;
     const lang = detectLanguage(diff.file);
+    const paintMode = mode;
     const totalLines = diff.hunks.reduce((s, h) => s + h.lines.length, 0);
     const wantHighlight = !!lang && totalLines <= MAX_HIGHLIGHT_LINES;
     // Only what's actually rendered (renderHunks is capped at MAX_RENDER_LINES).
     // Toggling showFullDiff changes renderHunks and re-runs this effect, so the
     // newly rendered tail is revealed and highlighted then — in steps too.
     const visibleHunks = renderHunks;
+    const visibleSbsRows = sbsRows;
     const theme = shikiTheme; // capture so a theme switch invalidates the pass
     let cancelled = false;
     const workerAbort = new AbortController();
@@ -615,12 +660,32 @@
       // hunk's stage/unstage doesn't re-highlight — or flash — every OTHER line.
       const reusable = ready && theme === lastHighlightTheme ? highlightedLines : undefined;
 
-      const flat: Array<{ key: string; content: string; hunk: DiffData['hunks'][number]; lineIndex: number }> = [];
-      for (const hunk of visibleHunks) {
-        for (let i = 0; i < hunk.lines.length; i++) {
-          flat.push({ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content, hunk, lineIndex: i });
+      type HighlightLine = { key: string; content: string; hunk: DiffData['hunks'][number]; lineIndex: number };
+      let units: HighlightLine[][];
+      if (paintMode === 'side-by-side') {
+        units = visibleSbsRows.flatMap((rows, hunkIndex) => {
+          const hunk = visibleHunks[hunkIndex];
+          return rows.map(row => {
+            const lines: SbsLine[] = [];
+            if (row.left) lines.push(row.left);
+            if (row.right && row.right !== row.left) lines.push(row.right);
+            return lines.map(({ line, index }) => ({
+              key: highlightKey(target.file, hunk.oldStart, index, line.content),
+              content: line.content,
+              hunk,
+              lineIndex: index,
+            }));
+          });
+        });
+      } else {
+        units = [];
+        for (const hunk of visibleHunks) {
+          for (let i = 0; i < hunk.lines.length; i++) {
+            units.push([{ key: highlightKey(target.file, hunk.oldStart, i, hunk.lines[i].content), content: hunk.lines[i].content, hunk, lineIndex: i }]);
+          }
         }
       }
+      const flat = units.flat();
       // Bound retained HTML to this render set even after cancelled passes.
       // A partial theme pass must never mix old-theme tail entries into its cache.
       const activeKeys = new Set(flat.map(line => line.key));
@@ -632,18 +697,38 @@
       });
 
       function prepareWork(from: number, to: number) {
-        const slice = flat.slice(from, to);
+        const slice = units.slice(from, to).flat();
         const missing = slice.filter(line => reusable?.get(line.key) === undefined);
         const work = missing.map(line => ({ content: line.content, ...getLineWordDiff(line.hunk, line.lineIndex) }));
         return { missing, work };
       }
 
+      function advanceUnits(from: number, lineLimit: number): number {
+        let lineCount = 0;
+        let end = from;
+        while (end < units.length) {
+          const nextLineCount = units[end].length;
+          if (lineCount > 0 && lineCount + nextLineCount > lineLimit) break;
+          lineCount += nextLineCount;
+          end++;
+        }
+        return end;
+      }
+
+      function countUnitLines(from: number, to: number): number {
+        let count = 0;
+        for (let i = from; i < to; i++) count += units[i].length;
+        return count;
+      }
+
       let pos = 0;
+      let revealedLineCount = 0;
       let first = true;
       let nextWorkerPromise: Promise<string[] | undefined> | undefined = undefined;
 
       do {
-        const end = Math.min(flat.length, pos + (first ? firstStep() : STEP));
+        const end = advanceUnits(pos, first ? firstStep() : STEP);
+        const batchLineCount = countUnitLines(pos, end);
         if (ready && h) {
           const { missing, work } = prepareWork(pos, end);
           let background: string[] | undefined;
@@ -668,12 +753,17 @@
           highlightedLines.clear();
         }
         // Never shrink: a same-file re-push already shows every row.
-        if (end > untrack(() => paintBudget)) paintBudget = end;
+        revealedLineCount += batchLineCount;
+        if (paintMode === 'side-by-side') {
+          if (revealedLineCount > untrack(() => sbsPaintBudget)) sbsPaintBudget = revealedLineCount;
+        } else if (end > untrack(() => paintBudget)) {
+          paintBudget = end;
+        }
         pos = end;
         first = false;
-        if (pos < flat.length) {
+        if (pos < units.length) {
           if (ready && h) {
-            const nextEnd = Math.min(flat.length, pos + STEP);
+            const nextEnd = advanceUnits(pos, STEP);
             const { work: nextWork } = prepareWork(pos, nextEnd);
             if (nextWork.length > 0) {
               nextWorkerPromise = highlightWorkerBatch(nextWork, lang, theme, workerAbort.signal);
@@ -682,7 +772,7 @@
           await yieldTask();
           if (stale()) return;
         }
-      } while (pos < flat.length);
+      } while (pos < units.length);
     })().catch(() => {});
     return () => { cancelled = true; workerAbort.abort(); };
   });
@@ -874,7 +964,7 @@
         <div class="sbs-pane sbs-left" bind:this={sbsLeftEl} onscroll={handleSbsScroll}>
           <div class="sbs-inner">
             <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
-            {#each paintHunks as hunk, hunkIdx}
+            {#each renderHunks as hunk, hunkIdx}
               {@const hunkStart = hunk.oldStart}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -888,23 +978,25 @@
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
                 <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
-                {#each sbsRows[hunkIdx] as row}
-                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
-                  {#if row.left}
-                    {@const line = row.left.line}
-                    {@const sourceIndex = row.left.index}
-                    <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
-                      <span class="line-num">{line.oldLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
-                      {@render crMarker(line)}
-                      {@render noNewlinePill(line)}
-                    </div>
-                  {:else}
-                    <div class="diff-line diff-empty-line">
-                      <span class="line-num"></span>
-                      <span class="line-content"></span>
-                    </div>
-                  {/if}
+                {#each visibleSbsGroups[hunkIdx] as group (group.startRow)}
+                  {#each group.rows as row (row.left?.index ?? row.right?.index ?? -1)}
+                    {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
+                    {#if row.left}
+                      {@const line = row.left.line}
+                      {@const sourceIndex = row.left.index}
+                      <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
+                        <span class="line-num">{line.oldLineNumber ?? ''}</span>
+                        <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
+                        {@render crMarker(line)}
+                        {@render noNewlinePill(line)}
+                      </div>
+                    {:else}
+                      <div class="diff-line diff-empty-line">
+                        <span class="line-num"></span>
+                        <span class="line-content"></span>
+                      </div>
+                    {/if}
+                  {/each}
                 {/each}
                 <!-- SNIPCODE-HOOK end -->
               </div>
@@ -917,30 +1009,32 @@
           if (sbsLeftEl) sbsLeftEl.scrollTop += e.deltaY;
         }}>
           <div class="sbs-center-inner">
-            {#each paintHunks as hunk, hunkIdx}
+            {#each renderHunks as hunk, hunkIdx}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <div class="sbs-center-hunk">
-                {#each sbsRows[hunkIdx] as row}
-                  {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
-                  {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
-                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
-                  {@const isDelete = !!(row.left && row.left.line.type === 'delete' && !row.right)}
-                  {@const isAdd = !!(row.right && row.right.line.type === 'add' && !row.left)}
-                  <div
-                    class="sbs-center-cell"
-                    class:cell-modify={isModify}
-                    class:cell-delete={isDelete}
-                    class:cell-add={isAdd}
-                  >
-                    {#if blockLines}
-                      <button class="sbs-block-stage-btn" class:staged-btn={staged} onclick={() => stageBlock(hunkIdx, blockLines)}
-                              disabled={stageBusy}
-                              aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
-                              title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
-                        <span class="intellij-arrow-glyph" aria-hidden="true">{staged ? '«' : '»'}</span>
-                      </button>
-                    {/if}
-                  </div>
+                {#each visibleSbsGroups[hunkIdx] as group (group.startRow)}
+                  {#each group.rows as row (row.left?.index ?? row.right?.index ?? -1)}
+                    {@const lineIndex = row.left?.index ?? row.right?.index ?? -1}
+                    {@const blockLines = canStage && onStageLines && isHunkComplete(hunkIdx) ? blockFirstByHunk.get(hunkIdx)?.get(lineIndex) : undefined}
+                    {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
+                    {@const isDelete = !!(row.left && row.left.line.type === 'delete' && !row.right)}
+                    {@const isAdd = !!(row.right && row.right.line.type === 'add' && !row.left)}
+                    <div
+                      class="sbs-center-cell"
+                      class:cell-modify={isModify}
+                      class:cell-delete={isDelete}
+                      class:cell-add={isAdd}
+                    >
+                      {#if blockLines}
+                        <button class="sbs-block-stage-btn" class:staged-btn={staged} onclick={() => stageBlock(hunkIdx, blockLines)}
+                                disabled={stageBusy}
+                                aria-label={staged ? t('file.unstageBlock') : t('file.stageBlock')}
+                                title={staged ? t('file.unstageBlock') : t('file.stageBlock')}>
+                          <span class="intellij-arrow-glyph" aria-hidden="true">{staged ? '«' : '»'}</span>
+                        </button>
+                      {/if}
+                    </div>
+                  {/each}
                 {/each}
               </div>
             {/each}
@@ -951,7 +1045,7 @@
         <div class="sbs-pane sbs-right" bind:this={sbsRightEl} onscroll={handleSbsScroll}>
           <div class="sbs-inner">
             <!-- SNIPCODE-HOOK: perf — paintHunks (progressive reveal), see the paint pass -->
-            {#each paintHunks as hunk, hunkIdx}
+            {#each renderHunks as hunk, hunkIdx}
               {@const hunkStart = hunk.oldStart}
               {#if hunkIdx > 0}<div class="hunk-separator" aria-hidden="true"></div>{/if}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -963,23 +1057,25 @@
                 oncontextmenu={(e) => handleLineContextMenu(e, hunkIdx)}
               >
                 <!-- SNIPCODE-HOOK start: Batch C shared aligned SBS rows. -->
-                {#each sbsRows[hunkIdx] as row}
-                  {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
-                  {#if row.right}
-                    {@const line = row.right.line}
-                    {@const sourceIndex = row.right.index}
-                    <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
-                      <span class="line-num">{line.newLineNumber ?? ''}</span>
-                      <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
-                      {@render crMarker(line)}
-                      {@render noNewlinePill(line)}
-                    </div>
-                  {:else}
-                    <div class="diff-line diff-empty-line">
-                      <span class="line-num"></span>
-                      <span class="line-content"></span>
-                    </div>
-                  {/if}
+                {#each visibleSbsGroups[hunkIdx] as group (group.startRow)}
+                  {#each group.rows as row (row.left?.index ?? row.right?.index ?? -1)}
+                    {@const isModify = !!(row.left && row.right && row.left.line.type === 'delete' && row.right.line.type === 'add')}
+                    {#if row.right}
+                      {@const line = row.right.line}
+                      {@const sourceIndex = row.right.index}
+                      <div class="diff-line diff-{line.type}" class:diff-modify={isModify}>
+                        <span class="line-num">{line.newLineNumber ?? ''}</span>
+                        <span class="line-content">{@html getHighlighted(hunkStart, sourceIndex, line.content)}</span>
+                        {@render crMarker(line)}
+                        {@render noNewlinePill(line)}
+                      </div>
+                    {:else}
+                      <div class="diff-line diff-empty-line">
+                        <span class="line-num"></span>
+                        <span class="line-content"></span>
+                      </div>
+                    {/if}
+                  {/each}
                 {/each}
                 <!-- SNIPCODE-HOOK end -->
               </div>

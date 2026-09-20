@@ -7,7 +7,7 @@ export async function checkPerformance(budgets) {
   const entryMs = performance.now();
   let observer;
   try {
-    assert(JSON.stringify(Object.keys(budgets).sort()) === JSON.stringify(['cold', 'large', 'refresh', 'small', 'theme']), 'Missing or unknown performance workload budget');
+    assert(JSON.stringify(Object.keys(budgets).sort()) === JSON.stringify(['cold', 'large', 'refresh', 'singleHunk', 'small', 'theme']), 'Missing or unknown performance workload budget');
     for (const limits of Object.values(budgets)) {
       assert(JSON.stringify(Object.keys(limits).sort()) === JSON.stringify(['firstMs', 'fullMs', 'maxLongTaskMs']), 'Missing or unknown performance metric budget');
     }
@@ -100,6 +100,19 @@ export async function checkPerformance(budgets) {
     assert(longTasks.some(t => t.startTime + t.duration >= probeStart && t.duration >= 75), 'Long Tasks observer failed its blocking probe');
     await run('theme', last, { theme: 'vscode-dark' });
     await run('theme', last, { theme: 'vscode-light' });
+    // A newly added file is one large hunk: small hunks hide repeated prefix work.
+    for (let i = 0; i < 3; i++) {
+      const marker = `single-hunk-${i}`;
+      await run('singleHunk', {
+        file: `${marker}.sql`, isBinary: false, isImage: false, fingerprint: marker,
+        hunks: [{
+          header: '@@ -0,0 +1,3000 @@', oldStart: 0, newStart: 1, oldLines: 0, newLines: 3000,
+          lines: Array.from({ length: 3000 }, (_, line) => ({
+            type: 'add', content: `select '${marker}', ${line};`, newLineNumber: line + 1,
+          })),
+        }],
+      });
+    }
     const summary = {}, failures = [];
     for (const [kind, limits] of Object.entries(budgets)) {
       const rows = samples.filter(s => s.kind === kind);
