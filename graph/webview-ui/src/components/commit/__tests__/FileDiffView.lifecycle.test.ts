@@ -227,7 +227,14 @@ describe('FileDiffView lifecycle', () => {
     }
 
     const view = render(FileDiffView, { diff, diffMode: 'side-by-side' });
-    await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(1200));
+    /* SNIPCODE-HOOK start: a reveal waitFor must carry an explicit timeout BELOW
+       its enclosing test's timeout — waitFor's own default is 1s, which 1200
+       progressively-revealed rows do not reach, so a bare wait here fails
+       ("to have a length of 1200 but got 1080") and the test's 15000 ceiling
+       never applies. 10000 < 15000 keeps the assertion, not the test, losing
+       first. */
+    await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(1200), { timeout: 10000 });
+    /* SNIPCODE-HOOK end */
 
     // Each source line is paired once and rendered once per pane. Re-reading the
     // entire revealed prefix per batch is the previous quadratic behavior.
@@ -303,7 +310,9 @@ describe('FileDiffView lifecycle', () => {
 
   it('does not reuse old-theme tail entries when a theme pass is interrupted by refresh', async () => {
     const view = render(FileDiffView, { diff: manyLineDiff(600) });
-    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="dark-plus"]')).toHaveLength(600));
+    /* SNIPCODE-HOOK start: 600-row reveals spanning batches — explicit timeouts
+       under the it()'s 5000ms default, same rule as above. */
+    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="dark-plus"]')).toHaveLength(600), { timeout: 4000 });
 
     highlighterState.workerEnabled = true;
     await changeToLightTheme();
@@ -319,7 +328,8 @@ describe('FileDiffView lifecycle', () => {
     await view.rerender({ diff: refreshed });
     expect(interrupted.signal.aborted).toBe(true);
     interrupted.resolve(Array(interrupted.length).fill('<span data-stale-theme-pass>obsolete</span>'));
-    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600));
+    await waitFor(() => expect(view.container.querySelectorAll('[data-theme="light-plus"]')).toHaveLength(600), { timeout: 4000 });
+    /* SNIPCODE-HOOK end */
     expect(view.container.querySelector('[data-theme="dark-plus"]')).toBeNull();
     expect(view.container.querySelector('[data-stale-theme-pass]')).toBeNull();
     expect(view.container.textContent).toContain('const refreshedTail = 599;');
@@ -468,13 +478,22 @@ describe('FileDiffView lifecycle', () => {
   it.each(['inline', 'side-by-side'] as const)('reveals every row of a file it cannot highlight (%s)', async mode => {
     highlighterState.lang = '';
     const view = render(FileDiffView, { diff: manyHunkDiff(500), diffMode: mode });
+    /* SNIPCODE-HOOK start: same rule as the reveal wait above — a wait that spans
+       reveal batches needs an explicit timeout BELOW its enclosing test's, because
+       waitFor's default is 1s. This was the thinnest margin left in the file:
+       measured 867ms for the whole test under full-suite load, nearly all of it
+       inside this wait, i.e. ~1.2x. The sibling at :236 was in the same band and
+       really did fail ("got 1080"). The it() here carries no timeout, so vitest's
+       5000ms default applies and 10000 would outrank it — 4000 keeps the
+       assertion losing first. */
     await waitFor(() => {
       if (mode === 'inline') expect(view.container.querySelectorAll('.diff-content .diff-line').length).toBe(500);
       else {
         expect(view.container.querySelectorAll('.sbs-left .diff-line').length).toBe(500);
         expect(view.container.querySelectorAll('.sbs-right .diff-line').length).toBe(500);
       }
-    });
+    }, { timeout: 4000 });
+    /* SNIPCODE-HOOK end */
     expect(view.container.querySelectorAll('[data-highlighted]').length).toBe(0);
   });
 
