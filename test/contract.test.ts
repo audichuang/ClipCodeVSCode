@@ -17,7 +17,7 @@ import { estimateTokens, payloadStats } from '../src/copy.js';
 // sides assert their build + parse match these frozen bytes, so neither can drift
 // from the contract without a red test. Regenerate via scripts/gen-contract-fixtures.cjs
 // and update EXPECTED_FIXTURES_SHA on BOTH sides.
-const EXPECTED_FIXTURES_SHA = '1af7c6b768be54c4b2d3611fedaf742799ce8eae128119f838c7145188b2d23c';
+const EXPECTED_FIXTURES_SHA = 'ea413ab8171060e7b47479990687a5a22f8fb810bc28b9ac5ea310a34fbe26d3';
 const FIXTURES_PATH = path.join(process.cwd(), 'test', 'fixtures', 'clipboard-contract.json');
 
 interface BuildOptions {
