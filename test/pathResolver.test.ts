@@ -131,6 +131,36 @@ test('write targets may follow a symlink that stays inside, never one that escap
   });
 });
 
+test('a workspace root that does not exist yet is canonicalized like its targets', async () => {
+  // Builds its own symlink instead of relying on the host: on macOS /tmp IS a symlink to
+  // /private/tmp, so the bug this guards reproduced there and was INVISIBLE on Linux — the
+  // whole suite stayed green with the fix reverted. A test that can only fail on one OS is
+  // not a guard, so the condition is constructed here and the assertion holds everywhere.
+  //
+  // The bug: containmentTarget() resolves the target through its deepest EXISTING ancestor,
+  // but the ROOT side used realpath and gave up when the root itself did not exist yet,
+  // returning the unresolved path. The two then lived in different namespaces and a
+  // perfectly safe create was refused as an escape.
+  await withTempDir(async parent => {
+    const real = path.join(parent, 'real');
+    await mkdir(real, { recursive: true });
+    await symlink(real, path.join(parent, 'link'), 'dir');
+
+    // Reached through the link, and not created yet — exactly a fresh restore destination.
+    const root = path.join(parent, 'link', 'workspace');
+    const resolved = resolveWriteTarget([root], 'src/New.ts');
+    assert.equal(resolved.ok, true, 'a safe create under a not-yet-created root must be allowed');
+
+    // The guard itself must still bite: a link inside that root pointing out of it escapes.
+    const escapeRoot = path.join(parent, 'link', 'ws2');
+    await mkdir(path.join(real, 'ws2'), { recursive: true });
+    await symlink(path.join(parent, 'outside'), path.join(real, 'ws2', 'out'), 'dir');
+    await mkdir(path.join(parent, 'outside'), { recursive: true });
+    const escaping = resolveWriteTarget([escapeRoot], 'out/escape.ts');
+    assert.equal(escaping.ok, false, 'a link leaving the root must still be refused');
+  });
+});
+
 async function withTempDir(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'clipcode-path-'));
   try {

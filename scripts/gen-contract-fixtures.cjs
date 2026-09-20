@@ -89,6 +89,24 @@ const buildInputs = [
     },
   },
   {
+    // A header format with the placeholder TWICE. The builder substitutes both slots, and
+    // the parser must read the pair back as ONE file whose path appears identically in
+    // each slot. Both sides used to anchor on the FIRST placeholder only, so
+    // `// a.ts -> a.ts` matched nothing and the whole payload parsed to zero files.
+    // Pinned here because two independent unit tests are not a cross-tool contract: this
+    // is the only thing that makes the two implementations agree on the same bytes.
+    name: 'regular: repeated $FILE_PATH placeholders',
+    kind: 'regular',
+    options: {
+      headerFormat: '### $FILE_PATH -> $FILE_PATH ###', preText: '', postText: '',
+      addExtraLineBetweenFiles: false,
+      sourceRoot: 'myrepo',
+      // `$&` and `$$` are regex-replacement metacharacters; substitution is a literal
+      // string replace on both sides, so they must survive verbatim in BOTH slots.
+      files: [{ path: 'src/Cost$&$$plan[1].ts', content: 'x();' }],
+    },
+  },
+  {
     name: 'regular: permissive header format suppresses the metadata line',
     kind: 'regular',
     options: {
@@ -250,6 +268,20 @@ const parseInputs = [
     name: 'parse: two files, default header',
     headerFormat: DEFAULT_HEADER,
     input: '// file: src/a.ts\na();\n// file: src/b.ts\nb();',
+  },
+  {
+    // The repeated-placeholder header, parse direction. The captured path must be reused
+    // as a backreference, not re-matched loosely.
+    name: 'parse: repeated $FILE_PATH placeholders read back as one file',
+    headerFormat: '### $FILE_PATH -> $FILE_PATH ###',
+    input: '### src/Cost$&$$plan[1].ts -> src/Cost$&$$plan[1].ts ###\nx();',
+  },
+  {
+    // The two slots disagreeing is NOT a header — it must fall through to content, or a
+    // hand-edited payload silently invents a file.
+    name: 'parse: repeated $FILE_PATH placeholders reject mismatched paths',
+    headerFormat: '### $FILE_PATH -> $FILE_PATH ###',
+    input: '### src/a.ts -> src/b.ts ###\nx();',
   },
   {
     name: 'parse: leading clipcode-root metadata line is dropped',
