@@ -11,10 +11,12 @@ class DiffStore {
   /* SNIPCODE-HOOK start: Batch B image request identity */
   generation = $state(0);
   /* SNIPCODE-HOOK end */
+  /* SNIPCODE-HOOK start: perf — immutable snapshots; avoid proxying each hunk/line. */
   /** HEAD ↔ index (git diff --cached). null when nothing is staged for this file. */
-  stagedDiff = $state<DiffData | null>(null);
+  stagedDiff = $state.raw<DiffData | null>(null);
   /** index ↔ working tree (git diff). null when nothing is unstaged for this file. */
-  unstagedDiff = $state<DiffData | null>(null);
+  unstagedDiff = $state.raw<DiffData | null>(null);
+  /* SNIPCODE-HOOK end */
   /** Soft error surfaced when a stage/unstage round-trip fails. */
   error = $state<string | null>(null);
   /* SNIPCODE-HOOK start: Batch D clear stale body during navigation */

@@ -65,6 +65,32 @@ describe('Diff.svelte unified view', () => {
     expect(getByText('Unstaged')).toBeTruthy();
   });
 
+  /* SNIPCODE-HOOK start: perf — raw diff snapshots still notify on replacement. */
+  it('updates displayed line stats when a new diff snapshot replaces the old one', async () => {
+    diffStore.setDiffs('/r', 'src/a.ts', null, textDiff());
+    const { container } = render(Diff);
+    expect(container.querySelector('.side-stats')?.getAttribute('aria-label')).toBe('+1 −0');
+
+    const updated: DiffData = {
+      ...textDiff(),
+      hunks: [{
+        ...textDiff().hunks[0],
+        oldLines: 1,
+        newLines: 2,
+        lines: [
+          { type: 'delete', content: 'old', oldLineNumber: 1 },
+          { type: 'add', content: 'new one', newLineNumber: 1 },
+          { type: 'add', content: 'new two', newLineNumber: 2 },
+        ],
+      }],
+    };
+    diffStore.setDiffs('/r', 'src/a.ts', null, updated);
+    await tick();
+
+    expect(container.querySelector('.side-stats')?.getAttribute('aria-label')).toBe('+2 −1');
+  });
+  /* SNIPCODE-HOOK end */
+
   it('renders only the Unstaged section when nothing is staged', () => {
     diffStore.setDiffs('/r', 'src/a.ts', null, textDiff());
     const { container, getByText, queryByText } = render(Diff);
