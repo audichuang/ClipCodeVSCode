@@ -150,6 +150,18 @@ afterEach(() => {
 });
 
 describe('FileDiffView lifecycle', () => {
+  // Budget note (measured on a 12-core Linux box, happy-dom 20.9 / svelte 5.55):
+  // inline 3000 lines finishes in ~1s, side-by-side in ~20s, and the cost is
+  // super-quadratic (sbs 750/1500/3000 → 0.8/4.3/23s). It is the component, not
+  // the DOM shim: the same 3000 lines split into 300 small hunks runs sbs in
+  // ~3.5s. `manyLineDiff` is ONE hunk, so every reveal step re-slices it
+  // (FileDiffView.svelte paintHunks), which misses the `lines`-keyed sbsCache
+  // WeakMap, rebuilds fresh SbsRow wrappers for every already-revealed row, and
+  // makes the three unkeyed `{#each sbsRows[hunkIdx] as row}` loops re-evaluate
+  // the whole revealed prefix once per step — O(n²/STEP). Inline is spared
+  // because slicing preserves DiffLine identity. The old 15s/20s budget passed
+  // only on a fast machine; it is a CPU-speed assumption, not a guard, so it is
+  // sized generously here. The real assertion is `firstRowReads` below.
   it.each(['inline', 'side-by-side'] as const)('does not repeatedly read old rows as new batches arrive (%s)', async mode => {
     const key = JSON.stringify(['src/large.ts', 1, 0, 'const value0 = 0;']);
     const original = Map.prototype.get;
@@ -160,10 +172,10 @@ describe('FileDiffView lifecycle', () => {
     });
     try {
       const view = render(FileDiffView, { diff: manyLineDiff(3000), diffMode: mode });
-      await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(mode === 'inline' ? 3000 : 6000), { timeout: 15000 });
+      await waitFor(() => expect(view.container.querySelectorAll('[data-highlighted]')).toHaveLength(mode === 'inline' ? 3000 : 6000), { timeout: 90000 });
       expect(firstRowReads).toBeLessThanOrEqual(10);
     } finally { spy.mockRestore(); }
-  }, 20000);
+  }, 120000);
 
   it('does not reuse old-theme tail entries when a theme pass is interrupted by refresh', async () => {
     const view = render(FileDiffView, { diff: manyLineDiff(600) });

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { decodeUtf8OrSkip } from './fileSystem.js';
 
 export interface ContentRepo {
@@ -7,15 +8,21 @@ export interface ContentRepo {
 }
 
 export function normalizeFsPath(value: string): string {
-  // Trim a trailing separator so a repo root like '/repo/' compares equal to
-  // '/repo' (resolveRepo) and repoRelativePath's slice(length+1) stays correct.
+  // A COMPARISON KEY only — it case-folds on win32, so it must never be returned as a
+  // path. Trims a trailing separator so a repo root like '/repo/' compares equal to '/repo'.
   const normalized = value.replaceAll('\\', '/').replace(/\/+$/, '');
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 export function repoRelativePath(repoRootFsPath: string, fileFsPath: string): string {
-  const relativePath = normalizeFsPath(fileFsPath).slice(normalizeFsPath(repoRootFsPath).length + 1);
-  return relativePath.replaceAll('\\', '/');
+  // path.relative, NOT a slice of normalizeFsPath's output. normalizeFsPath lowercases on
+  // win32 — correct for a comparison KEY, wrong for a value we hand to git: this returned
+  // `src/myfile.ts` for `src/MyFile.ts` on Windows only, and `git show <ref>:<path>` looks
+  // up tree entries byte-exactly no matter what core.ignorecase says, so every mixed-case
+  // file missed on its first candidate. The bug could not surface on Linux or macOS CI, and
+  // test/gitContent.test.ts uses all-lowercase POSIX paths, so nothing caught it.
+  // Case-folding for comparison stays in normalizeFsPath; this returns the real spelling.
+  return path.relative(repoRootFsPath, fileFsPath).split(path.sep).join('/');
 }
 
 export function decodeText(bytes: Uint8Array): string | undefined {
