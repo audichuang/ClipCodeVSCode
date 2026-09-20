@@ -1,0 +1,11 @@
+# The cross-tool contract goldens are hashed BYTE-FOR-BYTE and the hash is pinned in
+# test/contract.test.ts (and byte-identically in the IntelliJ twin). Git for Windows
+# installs with core.autocrlf=true by DEFAULT, which rewrites this file on checkout:
+# the suite then fails on a clean clone before a single line is edited, and the failure
+# message sends you to regenerate the fixture — which can never converge, because
+# gen-contract-fixtures.cjs writes LF and git hands it back as CRLF. Pasting the CRLF
+# hash "fixes" it for that one machine and breaks every other one, desynchronising the
+# very contract the file exists to freeze. Never translate it.
+test/fixtures/clipboard-contract.json -text
+
+*.sh text eol=lf
