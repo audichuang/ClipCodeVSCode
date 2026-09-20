@@ -1,8 +1,9 @@
 // Run after build:graph-webview. Real Chromium layout, not happy-dom.
 // CHROME_BIN overrides the local Chrome/Chromium executable. No browser download.
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir, cpus, platform, arch } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
@@ -93,8 +94,29 @@ const metadata = { startedAt: new Date().toISOString(), platform: platform(), ar
     [name, createHash('sha256').update(await readFile(join(assets, name))).digest('hex')]))), };
 await writeFile(reportPath, JSON.stringify({ ...metadata, status: 'running' }, null, 2));
 await access(join(assets, 'diff.js'));
-const chrome = process.env.CHROME_BIN || (process.platform === 'darwin'
-  ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : 'chromium');
+// CHROME_BIN wins; otherwise take the first browser that is actually installed.
+// This used to be the bare name 'chromium' on every non-darwin platform, so a Linux box
+// with Google Chrome but no `chromium` could not run this gate AT ALL — it died with
+// "spawn chromium ENOENT" before any check, which reads as "gate skipped" rather than
+// "gate missing". A machine-dependent gate is the same class of bug as a machine-dependent
+// test. Absolute paths are probed directly; bare names go through which/where.
+const chrome = process.env.CHROME_BIN || findChrome();
+
+function findChrome() {
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+       '/Applications/Chromium.app/Contents/MacOS/Chromium', 'google-chrome', 'chromium']
+    : process.platform === 'win32'
+      ? ['chrome.exe', 'msedge.exe']
+      : ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'chrome'];
+  for (const candidate of candidates) {
+    if (candidate.includes(sep)) { if (existsSync(candidate)) return candidate; continue; }
+    const found = spawnSync(process.platform === 'win32' ? 'where' : 'which', [candidate], { encoding: 'utf8' });
+    if (found.status === 0 && found.stdout.trim()) return found.stdout.trim().split(/\r?\n/)[0];
+  }
+  // Nothing found: fall through to the historical name so the failure names a browser.
+  return candidates[0];
+}
 const profile = await mkdtemp(join(tmpdir(), 'snipcode-layout-'));
 let complete, browser, timer, stderr = '';
 const result = new Promise(resolve => { complete = resolve; });
@@ -137,5 +159,11 @@ try {
     browser.kill(); await exited; clearTimeout(forceStop);
   }
   server.closeAllConnections(); server.close();
-  await rm(profile, { recursive: true, force: true });
+  // Chrome's children can still be flushing into the profile when we unlink it, so a bare
+  // rm -rf races and throws ENOTEMPTY — node retries exactly these errno's for us. And this
+  // runs in `finally`: a throw here REPLACES the real outcome, so a genuine budget failure
+  // would be reported as a temp-dir error, and a clean pass would exit 1. Cleanup must never
+  // decide the exit code.
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    .catch(error => console.warn(`warning: could not remove ${profile}: ${error.message}`));
 }
