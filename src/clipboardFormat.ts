@@ -286,11 +286,12 @@ function isLikelyBareFileHeaderPath(rawPath: string): boolean {
 
 function toHeaderPattern(headerFormat: string): RegExp | undefined {
   const placeholder = '$FILE_PATH';
-  const index = headerFormat.indexOf(placeholder);
-  if (index < 0) return undefined;
-  const prefix = escapeRegex(headerFormat.slice(0, index));
-  const suffix = escapeRegex(headerFormat.slice(index + placeholder.length));
-  return new RegExp(`^${prefix}(.+?)${suffix}$`);
+  const segments = headerFormat.split(placeholder);
+  if (segments.length < 2) return undefined;
+  const repeated = segments.slice(1, -1).map(segment => `${escapeRegex(segment)}(?:\\1)`).join('');
+  return new RegExp(
+    `^${escapeRegex(segments[0])}(.+?)${repeated}${escapeRegex(segments[segments.length - 1])}$`
+  );
 }
 
 function escapeRegex(value: string): string {

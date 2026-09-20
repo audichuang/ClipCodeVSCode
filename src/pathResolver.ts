@@ -606,11 +606,7 @@ function containmentTarget(targetPath: string, hops = 0): string | undefined {
 }
 
 function realOrSelf(value: string): string {
-  try {
-    return realpathSync(path.resolve(value));
-  } catch {
-    return path.resolve(value);
-  }
+  return containmentTarget(value) ?? path.resolve(value);
 }
 
 function countValues(values: string[]): Map<string, number> {

@@ -39,6 +39,8 @@ test('labels files from sibling workspace roots', async () => {
 });
 
 test('resolves safe restore target under workspace root', () => {
+  // Keep the root missing: on macOS /tmp is a symlink, so containment must canonicalize
+  // the nearest existing parent on both the target and root sides.
   const root = path.resolve('/tmp/project');
   const resolved = resolveRestoreTarget(root, 'src/main.ts');
   assert.equal(resolved.ok, true);
