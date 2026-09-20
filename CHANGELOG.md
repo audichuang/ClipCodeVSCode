@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.3.49
+
+- **Upgrade both tools together.** A payload with a configured post text now ends
+  the last file with a `// clipcode-end` line. Older Snipcode/ClipCode builds do
+  not know that line and will write it into the last file's content. The marker
+  exists because without it the post text itself was written into that file —
+  including over a real file the copy side had only stubbed out, which turned a
+  1100-byte file into a 58-byte stub.
+- Restore can no longer write or delete outside the workspace. A `[DELETED]`
+  entry followed a directory symlink and removed a file outside it; containment
+  is now decided by a real filesystem resolve, re-checked immediately before the
+  write, and a link that stays inside the workspace still works (pnpm layouts).
+- An absolute path matching no workspace root is refused instead of guessed at.
+- A file that is not UTF-8 is no longer overwritten on restore, and a target that
+  cannot be read or is over 8 MiB is treated the same way rather than assumed
+  safe. Empty files are copied instead of dropped; a leading BOM is preserved.
+- The Graph surface now applies your ordinary filters, labels a multi-repo
+  payload the way restore can read back, and de-duplicates per repository. A file
+  in a second repository used to overwrite the first one's same-named file.
+- A merge commit copies the union of its diffs against every parent, on the
+  History surface as well as the Graph. A deleted file carries its pre-deletion
+  content everywhere instead of a bare marker on some surfaces.
+- Git blob reads go through the strict UTF-8 decoder first, so a Big5 or
+  Shift_JIS blob is skipped rather than handed back as U+FFFD mojibake.
+- Binary, non-UTF-8 and unreadable files are counted in the copy notification
+  instead of going missing in silence. An unreadable directory costs its own
+  subtree rather than the whole copy.
+- Directory symlinks are walked only when one IS the selected folder, never
+  during recursion — a cross-linked tree no longer fills the copy with aliases.
+- A header format containing `$FILE_PATH` twice now round-trips instead of
+  parsing to zero files, and `*.txt` style filters, control characters in paths,
+  and the Turkish dotless `ı` behave identically in both tools.
+- The Diff panel no longer wraps every hunk and line of a staged/unstaged
+  snapshot in a reactive proxy. On a 3000-line single-hunk file that halved the
+  longest blocking task (146-188ms down to 110-131ms on a mid-range desktop), so
+  the first paint no longer stutters on large new files.
+- `npm run test:precommit` now finds an installed Chrome/Chromium/Edge instead of
+  only a binary literally named `chromium`, and its temp-profile cleanup can no
+  longer turn a clean pass into a failure or mask a real one.
+
 ## 0.3.48
 
 - Restore no longer overwrites a real file with the placeholder comment the copy
