@@ -64,12 +64,11 @@ describe('Snipcode × git-graph-plus integration', () => {
     const gitApi = (await gitExt!.activate()).getAPI(1);
     const repo = await waitForRepo(gitApi, repoDir);
 
-    // commit B is HEAD.
-    const log = await repo.log({ maxEntries: 1 });
-    const hashB = log[0].hash;
+    const commitB = (await repo.log({ maxEntries: 5 })).find((commit: any) => commit.message.startsWith('commit B:'));
+    assert.ok(commitB, 'commit B exists in the actual Git history');
 
     const payload: GraphCopyPayload = {
-      hash: hashB,
+      hash: commitB!.hash,
       files: [
         { repoRootFsPath: repoDir, relativePath: 'a.ts', status: 'M' },
         { repoRootFsPath: repoDir, relativePath: 'del.ts', status: 'D' },
@@ -93,6 +92,45 @@ describe('Snipcode × git-graph-plus integration', () => {
     assert.doesNotMatch(clip, /This file has been deleted/, 'the marker is only a fallback');
     assert.match(clip, /\[MOVED\] new\.ts/, 'moved header');
     assert.match(clip, /\[NEW\] added\.ts/, 'new header');
+  });
+
+  it('END-TO-END copies committed files contributed by both merge parents', async () => {
+    const gitExt = vscode.extensions.getExtension('vscode.git');
+    const gitApi = (await gitExt!.activate()).getAPI(1);
+    const repo = await waitForRepo(gitApi, repoDir);
+    const merge = (await repo.log({ maxEntries: 1 }))[0];
+    assert.equal(merge.message, 'merge side branches');
+    assert.equal(merge.parents.length, 3, 'fixture must be a real octopus merge');
+
+    await api.copyFullSourceAtCommit({
+      hash: merge.hash,
+      files: [
+        { repoRootFsPath: repoDir, relativePath: 'side1.ts', status: 'A' },
+        { repoRootFsPath: repoDir, relativePath: 'side2.ts', status: 'A' },
+      ],
+    });
+    const clip = await vscode.env.clipboard.readText();
+    assert.match(clip, /export const side1 = true;/, 'content contributed by merge parent 2');
+    assert.match(clip, /export const side2 = true;/, 'content contributed by merge parent 3');
+  });
+
+  it('History copy lists and copies files contributed by every real merge parent', async () => {
+    const gitExt = vscode.extensions.getExtension('vscode.git');
+    const gitApi = (await gitExt!.activate()).getAPI(1);
+    const repo = await waitForRepo(gitApi, repoDir);
+    const merge = (await repo.log({ maxEntries: 5 })).find((commit: any) => commit.message === 'merge side branches');
+    assert.ok(merge, 'merge commit found in the actual Git history');
+    assert.equal(merge!.parents.length, 3);
+
+    // Drive the registered History command with a commit node; its provider calls the real
+    // vscode.git diff API against every parent, then reads the resulting committed blobs.
+    await vscode.commands.executeCommand('clipcode.history.copyFullSource', {
+      kind: 'commit', commit: merge, contextValue: 'commit',
+    });
+    const clip = await vscode.env.clipboard.readText();
+
+    assert.match(clip, /side1\.ts/, 'History includes the file from merge parent 2');
+    assert.match(clip, /side2\.ts/, 'History includes the file from merge parent 3');
   });
 
   it('END-TO-END copies WORKING-TREE source for the UNCOMMITTED view', async () => {

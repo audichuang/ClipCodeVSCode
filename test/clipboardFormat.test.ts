@@ -17,6 +17,21 @@ test('formats default and labeled headers like IntelliJ ClipCode', () => {
   assert.equal(formatHeader('$FILE_PATH -> $FILE_PATH', 'src/main.ts'), 'src/main.ts -> src/main.ts');
 });
 
+test('repeated path placeholders round-trip as the same literal path', () => {
+  const format = '$FILE_PATH -> $FILE_PATH';
+  const filePath = 'src/$&$$.ts';
+  const payload = buildPayload({
+    headerFormat: format,
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: false,
+    files: [{ path: filePath, content: 'content' }]
+  });
+
+  assert.deepEqual(parseClipboard(payload, format).map(entry => [entry.path, entry.content]), [[filePath, 'content']]);
+  assert.deepEqual(parseClipboard('one -> two\ncontent', format), []);
+});
+
 test('escapes a CRLF content line that would parse as a custom header', () => {
   const format = '### $FILE_PATH';
   // buildPayload escapes via split('\n'), so the line still carries its \r; the parser

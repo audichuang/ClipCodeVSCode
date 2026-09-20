@@ -9,9 +9,10 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
 }
 
-// Build the temp fixture repo with the exact 2 commits the suite asserts on:
+// Build the temp fixture repo with a base, a linear change, and an octopus merge:
 //   commit A: add a.ts, del.ts, old.ts
 //   commit B: modify a.ts, delete del.ts, rename old.ts -> new.ts, add added.ts
+//   merge M: add side1.ts and side2.ts from separate parents
 function makeFixtureRepo(): string {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snipcode-e2e-'));
   const write = (rel: string, content: string) => fs.writeFileSync(path.join(repoDir, rel), content);
@@ -36,6 +37,20 @@ function makeFixtureRepo(): string {
   git(repoDir, 'add', '-A');
   git(repoDir, 'commit', '-m', 'commit B: modify/delete/rename/add');
 
+  git(repoDir, 'switch', '-c', 'side1');
+  write('side1.ts', 'export const side1 = true;\n');
+  git(repoDir, 'add', '-A');
+  git(repoDir, 'commit', '-m', 'side branch 1');
+
+  git(repoDir, 'switch', 'main');
+  git(repoDir, 'switch', '-c', 'side2');
+  write('side2.ts', 'export const side2 = true;\n');
+  git(repoDir, 'add', '-A');
+  git(repoDir, 'commit', '-m', 'side branch 2');
+
+  git(repoDir, 'switch', 'main');
+  git(repoDir, 'merge', '--no-ff', '-m', 'merge side branches', 'side1', 'side2');
+
   return repoDir;
 }
 
@@ -48,6 +63,7 @@ async function main(): Promise<void> {
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
+      vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH,
       launchArgs: [
         repoDir,
         '--no-sandbox',
