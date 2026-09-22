@@ -352,7 +352,11 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   await vscode.env.clipboard.writeText(payload);
 
   if (settings.showCopyNotification) {
-    const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
+    const reasons = [
+      ...(result.skippedFileSizeCount > 0 ? [`${result.skippedFileSizeCount} skipped: size exceeded`] : []),
+      ...(result.skippedUnreadableCount > 0 ? [`${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable`] : [])
+    ];
+    const skipped = reasons.length > 0 ? ` (${reasons.join(', ')})` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
     notifyCopied(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`, payload);
   }
@@ -542,6 +546,7 @@ export async function collectGitPayloadFiles(
   files: PayloadFile[];
   copiedFileCount: number;
   skippedFileSizeCount: number;
+  skippedUnreadableCount: number;
   fileLimitReached: boolean;
   usesRegularSpacing: boolean;
 }> {
@@ -549,6 +554,7 @@ export async function collectGitPayloadFiles(
   const seen = new Set<string>();
   let copiedFileCount = 0;
   let skippedFileSizeCount = 0;
+  let skippedUnreadableCount = 0;
   let fileLimitReached = false;
   let usesFallbackGitPayload = false;
 
@@ -624,6 +630,16 @@ export async function collectGitPayloadFiles(
     }
 
     files.push({ path: candidate.clipboardPath, content, changeType: candidate.changeType });
+    // An unreadable placeholder is not a copied file: it says the opposite. Counting it
+    // reported "1 Git file(s) copied" for a file whose content never left the repository,
+    // and — worse — it consumed the file-count limit, so with a limit of 1 the next REAL
+    // file was dropped in favour of a note saying nothing could be read. Matches
+    // GitClipboardPayloadBuilder on the IntelliJ side; the marker still travels in the
+    // payload, where both restore planners refuse to write it over a real file.
+    if (content === UNREADABLE_FILE_MARKER) {
+      skippedUnreadableCount++;
+      continue;
+    }
     copiedFileCount++;
   }
 
@@ -631,6 +647,7 @@ export async function collectGitPayloadFiles(
     files,
     copiedFileCount,
     skippedFileSizeCount,
+    skippedUnreadableCount,
     fileLimitReached,
     usesRegularSpacing: !usesFallbackGitPayload
   };

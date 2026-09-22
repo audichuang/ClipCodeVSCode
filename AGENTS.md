@@ -48,6 +48,9 @@ TS-side pins for the shared invariants:
   — it is the NORMAL path for Graph/PR/commit copies (`readRefContent` is only the
   spawn-failure fallback), so it must use `decodeUtf8OrSkip`, never
   `Buffer.toString('utf8')`.
+- `collectGitPayloadFiles` does not count `UNREADABLE_FILE_MARKER` as a copied file and does
+  not let it consume `fileCountLimit` — it is still pushed into the payload. Mirror of
+  `GitClipboardPayloadBuilder`; see the work-root `AGENTS.md`.
 - Filtering uses `PreparedFile.filterPath` / the clipboard path from
   `toClipboardPathFromRoots`, never a repo-relative header, and `matchesRule` refuses a
   relative PATH rule when that path is absolute — see the work-root `AGENTS.md`. The graph
