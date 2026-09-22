@@ -114,7 +114,8 @@ await access(join(assets, 'diff.js'));
 // "spawn chromium ENOENT" before any check, which reads as "gate skipped" rather than
 // "gate missing". A machine-dependent gate is the same class of bug as a machine-dependent
 // test. Absolute paths are probed directly; bare names go through which/where.
-const chrome = process.env.CHROME_BIN || findChrome() || await downloadHeadlessShell();
+const localBrowser = process.env.CHROME_BIN ? undefined : findChrome();
+const chrome = process.env.CHROME_BIN || localBrowser || await downloadHeadlessShell();
 // Which binary produced these numbers is part of the record the budgets are read against.
 // NOT `browser`: the performance check reports navigator.userAgent under that key and the
 // outcome is spread over the metadata, so the path would be silently replaced in exactly
@@ -175,9 +176,8 @@ async function downloadHeadlessShell() {
       + 'Install Chrome, set CHROME_BIN, or make the download reachable.');
   }
 }
-const profile = await mkdtemp(join(tmpdir(), 'snipcode-layout-'));
-let complete, browser, timer, stderr = '';
-const result = new Promise(resolve => { complete = resolve; });
+// Resolves the CURRENT attempt; the server's /result handler calls it.
+let complete;
 const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/diff.css"><link rel="stylesheet" href="/codicon.css"></head>
 <body class="vscode-dark" data-highlight-worker="/highlight-worker.js" style="--vscode-editor-font-family:monospace;--vscode-editor-font-size:12px"><div id="diff-app"></div>
 <script>window.onerror=(message,source,line,column)=>fetch('/result',{method:'POST',body:JSON.stringify({ok:false,error:String(message)+' at '+source+':'+line+':'+column})});window.onunhandledrejection=e=>window.onerror(e.reason);window.diffReady=new Promise(r=>window.ready=r);window.acquireVsCodeApi=()=>({getState:()=>({diffMode:'side-by-side'}),setState:()=>{},postMessage:m=>{if(m.type==='diffReady')ready()}});</script>
@@ -196,32 +196,61 @@ const server = createServer(async (req, res) => {
     res.end(await readFile(path));
   } catch { res.writeHead(404).end(); }
 });
+// One launch of one browser against the running server. `early` marks an outcome that came
+// from the browser dying or failing to start before posting any result — a fact about that
+// browser on this machine, not about the webview under test.
+async function attempt(browserPath) {
+  const profile = await mkdtemp(join(tmpdir(), 'snipcode-layout-'));
+  let browser, timer, stderr = '';
+  const result = new Promise(resolve => { complete = resolve; });
+  try {
+    browser = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+      '--window-size=1280,900', `--user-data-dir=${profile}`, `http://127.0.0.1:${server.address().port}/`], { stdio: ['ignore', 'ignore', 'pipe'] });
+    browser.stderr.on('data', data => { stderr = (stderr + data).slice(-3000); });
+    browser.once('error', error => complete({ ok: false, early: true, error: `Cannot start ${browserPath}: ${error.message}` }));
+    browser.once('exit', code => complete({ ok: false, early: true, error: `Browser exited before checks completed (${code})` }));
+    timer = setTimeout(() => complete({ ok: false, error: 'Browser checks timed out' }), performanceMode ? 120000 : 30000);
+    return { outcome: await result, stderr };
+  } finally {
+    clearTimeout(timer);
+    if (browser && browser.exitCode === null && browser.signalCode === null) {
+      const exited = new Promise(resolve => browser.once('exit', resolve));
+      const forceStop = setTimeout(() => browser.kill('SIGKILL'), 5000);
+      browser.kill(); await exited; clearTimeout(forceStop);
+    }
+    // Chrome's children can still be flushing into the profile when we unlink it, so a bare
+    // rm -rf races and throws ENOTEMPTY — node retries exactly these errno's for us. And this
+    // runs in `finally`: a throw here REPLACES the real outcome, so a genuine budget failure
+    // would be reported as a temp-dir error, and a clean pass would exit 1. Cleanup must never
+    // decide the exit code.
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      .catch(error => console.warn(`warning: could not remove ${profile}: ${error.message}`));
+  }
+}
 try {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  browser = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-    '--window-size=1280,900', `--user-data-dir=${profile}`, `http://127.0.0.1:${server.address().port}/`], { stdio: ['ignore', 'ignore', 'pipe'] });
-  browser.stderr.on('data', data => { stderr = (stderr + data).slice(-3000); });
-  browser.once('error', error => complete({ ok: false, error: `Cannot start ${chrome}: ${error.message}` }));
-  browser.once('exit', code => complete({ ok: false, error: `Browser exited before checks completed (${code})` }));
-  timer = setTimeout(() => complete({ ok: false, error: 'Browser checks timed out' }), performanceMode ? 120000 : 30000);
-  const outcome = await result;
-  await writeFile(reportPath, JSON.stringify({ ...metadata, status: outcome.ok ? 'passed' : 'failed', ...outcome }, null, 2));
+  let { outcome, stderr } = await attempt(chrome);
+  // A browser this machine happens to have installed that cannot even START headless (seen:
+  // a Homebrew-cask Google Chrome dying with `FATAL … Failed to get the path for 1001` before
+  // loading the page) says nothing about the webview — but it turned the gate red on every
+  // run the moment Chrome was installed. Fall back to the pinned shell, loudly. Never for
+  // CHROME_BIN (an explicit choice fails as chosen), never for the shell itself, and never
+  // on a timeout, which can be the webview hanging — a real signal.
+  if (outcome.early && chrome === localBrowser) {
+    // The exit can arrive before the last stderr chunk, so the tail may be empty.
+    const lastLines = stderr.trim() ? `\n  ${stderr.trim().split('\n').slice(-2).join('\n  ')}` : '';
+    console.warn(`warning: ${chrome} exited before any check ran (${outcome.error});${lastLines}\n` +
+      `  falling back to the pinned chrome-headless-shell ${HEADLESS_SHELL_BUILD}.`);
+    metadata.browserFallbackFrom = chrome;
+    metadata.browserBinary = await downloadHeadlessShell();
+    await writeFile(reportPath, JSON.stringify({ ...metadata, status: 'running' }, null, 2));
+    ({ outcome, stderr } = await attempt(metadata.browserBinary));
+  }
+  const { early, ...recorded } = outcome;
+  await writeFile(reportPath, JSON.stringify({ ...metadata, status: outcome.ok ? 'passed' : 'failed', ...recorded }, null, 2));
   if (!outcome.ok) throw Error(outcome.error + '\n' + stderr);
   console.log(`Diff browser ${performanceMode ? 'performance' : 'layout'} checks passed:`, JSON.stringify(outcome.summary || outcome.results));
   console.log('Report:', reportPath);
 } finally {
-  clearTimeout(timer);
-  if (browser && browser.exitCode === null && browser.signalCode === null) {
-    const exited = new Promise(resolve => browser.once('exit', resolve));
-    const forceStop = setTimeout(() => browser.kill('SIGKILL'), 5000);
-    browser.kill(); await exited; clearTimeout(forceStop);
-  }
   server.closeAllConnections(); server.close();
-  // Chrome's children can still be flushing into the profile when we unlink it, so a bare
-  // rm -rf races and throws ENOTEMPTY — node retries exactly these errno's for us. And this
-  // runs in `finally`: a throw here REPLACES the real outcome, so a genuine budget failure
-  // would be reported as a temp-dir error, and a clean pass would exit 1. Cleanup must never
-  // decide the exit code.
-  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-    .catch(error => console.warn(`warning: could not remove ${profile}: ${error.message}`));
 }
