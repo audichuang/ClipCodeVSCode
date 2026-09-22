@@ -115,3 +115,39 @@ test('an unreadable index entry is left out, never replaced by the working tree'
   ]);
   assert.deepEqual(workspaceReads, []);
 });
+
+test('an unreadable placeholder is not a copied file and does not consume the limit', async () => {
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: {
+      indexChanges: [
+        { uri: new Uri('/repo/broken.ts'), status: 'INDEX_MODIFIED' },
+        { uri: new Uri('/repo/real.ts'), status: 'INDEX_MODIFIED' }
+      ]
+    },
+    show: async (_ref: string, file: string) => {
+      if (file.endsWith('broken.ts')) throw new Error('index read failed');
+      return 'index:real';
+    }
+  };
+  const selected = ['broken.ts', 'real.ts'].map(file => ({ uriKey: `/repo/${file}`, staged: true }));
+
+  const { collectGitPayloadFiles } = await extensionModule;
+  workspaceReads.length = 0;
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, {
+    ...defaultSettings,
+    setMaxFileCount: true,
+    fileCountLimit: 1
+  });
+
+  // The placeholder used to count as a copied file, so a limit of 1 was spent on a note
+  // saying nothing could be read while `real.ts` was dropped — and the notification
+  // reported one file copied. Mirror of GitClipboardPayloadBuilder on the IntelliJ side.
+  assert.deepEqual(result.files, [
+    { path: 'broken.ts', content: '// Unable to read file content', changeType: 'MODIFIED' },
+    { path: 'real.ts', content: 'index:real', changeType: 'MODIFIED' }
+  ]);
+  assert.equal(result.copiedFileCount, 1);
+  assert.equal(result.skippedUnreadableCount, 1);
+  assert.equal(result.fileLimitReached, false);
+});
