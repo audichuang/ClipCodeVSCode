@@ -96,10 +96,20 @@ Snipcode-only edits inside `graph/` must be fenced with
 **Before every commit, after the final edits, run `npm run test:precommit` from
 this root and require exit code 0.** It rebuilds the current Webview and runs
 host/graph tests, real-browser layout and performance gates, and worker parity.
-Missing Chrome, timeouts, failed budgets, or omitted required checks block the
-commit; do not bypass checks or relax budgets to obtain green. Diagnose failures
-and report intentional suite skips separately. The check scope, prerequisites,
-metrics and reports are defined in `docs/testing/diff-webview-regressions.md`.
+A browser that can be neither found nor fetched, timeouts, failed
+budgets, or omitted required checks block the commit; do not bypass checks or relax
+budgets to obtain green. The gates no longer need a preinstalled Chrome: with none
+present, `scripts/verify-diff-layout.mjs` fetches its pinned `HEADLESS_SHELL_BUILD`
+into the gitignored `.cache/browsers/` — which `.vscodeignore` must keep out of the
+VSIX, because `vsce` reads that file and never `.gitignore` (it shipped a 93 MB
+package once). **`proxy-agent` and `yauzl` look unused and must stay:** nothing here
+imports them, they are optional peers `@puppeteer/browsers` loads dynamically, and
+without them the download ignores `HTTPS_PROXY` and needs a system `unzip` — both
+failures happen only on machines unlike the one running the cleanup (see the comment
+above `downloadHeadlessShell()` in `scripts/verify-diff-layout.mjs`). Diagnose
+failures and report intentional suite skips separately. The check scope,
+prerequisites, metrics and reports are defined in
+`docs/testing/diff-webview-regressions.md`.
 
 **A green test is not a spec.** Suites here have repeatedly locked the CURRENT
 (buggy) behavior into their expectations — e.g. PR open/copy asserting symbolic
