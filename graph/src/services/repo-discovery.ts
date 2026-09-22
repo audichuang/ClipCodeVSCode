@@ -97,7 +97,13 @@ export class RepoDiscoveryService {
       if (!seen.has(normRoot)) {
         seen.add(normRoot);
         repos.push({
-          path: repoRoot,
+          /* SNIPCODE-HOOK start: NATIVE, like every other path this walk emits (nested repos
+             via path.join, submodules via path.resolve). `git rev-parse --show-toplevel`
+             prints '/' even on Windows, so one repo reached this list as `C:/x` from here and
+             `C:\\x` from everywhere else — and repoPath is a Map/Set key (commit checkboxes,
+             per-repo locks) and is compared with ===, e.g. the active repo in MainPanel. */
+          path: path.resolve(repoRoot),
+          /* SNIPCODE-HOOK end */
           name: path.basename(repoRoot),
           type: 'root',
         });
