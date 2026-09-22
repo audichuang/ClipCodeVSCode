@@ -1374,14 +1374,17 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
+    "@puppeteer/browsers": "^3.2.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.13.0",
     "@types/vscode": "^1.108.0",
-    "@vscode/test-electron": "^2.4.1",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.25.12",
     "glob": "^11.0.0",
     "mocha": "^10.8.2",
-    "typescript": "^5.7.3"
+    "proxy-agent": "^8.0.2",
+    "typescript": "^5.7.3",
+    "yauzl": "^3.4.0"
   }
 }
