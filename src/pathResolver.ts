@@ -441,11 +441,16 @@ function resolvedTarget(
   relativePath: string,
   existed: boolean = isExistingFile(candidate.target)
 ): ResolvedRestoreTarget {
+  // NATIVE separators, never slash-normalised: this is the path restore writes to and
+  // re-checks containment on, and it is what the IntelliJ mirror returns
+  // (`root.path.resolve(rel).normalize()`). Slash-normalising it made every Windows target
+  // `C:/…` while each comparison beside it was `C:\…` — equal only on macOS and Linux, by
+  // accident, which is why only a Windows run could show it.
   return {
     ok: true,
     relativePath,
-    absolutePath: normalizeSystemPath(candidate.target),
-    rootPath: normalizeSystemPath(candidate.root.path),
+    absolutePath: path.resolve(candidate.target),
+    rootPath: path.resolve(candidate.root.path),
     existed
   };
 }
