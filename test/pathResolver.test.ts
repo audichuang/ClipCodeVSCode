@@ -50,11 +50,61 @@ test('resolves safe restore target under workspace root', () => {
   }
 });
 
-test('rejects restore targets outside workspace or with invalid segments', () => {
+test('rejects traversal and invalid segments while nesting unmapped absolute paths', () => {
   const root = path.resolve('/tmp/project');
   assert.equal(resolveRestoreTarget(root, '../secret.txt').ok, false);
   assert.equal(resolveRestoreTarget(root, 'src/bad:name.ts').ok, false);
-  assert.equal(resolveRestoreTarget(root, '/etc/passwd').ok, false);
+  // Row 5 of the cross-tool contract: an absolute path matching no root is kept LITERALLY
+  // under the primary root — never guessed onto a tail, never written outside it. So this is
+  // `<root>/etc/passwd`, exactly as IntelliJ 1.2.14+ restores it.
+  const absolute = resolveRestoreTarget(root, '/etc/passwd');
+  assert.ok(absolute.ok);
+  assert.equal(absolute.absolutePath, path.join(root, 'etc', 'passwd'));
+  assert.equal(resolveRestoreTarget(root, 'D:/foreign/../secret.txt').ok, false);
+  assert.equal(resolveRestoreTarget(root, '/foreign/../secret.txt').ok, false);
+  assert.equal(resolveRestoreTarget(root, 'D:/foreign/bad:name.txt').ok, false);
+});
+
+test('literal absolute fallback stays in the primary root and never remaps deletes', async () => {
+  await withTempDir(async parent => {
+    const root = path.join(parent, 'project');
+    const sibling = path.join(parent, 'backup');
+    const outside = path.join(parent, 'outside');
+    await mkdir(root);
+    await mkdir(sibling);
+    await mkdir(outside);
+    // The fallback's first segment matches a sibling label; it is still literal.
+    const resolved = resolveWriteTarget([root, sibling], '/backup/backup/new.txt');
+    assert.ok(resolved.ok);
+    assert.equal(resolved.absolutePath, path.join(root, 'backup/backup/new.txt'));
+    const unmapped = resolveWriteTarget([root, sibling], '/unmapped/source.txt');
+    assert.ok(unmapped.ok);
+    assert.equal(unmapped.absolutePath, path.join(root, 'unmapped/source.txt'));
+    await mkdir(path.join(root, 'D'), { recursive: true });
+    await writeFile(path.join(root, 'D', 'keep.txt'), 'keep');
+    assert.equal(resolveDeleteTarget([root], 'D:/keep.txt').ok, false);
+    await symlink(outside, path.join(root, 'escaped'), 'dir');
+    assert.equal(resolveWriteTarget([root], '/escaped/new.txt').ok, false);
+  });
+});
+
+test('a drive path with a line terminator in a name is still a Windows path', async () => {
+  // `.` in the drive regexes skipped these (JS skips four, Java five — U+0085 too), a lone \r
+  // survives the \r?\n header split, and the two tools then disagreed: the path was not
+  // Windows-style, so the cross-machine suffix compared `PROJ` to the root `proj`
+  // case-sensitively and missed it. Mirrors ClipboardPathResolverTest on the IntelliJ side.
+  await withTempDir(async parent => {
+    const root = path.join(parent, 'proj');
+    await mkdir(root);
+    for (const terminator of ['\r', '\u0085', '\u2028', '\u2029']) {
+      const literal = resolveWriteTarget([root], `D:/a${terminator}b.txt`);
+      assert.ok(literal.ok);
+      assert.equal(literal.absolutePath, path.join(root, 'D', `a${terminator}b.txt`));
+      const suffix = resolveWriteTarget([root], `D:/elsewhere/PROJ/a${terminator}b.ts`);
+      assert.ok(suffix.ok);
+      assert.equal(suffix.absolutePath, path.join(root, `a${terminator}b.ts`));
+    }
+  });
 });
 
 test('resolves explicit sibling root labels for restore', async () => {

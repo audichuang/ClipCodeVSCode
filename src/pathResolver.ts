@@ -157,14 +157,11 @@ class PathResolver {
   }
 
   resolveWriteTarget(rawPath: string): RestoreTargetResolution {
-    const absoluteCandidate = this.absoluteRootCandidate(rawPath);
+    const absoluteCandidate = this.absoluteRootCandidate(rawPath)
+      ?? this.crossMachineSuffixCandidate(rawPath)
+      ?? this.literalAbsoluteCandidate(rawPath);
     if (absoluteCandidate) {
       return this.resolveWriteCandidate(absoluteCandidate, absoluteCandidate.rootRelativePath);
-    }
-
-    const suffixCandidate = this.crossMachineSuffixCandidate(rawPath);
-    if (suffixCandidate) {
-      return this.resolveWriteCandidate(suffixCandidate, suffixCandidate.rootRelativePath);
     }
 
     const relativePath = this.toRelativeProjectPath(rawPath);
@@ -291,6 +288,23 @@ class PathResolver {
     }
 
     return this.crossMachineSuffixRelativePath(normalizedPath);
+  }
+
+  // Unmapped absolute paths retain every directory under the primary root. Only the
+  // drive colon/root separator is removed; archive names and arbitrary folders stay.
+  // Writes only: a foreign delete must not acquire a new target through this fallback.
+  private literalAbsoluteCandidate(rawPath: string): TargetCandidate | undefined {
+    const normalizedPath = normalizeSystemPath(rawPath);
+    if (!this.primaryRoot || !isAbsolutePath(normalizedPath) || /^[A-Za-z]:\/$/.test(normalizedPath)) {
+      return undefined;
+    }
+    const relativePath = sanitizeRelativePath(normalizedPath.replace(/^([A-Za-z]):\//, '$1/'));
+    if (!relativePath) return undefined;
+    return {
+      root: this.primaryRoot,
+      target: path.resolve(this.primaryRoot.path, relativePath),
+      rootRelativePath: relativePath
+    };
   }
 
   private absoluteRootCandidate(rawPath: string): TargetCandidate | undefined {
@@ -497,8 +511,14 @@ function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:\//.test(value);
 }
 
+// `[\s\S]`, never `.`: JavaScript's `.` skips four line terminators (\n \r U+2028 U+2029)
+// and Java's skips five (U+0085 too), while a lone \r survives the \r?\n header split.
+// With `.` here, `D:/x/PROJ/a\u2028b.ts` was not Windows-style, so the cross-machine
+// suffix compared `PROJ` to the root `proj` case-sensitively and missed it — and U+0085
+// alone already made the two tools disagree. Kotlin mirror: ClipboardPathResolver
+// WINDOWS_STYLE_PATH / WINDOWS_ABSOLUTE_PATH.
 function isWindowsStylePath(value: string): boolean {
-  return /^[A-Za-z]:(\/.*)?$/.test(value);
+  return /^[A-Za-z]:(\/[\s\S]*)?$/.test(value);
 }
 
 function segmentsMatch(left: string, right: string, windowsStylePath: boolean): boolean {
