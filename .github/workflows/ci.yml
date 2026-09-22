@@ -33,22 +33,29 @@ jobs:
             graph/package-lock.json
             graph/webview-ui/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - id: build
+        run: npm run build
+      # Every check below runs even when an earlier one fails, so one red suite cannot hide
+      # another — a failing graph suite used to skip the e2e round trip on Windows entirely.
       - name: Host unit tests (includes the cross-tool contract)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm test
       - name: Graph tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm --prefix graph test
       # Every runner image ships Google Chrome, so this exercises browser tier 2 (a local
       # browser), not the pinned chrome-headless-shell download (tier 3).
       - name: Diff webview layout gate (real browser)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/verify-diff-layout.mjs
       - name: Highlight worker parity
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/verify-highlight-worker.mjs
       - name: E2E (Linux, virtual display)
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
         run: xvfb-run -a npm run test:e2e
       - name: E2E
-        if: runner.os != 'Linux'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os != 'Linux' }}
         run: npm run test:e2e
       - name: Keep browser reports
         if: failure()

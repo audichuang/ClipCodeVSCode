@@ -67,6 +67,12 @@ import * as vscode from 'vscode';
 import { ChangesWorkbench } from '../changes-workbench';
 import { ChangesTreeProvider } from '../changes-tree';
 import type { FileNode, RepoNode, RepoStatus } from '../build-change-tree';
+/* SNIPCODE-HOOK start: native() — the product builds these paths with path.join / Uri.file,
+   which are NATIVE (`\\repo\\src\\a.ts` on Windows); a bare POSIX literal matched only on
+   macOS and Linux, by accident. */
+import { normalize as nativePath } from 'path';
+const native = (p: string): string => nativePath(p);
+/* SNIPCODE-HOOK end */
 
 function mkSvc(over: Record<string, unknown> = {}) {
   return {
@@ -279,9 +285,9 @@ describe('ChangesWorkbench stage/unstage selection routing', () => {
     await H.commands.get('snipcode.git.copyAsClipCode')!(modified, [modified, deleted, renamed]);
 
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('clipcode.copyGitChanges', [
-      { resourceUri: expect.objectContaining({ fsPath: '/a/same.ts' }), group: 'staged' },
-      { resourceUri: expect.objectContaining({ fsPath: '/a/gone.ts' }), group: 'staged' },
-      { resourceUri: expect.objectContaining({ fsPath: '/a/new.ts' }), group: 'staged' },
+      { resourceUri: expect.objectContaining({ fsPath: native('/a/same.ts') }), group: 'staged' },
+      { resourceUri: expect.objectContaining({ fsPath: native('/a/gone.ts') }), group: 'staged' },
+      { resourceUri: expect.objectContaining({ fsPath: native('/a/new.ts') }), group: 'staged' },
     ]);
   });
 });
@@ -585,7 +591,7 @@ describe('ChangesWorkbench openChange / openChangeNative (S9)', () => {
     await H.commands.get('snipcode.git.openChange')!(node);
 
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
-      'vscode.open', expect.objectContaining({ fsPath: '/a/src/foo.ts' }),
+      'vscode.open', expect.objectContaining({ fsPath: native('/a/src/foo.ts') }),
     );
     expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('git.openChange', expect.anything());
   });
@@ -872,7 +878,7 @@ describe('Changes tree repo badges', () => {
     const uri = item.resourceUri as unknown as { scheme: string; query: string; fsPath: string };
     expect(uri.scheme).toBe('snipcode-change');
     expect(uri.query).toBe('status=M&group=staged');
-    expect(uri.fsPath).toBe('/r/src/foo.ts');
+    expect(uri.fsPath).toBe(native('/r/src/foo.ts'));
     expect(item.tooltip).toBe('src/foo.ts\nModified (staged)');
   });
 

@@ -41,10 +41,15 @@ vi.mock('vscode', () => {
 });
 
 import { FileWatcher } from '../file-watcher';
+import { normalize as nativePath } from 'path'; // SNIPCODE-HOOK: native fsPath in fireOn
 
 const REPO = '/tmp/ggp-fw-test';
 
 function fireOn(patternStr: string, fsPath: string, kind: 'change' | 'create' | 'delete' = 'change') {
+  /* SNIPCODE-HOOK start: a real Uri.fsPath is NATIVE (`\\tmp\\…` on Windows); the mock above
+     returns its argument verbatim, so hand it what VS Code would. */
+  fsPath = nativePath(fsPath);
+  /* SNIPCODE-HOOK end */
   const w = h.watchers.find(w => w.pattern.pattern === patternStr);
   if (!w) throw new Error(`no watcher for pattern ${patternStr}`);
   w.fire(kind, { fsPath });

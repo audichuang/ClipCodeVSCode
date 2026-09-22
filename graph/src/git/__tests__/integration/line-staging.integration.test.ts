@@ -118,7 +118,8 @@ describe('GitService integration — stageLines / unstageLines', () => {
   });
 
   /* SNIPCODE-HOOK start: Batch A patch-safety regressions */
-  it('keeps quoted whole-file paths when partially staging a delete and unstaging a new file', async () => {
+  // POSIX-only: Windows forbids `"` in a file name, so the quoted-path case cannot arise there.
+  it.skipIf(process.platform === 'win32')('keeps quoted whole-file paths when partially staging a delete and unstaging a new file', async () => {
     const deletedFile = 'quote"name.txt';
     commit(repo.path, 'quoted-delete-base', { [deletedFile]: 'keep\nremove\n' });
     unlinkSync(`${repo.path}/${deletedFile}`);

@@ -84,6 +84,12 @@ void viewStub;
 import { activate, resolveConfiguredGitPath } from '../extension';
 import { existsSync } from 'fs';
 import * as vscode from 'vscode';
+/* SNIPCODE-HOOK start: native() — the product builds these paths with path.join / Uri.file,
+   which are NATIVE (`\\repo\\src\\a.ts` on Windows); a bare POSIX literal matched only on
+   macOS and Linux, by accident. */
+import { normalize as nativePath } from 'path';
+const native = (p: string): string => nativePath(p);
+/* SNIPCODE-HOOK end */
 
 function makeContext() {
   return { subscriptions: [] as Array<{ dispose(): void }>, extensionUri: {} } as unknown as import('vscode').ExtensionContext;
@@ -217,7 +223,7 @@ describe('activate', () => {
     const { MainPanel } = await import('../panels/MainPanel');
     expect(MainPanel.showModalWithPanel).toHaveBeenCalledWith(ctx.extensionUri, {
       modal: 'addWorktree',
-      defaultPath: '/repos/project.worktrees',
+      defaultPath: native('/repos/project.worktrees'),
     });
   });
 
