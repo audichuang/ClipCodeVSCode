@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.50
+
+- **Upgrade both tools together.** An absolute path that matches no workspace root
+  is now kept literally under the primary root on restore
+  (`/Users/bob/other/src/a.ts` → `<workspace>/Users/bob/other/src/a.ts`, a drive
+  colon is dropped and every directory is kept), exactly as ClipCode has done since
+  1.2.14. It used to be refused, so the same payload restored a file in IntelliJ and
+  nothing here. A `[DELETED]` entry still needs a real match, and nothing is ever
+  written outside the workspace.
+- A path segment containing a control character (tab, CR, LF, U+001C…) is refused on
+  every platform, like `< > : " | ? *` already were: Windows cannot create such a
+  name, so the same payload restored differently per platform. Only an interior
+  control character is refused; leading and trailing whitespace is trimmed first.
+  Matches ClipCode 1.2.15.
+- In a Git copy, a file that could not be read no longer counts as a copied file and
+  no longer uses up the file-count limit (with a limit of 1 it used to take the only
+  slot and drop the next real file). It is still listed in the payload and reported
+  as skipped. Matches ClipCode 1.2.14.
+- Windows: a drive path whose file name contains U+0085, U+2028 or U+2029 now matches
+  a workspace root case-insensitively like any other Windows path; restore targets
+  are native paths; and a repository found at a workspace root is reported with
+  native separators, the same as nested repositories and submodules.
+- Now tested on Windows, macOS and Linux on every push, against the same frozen
+  contract fixtures as ClipCode — including how both tools resolve 72 clipboard paths
+  and plan 16 restores.
+
 ## 0.3.49
 
 - **Upgrade both tools together.** A payload with a configured post text now ends
