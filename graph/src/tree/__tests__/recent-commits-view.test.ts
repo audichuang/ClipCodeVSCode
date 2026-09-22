@@ -44,6 +44,12 @@ vi.mock('../../panels/MainPanel', () => ({
 vi.mock('../../services/repo-discovery', () => ({ RepoDiscoveryService: { discoverRepos: vi.fn(async () => H.repos) } }));
 
 import { RecentCommitsViewProvider } from '../recent-commits-view';
+/* SNIPCODE-HOOK start: native() — the product builds these paths with path.join / Uri.file,
+   which are NATIVE (`\\repo\\src\\a.ts` on Windows); a bare POSIX literal matched only on
+   macOS and Linux, by accident. */
+import { normalize as nativePath } from 'path';
+const native = (p: string): string => nativePath(p);
+/* SNIPCODE-HOOK end */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- stub service: each
 // test overrides just the methods it exercises, so the shape is open by design.
@@ -210,8 +216,8 @@ describe('RecentCommitsViewProvider', () => {
 
     const [command, left, right, title] = H.commands[0] as any[];
     expect(command).toBe('vscode.diff');
-    expect(left).toMatchObject({ scheme: 'git', query: JSON.stringify({ path: '/repo/src/a.ts', ref: 'parentsha' }) });
-    expect(right).toMatchObject({ scheme: 'git', query: JSON.stringify({ path: '/repo/src/a.ts', ref: 'abc1234' }) });
+    expect(left).toMatchObject({ scheme: 'git', query: JSON.stringify({ path: native('/repo/src/a.ts'), ref: 'parentsha' }) });
+    expect(right).toMatchObject({ scheme: 'git', query: JSON.stringify({ path: native('/repo/src/a.ts'), ref: 'abc1234' }) });
     expect(title).toBe('a.ts (abc1234)');
   });
 
@@ -222,7 +228,7 @@ describe('RecentCommitsViewProvider', () => {
     await H.handler!({ type: 'recentCommitsOpenFile', payload: { hash: 'abc1234', path: 'src/new.ts', oldPath: 'src/old.ts', ...FOR_REPO } });
 
     const [, left] = H.commands[0] as any[];
-    expect(left.query).toBe(JSON.stringify({ path: '/repo/src/old.ts', ref: 'parentsha' }));
+    expect(left.query).toBe(JSON.stringify({ path: native('/repo/src/old.ts'), ref: 'parentsha' }));
   });
 
   // Merge: the file came in from parent 2..N, and THAT parent already knows it
@@ -240,7 +246,7 @@ describe('RecentCommitsViewProvider', () => {
     await H.handler!({ type: 'recentCommitsOpenFile', payload: { hash: 'abc1234', path: 'renamed.ts', oldPath: 'a.ts', ...FOR_REPO } });
 
     const [, left] = H.commands[0] as any[];
-    expect(left.query).toBe(JSON.stringify({ path: '/repo/renamed.ts', ref: 'secondparent' }));
+    expect(left.query).toBe(JSON.stringify({ path: native('/repo/renamed.ts'), ref: 'secondparent' }));
   });
 
   it('refuses a path that escapes the repository', async () => {
@@ -258,7 +264,7 @@ describe('RecentCommitsViewProvider', () => {
     await H.handler!({ type: 'recentCommitsOpenFile', payload: { hash: 'abc1234', path: '..keep', ...FOR_REPO } });
 
     expect(H.errors).toHaveLength(0);
-    expect((H.commands[0] as any[])[2].query).toBe(JSON.stringify({ path: '/repo/..keep', ref: 'abc1234' }));
+    expect((H.commands[0] as any[])[2].query).toBe(JSON.stringify({ path: native('/repo/..keep'), ref: 'abc1234' }));
   });
 
   it('opens every file of the commit in one multi-diff editor', async () => {
@@ -275,8 +281,8 @@ describe('RecentCommitsViewProvider', () => {
     expect(title).toBe('feat: two files second line (abc1234)');
     expect(resources).toHaveLength(2);
     // [resource, original, modified] — the first drives the row label + Go To File.
-    expect(resources[0][0]).toMatchObject({ scheme: 'file', fsPath: '/repo/a.ts' });
-    expect(resources[0][1].query).toBe(JSON.stringify({ path: '/repo/a.ts', ref: 'parentsha' }));
+    expect(resources[0][0]).toMatchObject({ scheme: 'file', fsPath: native('/repo/a.ts') });
+    expect(resources[0][1].query).toBe(JSON.stringify({ path: native('/repo/a.ts'), ref: 'parentsha' }));
     expect(resources[0][2].query).toBe(JSON.stringify({ path: '/repo/a.ts', ref: 'abc1234' }));
 
     H.commands = [];
@@ -381,7 +387,7 @@ describe('RecentCommitsViewProvider', () => {
     boot(service());
     await H.handler!({ type: 'recentCommitsOpenWorkingFile', payload: { path: 'src/a.ts', ...FOR_REPO } });
 
-    expect(H.commands[0]).toEqual(['vscode.open', expect.objectContaining({ fsPath: '/repo/src/a.ts' })]);
+    expect(H.commands[0]).toEqual(['vscode.open', expect.objectContaining({ fsPath: native('/repo/src/a.ts') })]);
   });
   /* SNIPCODE-HOOK end */
   it.each(['A', 'D'])('preserves missing %s sides in single and multi-diff', async status => {

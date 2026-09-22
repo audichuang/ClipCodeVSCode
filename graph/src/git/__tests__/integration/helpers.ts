@@ -67,6 +67,12 @@ export function createTempRepo(opts: { bare?: boolean } = {}): TempRepo {
     runGit(path, ['config', 'tag.gpgsign', 'false']);
     runGit(path, ['config', 'user.name', 'Test User']);
     runGit(path, ['config', 'user.email', 'test@example.com']);
+    /* SNIPCODE-HOOK start: repo-LOCAL core.autocrlf=false. The env above only reaches the
+       git calls made here; GitService spawns its own git, which reads Git for Windows'
+       SYSTEM core.autocrlf=true — so LF fixtures came back as CRLF (`x\r\n`), patches no
+       longer applied and checkouts refused "local changes". A local setting beats it. */
+    runGit(path, ['config', 'core.autocrlf', 'false']);
+    /* SNIPCODE-HOOK end */
   }
   return {
     path,

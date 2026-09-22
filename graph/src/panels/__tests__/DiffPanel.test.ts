@@ -29,6 +29,12 @@ import { StaleDiffError } from '../../git/git-service';
 /* SNIPCODE-HOOK end */
 import type { ChangesWorkbench } from '../../tree/changes-workbench';
 import type { StatusChange } from '../../git/git-service';
+/* SNIPCODE-HOOK start: native() — the product builds these paths with path.join / Uri.file,
+   which are NATIVE (`\\repo\\src\\a.ts` on Windows); a bare POSIX literal matched only on
+   macOS and Linux, by accident. */
+import { normalize as nativePath } from 'path';
+const native = (p: string): string => nativePath(p);
+/* SNIPCODE-HOOK end */
 
 const extUri = { fsPath: '/ext' } as unknown as import('vscode').Uri;
 
@@ -401,7 +407,7 @@ describe('DiffPanel', () => {
 
     await H.messageHandler!({ type: 'getImageAtRef', payload: { repoPath: '/r', generation, ref: 'working', path: 'a.ts' } });
 
-    expect(H.fsOpen).toHaveBeenCalledWith('/r/a.ts', 'r');
+    expect(H.fsOpen).toHaveBeenCalledWith(native('/r/a.ts'), 'r');
     expect(read.mock.calls[0][2]).toBeLessThanOrEqual(64 * 1024);
     expect(Math.max(...read.mock.calls.map(call => call[2]))).toBeLessThanOrEqual(maxRead);
     expect(close).toHaveBeenCalled();
@@ -621,7 +627,7 @@ describe('DiffPanel', () => {
       const unstagedCall = calls[calls.length - 1] as any[];
       expect(JSON.parse(unstagedCall[1].query)).toEqual({ repoPath: '/r', file: 'new.ts', ref: '' });
       expect(unstagedCall[2].query).toBeUndefined(); // working tree fileUri
-      expect(unstagedCall[2].fsPath).toBe('/r/new.ts');
+      expect(unstagedCall[2].fsPath).toBe(native('/r/new.ts'));
       expect(unstagedCall[3]).toBe('new.ts (Working Tree)');
     });
 
@@ -831,7 +837,7 @@ describe('DiffPanel', () => {
       expect(calls).toHaveLength(1);
       const [_, leftUri, rightUri, title] = calls[0] as any[];
       expect(JSON.parse(leftUri.query)).toEqual({ repoPath: '/r', file: 'a.ts', ref: '' });
-      expect(rightUri.fsPath).toBe('/r/a.ts');
+      expect(rightUri.fsPath).toBe(native('/r/a.ts'));
       expect(title).toBe('a.ts (Working Tree)');
     });
   });
