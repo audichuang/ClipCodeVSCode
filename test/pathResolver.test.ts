@@ -96,13 +96,20 @@ test('a drive path with a line terminator in a name is still a Windows path', as
   await withTempDir(async parent => {
     const root = path.join(parent, 'proj');
     await mkdir(root);
-    for (const terminator of ['\r', '\u0085', '\u2028', '\u2029']) {
+    // U+0085/U+2028/U+2029 are legal file-name characters on every platform.
+    for (const terminator of ['\u0085', '\u2028', '\u2029']) {
       const literal = resolveWriteTarget([root], `D:/a${terminator}b.txt`);
       assert.ok(literal.ok);
       assert.equal(literal.absolutePath, path.join(root, 'D', `a${terminator}b.txt`));
       const suffix = resolveWriteTarget([root], `D:/elsewhere/PROJ/a${terminator}b.ts`);
       assert.ok(suffix.ok);
       assert.equal(suffix.absolutePath, path.join(root, `a${terminator}b.ts`));
+    }
+    // A control character is not, on Windows — so both tools refuse it everywhere.
+    for (const control of ['\r', '\n', '\t', '\u001C']) {
+      assert.equal(resolveWriteTarget([root], `D:/a${control}b.txt`).ok, false);
+      assert.equal(resolveWriteTarget([root], `D:/elsewhere/PROJ/a${control}b.ts`).ok, false);
+      assert.equal(resolveWriteTarget([root], `/a${control}b.txt`).ok, false);
     }
   });
 });

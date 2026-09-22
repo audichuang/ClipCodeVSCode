@@ -490,6 +490,84 @@ const tokenInputs = [
   { name: 'CRLF counts one line break, lone CR counts none', text: 'a\r\nb\rc' },
 ];
 
+// ---------------------------------------------------------------------------------------
+// pathCases — both REAL resolvers, one fixed on-disk layout, the same clipboard path.
+//
+// Restore is only interoperable if every clipboard path lands on the SAME target in both
+// tools (or both refuse it). These rows began as a one-off differential of the two real
+// resolvers (2026-09-23), which found the `.`-in-regex and control-character divergences;
+// committing them is what keeps that true instead of merely true-once.
+//
+// Expectations are {root, path} with `/` separators — never absolute, and never `existed`,
+// which depends on whether the filesystem is case-sensitive. Rows whose answer legitimately
+// depends on the platform are NOT here: a POSIX-style path whose segment differs from a root
+// name only by case matches on Windows (whose `C:/…` roots make every suffix comparison
+// case-insensitive) and not on Linux. Both tools agree on each platform; no single golden
+// value can describe all three, so such a row would be a false alarm, not a contract.
+// @ROOT@ / @SIBLING@ are replaced by each side with its own absolute root paths.
+// Outcomes: a target, or 'refused' | 'missing' | 'ambiguous' (Kotlin Unresolved | Missing |
+// Ambiguous ↔ VS Code 'unsafe path'/'outside workspace' | 'missing path' | 'ambiguous path').
+const pathLayout = {
+  roots: ['project', 'backup'], // the first is the primary root
+  dirs: ['project', 'backup', 'outside', 'project/D'],
+  files: { 'project/D/keep.txt': 'keep' },
+  symlinks: { 'project/escaped': 'outside' },
+};
+const SYMLINK = { needsSymlink: true };
+const pathInputs = [
+  'D:\\Users\\author\\.m2\\repository\\library.jar!\\com\\example\\Library$Inner.java',
+  '/foreign/checkout/src/New.kt', '\\\\server\\share\\arbitrary\\New.txt', '/etc/passwd',
+  'D:/foreign/../secret.txt', '/foreign/../secret.txt', 'D:/foreign/bad:name.txt',
+  '/backup/backup/new.txt', '/unmapped/source.txt',
+  'D:/', 'D:\\', 'D:', '/', '//', 'D:relative-drive.txt',
+  // Line terminators: U+0085/U+2028/U+2029 are legal names everywhere (`[\s\S]`, not `.`);
+  // \r and \n are control characters and refused everywhere.
+  'D:/a\rb.txt', 'D:/a\u0085b.txt', 'D:/a\u2028b.txt', 'D:/a\u2029b.txt', 'D:/a\nb.txt',
+  'D:\\a\nb.txt', 'D:\\a\rb.txt', 'D:\\a\u2028b.txt', 'D:\\a\u0085b.txt',
+  '/a\rb.txt', '/a\u0085b.txt', '/a\u2028b.txt', '/a\tb.txt', '/a\u0000b.txt', 'D:\\a\tb.txt',
+  'd:/lower/x.txt', 'D://double//slash.txt', '//double/leading.txt',
+  '/Users/bob/other/src/a.ts', 'C:/Users/bob/other/src/a.ts',
+  '/elsewhere/project/src/x.ts', '/elsewhere/backup/y.ts', 'D:/elsewhere/PROJECT/z.ts',
+  'D:/elsewhere/PROJECT/a\rb.ts', 'D:/elsewhere/PROJECT/a\u0085b.ts',
+  'D:/elsewhere/PROJECT/a\u2028b.ts', 'D:/elsewhere/PROJECT/a\u2029b.ts',
+  '/x/./y.txt', '/dir/', '  /spaced/path.txt  ', '\t/tabbed.txt',
+  '/a\u3000b.txt', '\u00A0/nbsp.txt', '\uFEFF/bom.txt', '\u001C/fs-lead.txt',
+  '/a.txt\u001C', 'D:/x/y\u001C', '/seg/\u001C/z.txt',
+  { input: '/escaped/new.txt', ...SYMLINK }, { input: '/escaped/deeper/new.txt', ...SYMLINK },
+  '/D/keep.txt', 'D:/keep.txt',
+  'relative/ok.txt', 'backup/rel.txt', '../up.txt', 'src/bad:name.ts',
+  '/a/b<c>.txt', '/q/what?.txt', '/😀/emoji.txt', 'D:/Ünïcode/файл.txt', '/foo\\bar.txt',
+  '@ROOT@/src/in-root.ts', '@ROOT@/../outside/x.txt', '@SIBLING@/z.txt', '@ROOT@',
+  '/project/src/lead-seg.ts', '/backup/lead.ts',
+].map(row => (typeof row === 'string' ? { input: row } : row));
+
+function computePathCases() {
+  const os = require('node:os');
+  const { resolveWriteTarget, resolveDeleteTarget } = require('../out/src/pathResolver.js');
+  const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clipcode-path-cases-')));
+  try {
+    for (const dir of pathLayout.dirs) fs.mkdirSync(path.join(parent, dir), { recursive: true });
+    for (const [file, text] of Object.entries(pathLayout.files)) fs.writeFileSync(path.join(parent, file), text);
+    for (const [link, target] of Object.entries(pathLayout.symlinks)) {
+      fs.symlinkSync(path.join(parent, target), path.join(parent, link), 'dir');
+    }
+    const roots = pathLayout.roots.map(root => path.join(parent, root));
+    const outcome = resolution => {
+      if (resolution.ok) {
+        const [root, ...rest] = path.relative(parent, resolution.absolutePath).split(path.sep);
+        return { root, path: rest.join('/') };
+      }
+      return { 'missing path': 'missing', 'ambiguous path': 'ambiguous' }[resolution.reason] ?? 'refused';
+    };
+    return pathInputs.map(row => {
+      const input = row.input.replaceAll('@ROOT@', roots[0]).replaceAll('@SIBLING@', roots[1]);
+      return { ...row, write: outcome(resolveWriteTarget(roots, input)), delete: outcome(resolveDeleteTarget(roots, input)) };
+    });
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+}
+
 function buildWire(input) {
   return input.kind === 'git' ? fmt.buildGitPayload(input.options) : fmt.buildPayload(input.options);
 }
@@ -509,6 +587,8 @@ const fixtures = {
   buildCases: buildInputs.map(i => ({ name: i.name, kind: i.kind, options: i.options, wire: buildWire(i) })),
   parseCases: parseInputs.map(i => ({ name: i.name, headerFormat: i.headerFormat, input: i.input, expected: parseExpected(i) })),
   tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, ...payloadStats(i.text) })),
+  pathLayout,
+  pathCases: computePathCases(),
 };
 
 const json = JSON.stringify(fixtures, null, 2) + '\n';
