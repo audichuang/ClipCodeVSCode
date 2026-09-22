@@ -191,7 +191,8 @@ describe('GitService integration — basic queries', () => {
       expect(paths).toContain('한글.txt');
     });
 
-    it('returns quoted porcelain paths literally so file diffs work', async () => {
+    // POSIX-only: the fixture names hold tabs, which Windows cannot create. // SNIPCODE-HOOK
+    it.skipIf(process.platform === 'win32')('returns quoted porcelain paths literally so file diffs work', async () => {
       commit(repo.path, 'init', { 'a.txt': 'a\n' });
       const { writeFileSync } = await import('fs');
       const pathWithSpace = 'dir/name with space.txt';

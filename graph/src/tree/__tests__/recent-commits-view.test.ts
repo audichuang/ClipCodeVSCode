@@ -285,7 +285,7 @@ describe('RecentCommitsViewProvider', () => {
     // [resource, original, modified] — the first drives the row label + Go To File.
     expect(resources[0][0]).toMatchObject({ scheme: 'file', fsPath: native('/repo/a.ts') });
     expect(resources[0][1].query).toBe(JSON.stringify({ path: native('/repo/a.ts'), ref: 'parentsha' }));
-    expect(resources[0][2].query).toBe(JSON.stringify({ path: '/repo/a.ts', ref: 'abc1234' }));
+    expect(resources[0][2].query).toBe(JSON.stringify({ path: native('/repo/a.ts'), ref: 'abc1234' }));
 
     H.commands = [];
     await H.handler!({ type: 'recentCommitsOpenChanges', payload: { hash: 'abc1234', ...FOR_REPO } });

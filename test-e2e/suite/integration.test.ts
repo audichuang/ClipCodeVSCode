@@ -15,7 +15,10 @@ interface SnipcodeApi {
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const slashed = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  // Windows paths are case-insensitive, and VS Code's Uri.fsPath lowercases the drive letter
+  // (`c:\\…`) while the fixture path keeps `C:\\…` — so the repo was never matched there.
+  return process.platform === 'win32' ? slashed.toLowerCase() : slashed;
 }
 
 // Poll the VS Code Git API until it has discovered the fixture repo.
