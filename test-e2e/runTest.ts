@@ -14,7 +14,10 @@ function git(cwd: string, ...args: string[]): void {
 //   commit B: modify a.ts, delete del.ts, rename old.ts -> new.ts, add added.ts
 //   merge M: add side1.ts and side2.ts from separate parents
 function makeFixtureRepo(): string {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snipcode-e2e-'));
+  // realpath.native: a Windows TEMP under a long user name is the 8.3 short form (RUNNER~1),
+  // while VS Code's Git API reports the long one, so the suite waited for a repo path it
+  // would never see ("Git API never discovered repo at C:\\Users\\RUNNER~1\\…").
+  const repoDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'snipcode-e2e-')));
   const write = (rel: string, content: string) => fs.writeFileSync(path.join(repoDir, rel), content);
 
   git(repoDir, 'init', '-b', 'main');

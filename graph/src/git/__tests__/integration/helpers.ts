@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 /* SNIPCODE-HOOK end */
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 /**
  * Spins up a fresh git repository in a temp directory for one test, plus a
@@ -84,7 +84,10 @@ export function createTempRepo(opts: { bare?: boolean } = {}): TempRepo {
 
 export function writeFile(repoPath: string, relPath: string, content: string): void {
   const full = join(repoPath, relPath);
-  const dir = full.substring(0, full.lastIndexOf('/'));
+  /* SNIPCODE-HOOK start: dirname, not lastIndexOf('/') — join() is native, so on Windows there
+     is no '/' to find, no parent was created, and every nested fixture file hit ENOENT. */
+  const dir = dirname(full);
+  /* SNIPCODE-HOOK end */
   if (dir && dir !== repoPath) mkdirSync(dir, { recursive: true });
   writeFileSync(full, content);
 }

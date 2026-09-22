@@ -65,7 +65,9 @@ describe('GitService integration — commitSelected', () => {
   });
 
   /* SNIPCODE-HOOK start: Batch B commitSelected mode guard regression */
-  it('refuses selected content hunks when the file also has a mode change', async () => {
+  // POSIX-only: Windows has no executable bit (core.fileMode is false), so chmod +x records
+  // no mode change and there is nothing for this guard to refuse. // SNIPCODE-HOOK
+  it.skipIf(process.platform === 'win32')('refuses selected content hunks when the file also has a mode change', async () => {
     chmodSync(join(repo.path, 'f.txt'), 0o755);
     expect(runGit(repo.path, ['diff', 'f.txt'])).toMatch(/^new mode 100755$/m);
     const before = head(repo.path);

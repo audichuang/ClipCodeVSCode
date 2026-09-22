@@ -47,7 +47,9 @@ import { RecentCommitsViewProvider } from '../recent-commits-view';
 /* SNIPCODE-HOOK start: native() — the product builds these paths with path.join / Uri.file,
    which are NATIVE (`\\repo\\src\\a.ts` on Windows); a bare POSIX literal matched only on
    macOS and Linux, by accident. */
-import { normalize as nativePath } from 'path';
+import { resolve as nativePath } from 'path';
+// resolve, not normalize: the product builds these through Uri.file / path.resolve, which also
+// prefix the current drive on Windows (`D:\\repo\\…`).
 const native = (p: string): string => nativePath(p);
 /* SNIPCODE-HOOK end */
 

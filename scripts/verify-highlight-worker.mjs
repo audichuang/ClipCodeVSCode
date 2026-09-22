@@ -13,15 +13,19 @@ const req = createRequire(join(root, 'graph/webview-ui/package.json'));
 const scratch = await mkdtemp(join(tmpdir(), 'snipcode-worker-parity-'));
 let worker;
 try {
-  const helpers = join(scratch, 'helpers.cjs');
+  const helpers = join(scratch, 'helpers.mjs');
   await build({
     entryPoints: [join(root, 'graph/webview-ui/src/lib/utils/highlighter.ts')],
-    outfile: helpers, bundle: true, platform: 'node', format: 'cjs',
+    outfile: helpers, bundle: true, platform: 'node', format: 'esm',
     plugins: [{ name: 'installed-shiki', setup(b) {
-      b.onResolve({ filter: /^shiki(?:\/|$)/ }, args => ({ path: req.resolve(args.path), external: true }));
+      // A file:// URL, never the bare resolved path: the external is emitted verbatim into
+      // import statements, and Node's ESM loader rejects `d:\\…` on Windows
+      // (ERR_UNSUPPORTED_ESM_URL_SCHEME) — the reference highlighter then started with
+      // highlighting off and every parity case failed there. A URL is valid everywhere.
+      b.onResolve({ filter: /^shiki(?:\/|$)/ }, args => ({ path: pathToFileURL(req.resolve(args.path)).href, external: true }));
     } }],
   });
-  const local = createRequire(import.meta.url)(helpers);
+  const local = await import(pathToFileURL(helpers).href);
   const h = await local.getHighlighter();
   worker = new Worker(`
     const {parentPort,workerData}=require('node:worker_threads');
