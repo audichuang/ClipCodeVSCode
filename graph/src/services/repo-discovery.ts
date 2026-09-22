@@ -220,7 +220,9 @@ export class RepoDiscoveryService {
         try {
           // Verify it's a real git repo and get its canonical root path
           const realRoot = await this.execGit(['rev-parse', '--show-toplevel'], childPath);
-          return { childPath: realRoot, hasGit: true };
+          /* SNIPCODE-HOOK start: native — git prints '/' on Windows; see the root pass above */
+          return { childPath: path.resolve(realRoot), hasGit: true };
+          /* SNIPCODE-HOOK end */
         } catch {
           // False positive .git folder
           return { childPath, hasGit: false };
