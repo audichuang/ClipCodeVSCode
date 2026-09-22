@@ -324,7 +324,9 @@ test('containment holds however many missing levels sit under an escaping link',
   }
 });
 
-test('a literal backslash in a real directory name is not read as a separator', async () => {
+// POSIX-only by nature: on Windows a backslash IS a separator, so `repo\\outside` really is
+// `outside` inside `repo`, and allowing that write is correct there.
+test('a literal backslash in a real directory name is not read as a separator', { skip: process.platform === 'win32' && 'a backslash is a path separator on Windows' }, async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-backslash-'));
   try {
     const repo = path.join(base, 'repo');
