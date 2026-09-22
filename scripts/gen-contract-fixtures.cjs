@@ -568,6 +568,107 @@ function computePathCases() {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// restoreCases — a payload + a fixed on-disk layout → the PLAN both tools build before
+// anything is written: which files are created (with what content, and whether one already
+// existed), deleted, or skipped and why. Every cross-tool DECISION a paste makes lives in the
+// plan; writing the bytes is covered by each side's own executor tests and e2e. Paths are
+// {root, path} with `/`, never absolute. Skip reasons are normalised: VS Code's AMBIGUOUS_PATH
+// and IntelliJ's AMBIGUOUS_TARGET are one outcome, AMBIGUOUS.
+const restoreLayout = {
+  roots: ['project', 'backup'],
+  dirs: ['project/src', 'backup', 'outside'],
+  files: {
+    'project/src/existing.ts': { text: 'old\n' },
+    'project/src/to-delete.ts': { text: 'bye\n' },
+    'project/latin1.txt': { base64: Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]).toString('base64') }, // "café" in latin-1
+    'project/bom.txt': { base64: Buffer.from('\uFEFFhi\n', 'utf8').toString('base64') },
+    'backup/b.ts': { text: 'b\n' },
+    'outside/secret.txt': { text: 'must never be deleted\n' },
+  },
+  symlinks: { 'project/escaped': 'outside' },
+};
+const H = '// file: $FILE_PATH';
+const restoreInputs = [
+  { name: 'new files, nested directories included', headerFormat: H,
+    payload: '// file: src/new/A.ts\nexport const a = 1;\n\n// file: README.md\n# hi' },
+  { name: 'overwriting a file that exists reports existed', headerFormat: H,
+    payload: '// file: src/existing.ts\nnew content' },
+  { name: '[DELETED] removes an existing file and skips one that is already gone', headerFormat: H,
+    payload: '// file: [DELETED] src/to-delete.ts\nbye\n\n// file: [DELETED] src/ghost.ts\ngone' },
+  { name: 'placeholder bodies are never written, over an existing file or a new one', headerFormat: H,
+    payload: '// file: src/existing.ts\n// File skipped: size exceeds limit\n\n' +
+      '// file: src/new-unreadable.ts\n// Unable to read file content\n\n' +
+      '// file: src/new-error.ts\n// Error reading file content' },
+  { name: 'the placeholder guard reads only the first line of the body', headerFormat: H,
+    payload: '// file: src/existing.ts\n// File skipped: size exceeds limit\ntrailing footer noise' },
+  { name: 'a non-UTF-8 target is never overwritten; a UTF-8 one with a BOM is', headerFormat: H,
+    payload: '// file: latin1.txt\ncafé\n\n// file: bom.txt\n\uFEFFhello' },
+  // Writing AND deleting through a directory symlink that points out of the workspace. The
+  // delete target really exists outside, so this is refused by containment — never deleted,
+  // and never mis-reported as ALREADY_ABSENT.
+  { name: 'a path escaping through a symlink is refused, for a write and for a delete', headerFormat: H, needsSymlink: true,
+    payload: '// file: escaped/x.txt\nx\n\n// file: [DELETED] escaped/secret.txt\ngone' },
+  { name: 'an absolute path matching no root is kept literally under the primary root', headerFormat: H,
+    payload: '// file: /Users/bob/other/src/a.ts\nx\n\n// file: D:\\work\\lib\\b.ts\ny' },
+  { name: 'a sibling root label targets that root', headerFormat: H,
+    payload: '// file: backup/c.ts\nc\n\n// file: backup/b.ts\nb2' },
+  { name: 'traversal, Windows-illegal characters and control characters are refused', headerFormat: H,
+    payload: '// file: ../escape.txt\nx\n\n// file: src/bad:name.ts\nx\n\n// file: src/a\u001Cb.ts\nx\n\n// file: src/tab\tname.ts\nx' },
+  { name: 'backslash header paths are ordinary separators', headerFormat: H,
+    payload: '// file: src\\win\\A.ts\nwin' },
+  { name: 'labels are stripped from the target path', headerFormat: H,
+    payload: '// file: [NEW] src/n.ts\nn\n\n// file: [MODIFIED] src/existing.ts\nm\n\n// file: [MOVED] src/moved.ts\nmv' },
+  { name: 'CRLF line endings, a BOM and an empty file', headerFormat: H,
+    payload: '// file: src/crlf.ts\r\nline1\r\nline2\r\n\r\n// file: src/bom.ts\n\uFEFFbom\n\n// file: src/empty.ts\n' },
+  { name: 'the same path twice is planned twice, in order', headerFormat: H,
+    payload: '// file: src/dup.ts\nfirst\n\n// file: src/dup.ts\nsecond' },
+  { name: 'a header-shaped content line round-trips, clipcode-root and the end marker are not files',
+    headerFormat: H,
+    payload: fmt.buildPayload({ headerFormat: H, preText: 'PRE', postText: 'POST', addExtraLineBetweenFiles: true,
+      sourceRoot: 'project', files: [
+        { path: 'src/escaped.ts', content: 'const a = 1;\n// file: not/a/header.ts\nconst b = 2;' },
+        { path: 'src/last.ts', content: 'last' },
+      ] }) },
+  { name: 'another header format', headerFormat: '# $FILE_PATH',
+    payload: '# src/py.py\nprint(1)\n\n# [DELETED] src/to-delete.ts\nx' },
+];
+
+async function computeRestoreCases() {
+  const os = require('node:os');
+  const { planRestore } = require('../out/src/restore.js');
+  const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clipcode-restore-cases-')));
+  try {
+    for (const dir of restoreLayout.dirs) fs.mkdirSync(path.join(parent, dir), { recursive: true });
+    for (const [file, spec] of Object.entries(restoreLayout.files)) {
+      fs.writeFileSync(path.join(parent, file), spec.base64 !== undefined ? Buffer.from(spec.base64, 'base64') : spec.text);
+    }
+    for (const [link, target] of Object.entries(restoreLayout.symlinks)) {
+      fs.symlinkSync(path.join(parent, target), path.join(parent, link), 'dir');
+    }
+    const roots = restoreLayout.roots.map(root => path.join(parent, root));
+    const where = absolutePath => {
+      const [root, ...rest] = path.relative(parent, absolutePath).split(path.sep);
+      return { root, path: rest.join('/') };
+    };
+    const reason = r => (r === 'AMBIGUOUS_PATH' || r === 'AMBIGUOUS_TARGET' ? 'AMBIGUOUS' : r);
+    const cases = [];
+    for (const input of restoreInputs) {
+      const entries = fmt.parseClipboard(input.payload, input.headerFormat);
+      const plan = await planRestore(roots, entries);
+      cases.push({
+        ...input,
+        creates: plan.createOperations.map(op => ({ ...where(op.absolutePath), relativePath: op.relativePath, content: op.content, existed: op.existed })),
+        deletes: plan.deleteOperations.map(op => ({ ...where(op.absolutePath), relativePath: op.relativePath })),
+        skips: plan.skippedOperations.map(op => ({ rawPath: op.rawPath, relativePath: op.relativePath ?? null, reason: reason(op.reason) })),
+      });
+    }
+    return cases;
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+}
+
 function buildWire(input) {
   return input.kind === 'git' ? fmt.buildGitPayload(input.options) : fmt.buildPayload(input.options);
 }
@@ -589,8 +690,11 @@ const fixtures = {
   tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, ...payloadStats(i.text) })),
   pathLayout,
   pathCases: computePathCases(),
+  restoreLayout,
 };
 
+(async () => {
+fixtures.restoreCases = await computeRestoreCases();
 const json = JSON.stringify(fixtures, null, 2) + '\n';
 const vscodeOut = path.join(__dirname, '..', 'test', 'fixtures', 'clipboard-contract.json');
 fs.mkdirSync(path.dirname(vscodeOut), { recursive: true });
@@ -602,3 +706,4 @@ console.log('Wrote', vscodeOut);
 console.log('SHA-256:', sha);
 console.log('Copy this file to: ClipCode/src/test/resources/clipboard-contract.json');
 console.log('Set EXPECTED_FIXTURES_SHA =', sha, 'in both contract tests.');
+})().catch(error => { console.error(error); process.exit(1); });
