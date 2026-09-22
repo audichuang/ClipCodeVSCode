@@ -1,21 +1,53 @@
-# Diff Webview regression checks
+# Diff Webview invariants and regression checks
 
 A happy-dom green result does not prove rendered geometry or real VS Code lifecycle behavior. Use these layers together.
+
+## Rendering invariants
+
+- **Replace immutable snapshots.** `DiffStore` keeps staged and unstaged data in
+  `$state.raw` to avoid deep proxies for every hunk and line. Publish new snapshots
+  through `setDiffs`; in-place edits to nested lines do not notify consumers.
+  Changes to this ownership model must preserve UI updates on replacement.
+- **Pair once, reveal progressively.** `FileDiffView` pairs side-by-side rows from
+  the stable `renderHunks` line arrays, then reveals complete pairs in stable
+  groups. Pairing freshly sliced prefixes on every batch defeats the identity
+  cache and repeats work over all visible rows. Preserve reveal progress across
+  inline/side-by-side switches and same-file refreshes; preserve existing DOM
+  where content remains so focus and stage actions keep their intended targets.
+- **Keep reveal independent of worker availability.** The first batch highlights
+  locally; a ready worker may process later uncached batches, with local fallback
+  on worker failure. The reveal loop must also finish when highlighting is
+  unavailable or already cached. File, theme and mode changes, and unmounting,
+  invalidate the old paint pass: abort pending worker requests and check whether
+  work is still current before publishing results. Cancellation alone cannot
+  prevent a late reply from repainting the current view.
 
 ## Fast lifecycle and protocol checks
 
 ```sh
-npm --prefix graph test -- DiffPanel.test.ts messaging.test.ts FileDiffView.lifecycle.test.ts highlight-worker-client.test.ts
+npm --prefix graph test -- DiffPanel.test.ts messaging.test.ts Diff.test.ts \
+  CommitDetails.test.ts FileDiffView.lifecycle.test.ts highlight-worker-client.test.ts
 ```
 
 - `DiffPanel.test.ts`: latest navigation before ready, late image replies, disposal, stage hunk/line failures after file/repo changes, and same-target refresh retaining the operation's error reply.
 - `messaging.test.ts`: operation correlation and busy state at the receiving boundary.
-- `FileDiffView.lifecycle.test.ts`: pending highlighting after unmount, pure theme changes while a worker is pending, stale result rejection, progressive reveal and cache reuse.
+- `Diff.test.ts`: displayed statistics update when a new diff snapshot replaces the old one.
+- `CommitDetails.test.ts`: truncation, its banner, and actual tail rows after expanding the full diff.
+- `FileDiffView.lifecycle.test.ts`: stale result rejection after unmount/theme/mode changes, progressive reveal, row/cache reuse, replacement-pair boundaries, focus and stage line indices.
 - `highlight-worker-client.test.ts`: worker request cancellation/failure handling.
 
 Control races with deferred promises; do not use elapsed sleeps to assume completion. Test both rejection of obsolete replies and acceptance of a current reply. In particular, an unconditional generation check can strand a current operation when the same file is refreshed.
 
 The host guard is defense in depth: correlated stale errors are also rejected by the current webview consumer. Keep host and consumer contracts independently covered, including messages without an operation id.
+
+For progressive-reveal tests, distinguish product rendering cost from observation
+cost: repeatedly scanning all descendants of a growing DOM can make the assertion
+itself quadratic. Use a bounded probe that still verifies actual rows; expanding
+"show full diff" must reveal the tail, not just dismiss the banner. `waitFor`
+callbacks must assert (throw until ready), with an explicit timeout below the
+enclosing test's timeout. These waits check functional completion; performance is
+measured by the browser gate below, so a timeout alone does not identify a product
+bottleneck.
 
 ## Real browser layout
 

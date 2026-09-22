@@ -227,9 +227,10 @@ Release / marketplace / workflow edits: follow **`../AGENTS.md`**.
 A visual change under `webview-ui/**` is not done until it has been **rendered
 and looked at**: the webview vitest project runs on happy-dom, which computes no
 layout, so `getBoundingClientRect` is all zeros and a positioning bug passes
-every test. For Diff rendering, highlighting, worker, or lifecycle changes,
-read `../docs/testing/diff-webview-regressions.md` and verify both browser geometry
-and performance reports against the current build. Run performance checks alone,
+every test. Before changing Diff snapshot updates, rendering, highlighting,
+worker, or lifecycle behavior, read `../docs/testing/diff-webview-regressions.md`
+for invariants and checks. Verify both browser geometry and performance reports
+against the current build. Run performance checks alone,
 without concurrent builds/test suites; report cold and warm samples separately.
 Prove new regression checks fail when the relevant guard/layout fix is removed,
 then restore it and require green. Browser checks supplement actual VS Code UI
