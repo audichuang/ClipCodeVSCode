@@ -15,7 +15,8 @@ are **shared** with the IntelliJ sibling and live in the work-root `AGENTS.md`.
 Read that before changing anything about the wire format — and note the fixtures
 are generated from **this** implementation, so a format change starts here. From a
 lone clone, the executable copy of the contract is
-`test/fixtures/clipboard-contract.json` + `test/contract.test.ts`.
+`test/fixtures/clipboard-contract.json` + `test/contract.test.ts` — build, parse, token
+stats and (`pathCases`) path resolution of both writes and deletes.
 
 Implementation: `src/clipboardFormat.ts` — `buildPayloadInternal` + `escapeContent`
 (build), `parseClipboard` + `unescapeContent` + `joinContent` (parse). The Kotlin

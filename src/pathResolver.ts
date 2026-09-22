@@ -468,7 +468,12 @@ function sanitizeRelativePath(value: string): string | undefined {
   if (!normalized || isAbsolutePath(normalized)) return undefined;
   const segments = normalized.split('/').filter(segment => segment && segment !== '.');
   if (segments.length === 0) return undefined;
-  if (segments.some(segment => segment === '..' || /[<>:"|?*]/.test(segment))) return undefined;
+  // A control character (0x00-0x1F) is refused on EVERY platform, exactly like the
+  // Windows-illegal <>:"|?* beside it: Windows cannot create such a name, and Java's
+  // WindowsPathParser throws on it, so allowing it on macOS/Linux made one payload restore
+  // differently per platform. U+0085/U+2028/U+2029 are legal on Windows and stay allowed.
+  // Kotlin mirror: ClipboardPathResolver.sanitizeRelativePath.
+  if (segments.some(segment => segment === '..' || /[<>:"|?*\x00-\x1F]/.test(segment))) return undefined;
   return segments.join('/');
 }
 
