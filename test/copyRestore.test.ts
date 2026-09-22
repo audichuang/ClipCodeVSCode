@@ -9,6 +9,29 @@ import { buildPayload, parseClipboard } from '../src/clipboardFormat.js';
 import { executeRestorePlan, hasPathDependencies, planRestore, type RestoreEntry } from '../src/restore.js';
 import { defaultSettings } from '../src/settings.js';
 
+test('restores unmatched absolute paths with their entire directory tree', async () => {
+  await withTempDir(async root => {
+    const paths = [
+      [String.raw`D:\Users\author\.m2\repository\library.jar!\com\example\Library$Inner.java`,
+        'D/Users/author/.m2/repository/library.jar!/com/example/Library$Inner.java'],
+      ['/foreign/checkout/src/New.kt', 'foreign/checkout/src/New.kt'],
+      [String.raw`\\server\share\arbitrary\New.txt`, 'server/share/arbitrary/New.txt']
+    ];
+    const payload = paths.map(([source], index) => `// file: ${source}\ncontent-${index}`).join('\n');
+    const entries = parseClipboard(payload, '// file: $FILE_PATH');
+    const plan = await planRestore(root, entries);
+
+    assert.deepEqual(plan.createOperations.map(op => op.relativePath), paths.map(([, relative]) => relative));
+    assert.deepEqual(plan.skippedOperations, []);
+    const result = await executeRestorePlan(plan, { overwriteExisting: false, skipExisting: false });
+    assert.equal(result.createdCount, paths.length);
+    assert.deepEqual(result.errors, []);
+    for (const [index, [, relative]] of paths.entries()) {
+      assert.equal(await readFile(path.join(root, relative), 'utf8'), `content-${index}`);
+    }
+  });
+});
+
 test('copies folders recursively, empty files included', async () => {
   await withTempDir(async root => {
     await mkdir(path.join(root, 'src', 'nested'), { recursive: true });

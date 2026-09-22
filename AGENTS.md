@@ -36,6 +36,15 @@ TS-side pins for the shared invariants:
 - `GENERIC_FILE_HEADER` spells the token out as `[Ff][Ii][Ll][Ee]:` instead of using
   `/i`: Kotlin's `IGNORE_CASE` folds the Turkish dotless `ı` (U+0131) onto `i` and JS
   refuses to, so `// fıle: x.ts` was content here and a header in IntelliJ.
+- Path-shape regexes never use `.` — `[\s\S]` for "any character". JS's `.` skips four
+  line terminators and Java's five (U+0085 too), and a lone `\r` survives the `\r?\n`
+  header split, so `.` made `D:/a\rb.txt` Windows-style here and not in IntelliJ.
+  Kotlin mirrors: `ClipboardPathResolver` `WINDOWS_STYLE_PATH` / `WINDOWS_ABSOLUTE_PATH`,
+  `CopyPathFormatter`, `PathRuleMatcher`.
+- An absolute path matching no root is kept LITERALLY under the primary root on a write
+  (`literalAbsoluteCandidate`: drive colon stripped, every directory kept), never on a
+  delete — IntelliJ 1.2.14's rule, row 5 of the work-root `AGENTS.md`. A test asserting
+  `/etc/passwd` resolves to `<root>/etc/passwd` is that rule, not a hole.
 - The builder emits `POST_TEXT_MARKER` (`// clipcode-end`) before a non-empty post text
   and the parser stops there. Do NOT reintroduce a `postText` parameter on
   `parseClipboard` — see the work-root `AGENTS.md` for why reconstructing the footer from
