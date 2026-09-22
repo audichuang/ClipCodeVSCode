@@ -47,7 +47,8 @@ describe('RepoDiscoveryService', () => {
   beforeEach(() => {
     // realpath resolves the macOS /var → /private/var symlink so paths we
     // construct match the canonical paths git returns from --show-toplevel.
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'ggp-repo-disc-')));
+    // .native: on Windows it expands an 8.3 TEMP (RUNNER~1) to the long name git reports. // SNIPCODE-HOOK
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'ggp-repo-disc-')));
     RepoDiscoveryService.clearCache();
   });
   afterEach(() => {
@@ -156,7 +157,7 @@ describe('RepoDiscoveryService', () => {
       // walker stumbling onto the submodule first), place the submodule inside
       // an IGNORED_DIR — the walker won't descend into `vendor/`, so the entry
       // can only surface via `git submodule status --recursive`.
-      const library = realpathSync(mkdtempSync(join(tmpdir(), 'ggp-sub-lib-')));
+      const library = realpathSync.native(mkdtempSync(join(tmpdir(), 'ggp-sub-lib-'))); // SNIPCODE-HOOK: see root
       initRepo(library);
 
       const parent = join(root, 'parent');
