@@ -1,6 +1,5 @@
-/* SNIPCODE-HOOK start: execFileSync + os.devNull (portable git harness) */
+/* SNIPCODE-HOOK start: execFileSync (portable git harness) */
 import { execFileSync } from 'child_process';
-import { devNull } from 'os';
 /* SNIPCODE-HOOK end */
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -19,9 +18,12 @@ export interface TempRepo {
 
 const NOISY_ENV_OVERRIDES = {
   // Prevent CI / user config from interfering with deterministic repos.
-  /* SNIPCODE-HOOK start: os.devNull — the literal '/dev/null' does not exist on Windows */
-  GIT_CONFIG_GLOBAL: devNull,
-  GIT_CONFIG_SYSTEM: devNull,
+  /* SNIPCODE-HOOK start: keep the literal '/dev/null', NOT os.devNull. Git for Windows
+     special-cases the string '/dev/null' (mapping it to nul); os.devNull is `\\.\nul`, which it
+     rewrites to '//./nul' and then fails to open — every `git init` died with
+     "unable to access '//./nul': Invalid argument". */
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
   /* SNIPCODE-HOOK end */
   GIT_AUTHOR_NAME: 'Test Author',
   GIT_AUTHOR_EMAIL: 'author@example.com',
