@@ -14,13 +14,14 @@ import {
 } from '../src/clipboardFormat.js';
 import { estimateTokens, payloadStats } from '../src/copy.js';
 import { resolveDeleteTarget, resolveWriteTarget, type RestoreTargetResolution } from '../src/pathResolver.js';
+import { planRestore } from '../src/restore.js';
 
 // Shared cross-tool contract goldens — the SAME file is committed byte-identically
 // in the IntelliJ repo (ClipCode/src/test/resources/clipboard-contract.json). Both
 // sides assert their build + parse match these frozen bytes, so neither can drift
 // from the contract without a red test. Regenerate via scripts/gen-contract-fixtures.cjs
 // and update EXPECTED_FIXTURES_SHA on BOTH sides.
-const EXPECTED_FIXTURES_SHA = '2d5908a5a247fcc564380a4c5ec1b8f188bcc50fae9d039aa0f8e200c37a9771';
+const EXPECTED_FIXTURES_SHA = 'df317eb7b412d4bd71222d71d4cd64a1652fbcac2d82468ec417e4ce95ec2468';
 const FIXTURES_PATH = path.join(process.cwd(), 'test', 'fixtures', 'clipboard-contract.json');
 
 interface BuildOptions {
@@ -38,7 +39,18 @@ interface TokenCase { name: string; text: string; chars: number; lines: number; 
 type PathOutcome = { root: string; path: string } | 'refused' | 'missing' | 'ambiguous';
 interface PathCase { input: string; needsSymlink?: boolean; write: PathOutcome; delete: PathOutcome; }
 interface PathLayout { roots: string[]; dirs: string[]; files: Record<string, string>; symlinks: Record<string, string>; }
+interface FileSpec { text?: string; base64?: string; }
+interface RestoreLayout { roots: string[]; dirs: string[]; files: Record<string, FileSpec>; symlinks: Record<string, string>; }
+interface PlannedCreate { root: string; path: string; relativePath: string; content: string; existed: boolean; }
+interface PlannedDelete { root: string; path: string; relativePath: string; }
+interface PlannedSkip { rawPath: string; relativePath: string | null; reason: string; }
+interface RestoreCase {
+  name: string; headerFormat: string; payload: string; needsSymlink?: boolean;
+  creates: PlannedCreate[]; deletes: PlannedDelete[]; skips: PlannedSkip[];
+}
 interface Fixtures {
+  restoreLayout: RestoreLayout;
+  restoreCases: RestoreCase[];
   buildCases: BuildCase[];
   parseCases: ParseCase[];
   tokenCases: TokenCase[];
@@ -139,6 +151,52 @@ test('path: every clipboard path resolves to the frozen cross-tool target', asyn
     }
     if (skipped.length > 0) {
       t.diagnostic(`SKIPPED ${skipped.length} symlink row(s): this platform refused to create a directory symlink`);
+    }
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+// A paste is interoperable only if both tools plan the SAME operations for one payload:
+// which files are created (with what content, over an existing one or not), deleted, or
+// skipped and why. The IntelliJ mirror builds its RestorePlanBuilder plan from the same
+// frozen payloads on the same layout.
+test('restore: every payload plans the frozen cross-tool operations', async t => {
+  const layout = fixtures.restoreLayout;
+  const parent = await realpath(await mkdtemp(path.join(os.tmpdir(), 'clipcode-restore-contract-')));
+  try {
+    for (const dir of layout.dirs) await mkdir(path.join(parent, dir), { recursive: true });
+    for (const [file, spec] of Object.entries(layout.files)) {
+      await writeFile(path.join(parent, file), spec.base64 !== undefined ? Buffer.from(spec.base64, 'base64') : spec.text ?? '');
+    }
+    let symlinks = true;
+    for (const [link, target] of Object.entries(layout.symlinks)) {
+      try {
+        await symlink(path.join(parent, target), path.join(parent, link), 'dir');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+        symlinks = false;
+      }
+    }
+    const roots = layout.roots.map(root => path.join(parent, root));
+    const where = (absolutePath: string) => {
+      const [root, ...rest] = path.relative(parent, absolutePath).split(path.sep);
+      return { root, path: rest.join('/') };
+    };
+    const reason = (r: string) => (r === 'AMBIGUOUS_PATH' || r === 'AMBIGUOUS_TARGET' ? 'AMBIGUOUS' : r);
+    for (const c of fixtures.restoreCases) {
+      if (c.needsSymlink && !symlinks) {
+        t.diagnostic(`SKIPPED "${c.name}": this platform refused to create a directory symlink`);
+        continue;
+      }
+      await t.test(c.name, async () => {
+        const plan = await planRestore(roots, parseClipboard(c.payload, c.headerFormat));
+        assert.deepEqual({
+          creates: plan.createOperations.map(op => ({ ...where(op.absolutePath), relativePath: op.relativePath, content: op.content, existed: op.existed })),
+          deletes: plan.deleteOperations.map(op => ({ ...where(op.absolutePath), relativePath: op.relativePath })),
+          skips: plan.skippedOperations.map(op => ({ rawPath: op.rawPath, relativePath: op.relativePath ?? null, reason: reason(op.reason) })),
+        }, { creates: c.creates, deletes: c.deletes, skips: c.skips });
+      });
     }
   } finally {
     await rm(parent, { recursive: true, force: true });

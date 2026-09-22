@@ -16,7 +16,8 @@ Read that before changing anything about the wire format — and note the fixtur
 are generated from **this** implementation, so a format change starts here. From a
 lone clone, the executable copy of the contract is
 `test/fixtures/clipboard-contract.json` + `test/contract.test.ts` — build, parse, token
-stats and (`pathCases`) path resolution of both writes and deletes.
+stats, (`pathCases`) path resolution of both writes and deletes, and (`restoreCases`) the
+restore plan a payload produces.
 
 Implementation: `src/clipboardFormat.ts` — `buildPayloadInternal` + `escapeContent`
 (build), `parseClipboard` + `unescapeContent` + `joinContent` (parse). The Kotlin

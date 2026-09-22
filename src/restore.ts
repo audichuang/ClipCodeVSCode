@@ -60,14 +60,18 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
     if (entry.changeTypes.has('DELETED')) {
       const resolution = resolveDeleteTarget(roots, entry.path);
       if (!resolution.ok) {
+        const reason = resolution.reason === 'missing path'
+          ? 'ALREADY_ABSENT'
+          : resolution.reason === 'ambiguous path'
+            ? 'AMBIGUOUS_PATH'
+            : 'UNRESOLVED_PATH';
         skippedOperations.push({
           rawPath: entry.path,
-          relativePath: resolution.relativePath,
-          reason: resolution.reason === 'missing path'
-            ? 'ALREADY_ABSENT'
-            : resolution.reason === 'ambiguous path'
-              ? 'AMBIGUOUS_PATH'
-              : 'UNRESOLVED_PATH'
+          // An UNRESOLVED path has no target, so it carries no relative one either — even a
+          // path refused for escaping through a symlink, which HAD a candidate. Mirrors
+          // RestorePlanBuilder (pinned by the shared restoreCases).
+          relativePath: reason === 'UNRESOLVED_PATH' ? undefined : resolution.relativePath,
+          reason
         });
         continue;
       }
@@ -86,10 +90,12 @@ export async function planRestore(workspaceRoot: string | string[], entries: Res
 
     const resolution = resolveWriteTarget(roots, entry.path);
     if (!resolution.ok) {
+      const ambiguous = resolution.reason === 'ambiguous path';
       skippedOperations.push({
         rawPath: entry.path,
-        relativePath: resolution.relativePath,
-        reason: resolution.reason === 'ambiguous path' ? 'AMBIGUOUS_PATH' : 'UNRESOLVED_PATH'
+        // See the delete branch: an UNRESOLVED path carries no relative path.
+        relativePath: ambiguous ? resolution.relativePath : undefined,
+        reason: ambiguous ? 'AMBIGUOUS_PATH' : 'UNRESOLVED_PATH'
       });
       continue;
     }
