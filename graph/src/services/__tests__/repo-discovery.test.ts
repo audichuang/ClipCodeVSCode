@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process'; // SNIPCODE-HOOK: no shell (Windows)
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -23,7 +23,9 @@ const ENV = {
 };
 
 function git(cwd: string, args: string[]): string {
-  return execSync(`git ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`, {
+  /* SNIPCODE-HOOK start: no shell — cmd.exe does not treat ' as a quote (see integration/helpers.ts) */
+  return execFileSync('git', args, {
+  /* SNIPCODE-HOOK end */
     cwd, encoding: 'utf-8', env: { ...process.env, ...ENV }, stdio: ['pipe', 'pipe', 'pipe'],
   });
 }

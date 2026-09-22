@@ -1,4 +1,7 @@
-import { execSync } from 'child_process';
+/* SNIPCODE-HOOK start: execFileSync + os.devNull (portable git harness) */
+import { execFileSync } from 'child_process';
+import { devNull } from 'os';
+/* SNIPCODE-HOOK end */
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -16,8 +19,10 @@ export interface TempRepo {
 
 const NOISY_ENV_OVERRIDES = {
   // Prevent CI / user config from interfering with deterministic repos.
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
+  /* SNIPCODE-HOOK start: os.devNull — the literal '/dev/null' does not exist on Windows */
+  GIT_CONFIG_GLOBAL: devNull,
+  GIT_CONFIG_SYSTEM: devNull,
+  /* SNIPCODE-HOOK end */
   GIT_AUTHOR_NAME: 'Test Author',
   GIT_AUTHOR_EMAIL: 'author@example.com',
   GIT_COMMITTER_NAME: 'Test Committer',
@@ -36,10 +41,12 @@ export function shellQuote(s: string): string {
 /* SNIPCODE-HOOK end */
 
 export function runGit(cwd: string, args: string[], input?: string): string {
-  /* SNIPCODE-HOOK start: use shared shellQuote */
-  const cmd = `git ${args.map(shellQuote).join(' ')}`;
+  /* SNIPCODE-HOOK start: no shell. A POSIX-quoted command line went through cmd.exe on
+     Windows, which does not treat ' as a quote, so every repo setup failed there
+     (`git 'init' '--initial-branch=main'`) and each test's cleanup then hit undefined.
+     execFileSync passes the arguments verbatim on every platform. */
+  return execFileSync('git', args, {
   /* SNIPCODE-HOOK end */
-  return execSync(cmd, {
     cwd,
     encoding: 'utf-8',
     input,

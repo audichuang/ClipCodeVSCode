@@ -60,7 +60,13 @@ function initRepoWithHunk(path: string, file = 'f.txt'): void {
 
 function initDirtyRepo(path: string): void {
   mkdirSync(path, { recursive: true });
-  for (const args of [['init', '--initial-branch=main'], ['config', 'commit.gpgsign', 'false'], ['add', '-A'], ['commit', '--allow-empty', '-m', 'init']]) {
+  /* SNIPCODE-HOOK start: a REPO-LOCAL identity. ENV only reaches the git calls made here;
+     the workbench's own `git commit` runs with process.env, and a CI runner has no global
+     identity (Linux cannot even auto-detect one from its domainless hostname), so the
+     final commit failed on ubuntu only — `[false, false]`, not a product bug. */
+  const identity = [['config', 'user.name', 'T'], ['config', 'user.email', 't@e.com']];
+  /* SNIPCODE-HOOK end */
+  for (const args of [['init', '--initial-branch=main'], ['config', 'commit.gpgsign', 'false'], /* SNIPCODE-HOOK start */ ...identity, /* SNIPCODE-HOOK end */ ['add', '-A'], ['commit', '--allow-empty', '-m', 'init']]) {
     execSync(`git ${args.map(a => `'${a}'`).join(' ')}`, { cwd: path, env: { ...process.env, ...ENV }, stdio: 'pipe' });
   }
   writeFileSync(join(path, 'dirty.txt'), 'x\n'); // untracked → shows under Unstaged
