@@ -1,0 +1,88 @@
+name: CI
+
+# Every push to main and every PR, on all three platforms. The clipboard payload is
+# supposed to restore identically wherever it is pasted, and the shared contract fixture
+# (test/fixtures/clipboard-contract.json, byte-identical in the IntelliJ repo) is what
+# says so — so the same fixture must pass on Windows, macOS and Linux, not only on the
+# machine that generated it. Separate from publish.yml, which only runs on a v* tag.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            graph/package-lock.json
+            graph/webview-ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Host unit tests (includes the cross-tool contract)
+        run: npm test
+      - name: Graph tests
+        run: npm --prefix graph test
+      # Every runner image ships Google Chrome, so this exercises browser tier 2 (a local
+      # browser), not the pinned chrome-headless-shell download (tier 3).
+      - name: Diff webview layout gate (real browser)
+        run: node scripts/verify-diff-layout.mjs
+      - name: Highlight worker parity
+        run: node scripts/verify-highlight-worker.mjs
+      - name: E2E (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e
+      - name: E2E
+        if: runner.os != 'Linux'
+        run: npm run test:e2e
+      - name: Keep browser reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: ignore
+
+  # The performance budgets assume an otherwise IDLE machine
+  # (docs/testing/diff-webview-regressions.md); a shared runner is not one, so this job
+  # reports but never blocks. Do not relax the budgets to make it green: a regression is
+  # judged on an idle machine by `npm run test:precommit`, which still gates every commit.
+  performance:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            graph/package-lock.json
+            graph/webview-ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Diff webview performance gate (report only)
+        run: node scripts/verify-diff-layout.mjs --performance
+      - name: Keep the performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-performance
+          path: test-results/diff-performance.json
+          if-no-files-found: ignore
