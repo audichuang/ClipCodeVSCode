@@ -344,6 +344,16 @@ export async function buildGraphCopyPayload(
     )) {
       continue;
     }
+    // The workspace spelling above can differ from the physical path git reports (symlinked
+    // workspace). An absolute EXCLUDE written against the physical path must still hit, so
+    // run an exclude-only pass on it; includes stay judged on the workspace spelling alone.
+    if (settings.useFilters && deps.workspaceRoots?.length) {
+      const physical = joinFsPath(file.repoRootFsPath, file.relativePath);
+      if (physical !== workspaceSpelling(deps.workspaceRoots, file.repoRootFsPath, file.relativePath) &&
+          !fileMatchesFilters(file.filterPath, settings.filterRules ?? [], false, settings.useExcludeFilters === true, physical)) {
+        continue;
+      }
+    }
 
     const content = file.content;
     if (content === undefined) {
