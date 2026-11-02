@@ -147,7 +147,7 @@ export type WebviewMessage =
           relativePath: string;
           oldRelativePath?: string;
           status: string;
-          beforeRef?: string;
+          beforeRefs?: string[];
         }>;
       };
     }

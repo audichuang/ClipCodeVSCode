@@ -605,13 +605,13 @@ test('a multi-commit union reads each deleted file from its own deleting commit\
   const repo: ContentRepo = {
     rootUri: { fsPath: '/repo' },
     show: async (ref: string, p: string) => {
-      if (ref === 'c2^' && p === 'gone.ts') return 'pre-deletion body';
+      if (ref === 'c2^2' && p === 'gone.ts') return 'pre-deletion body';  // c2: a merge, file only on parent 2
       throw new Error(`fatal: path '${p}' does not exist in '${ref}'`);
     }
   };
   const r = await buildGraphCopyPayload(deps(repo), {
     hash: 'c3',
-    files: [{ repoRootFsPath: '/repo', relativePath: 'gone.ts', status: 'D', beforeRef: 'c2^' }]
+    files: [{ repoRootFsPath: '/repo', relativePath: 'gone.ts', status: 'D', beforeRefs: ['c2^1', 'c2^2', 'c2^3'] }]
   });
   assert.match(r.text, /\/\/ file: \[DELETED\] gone\.ts\npre-deletion body/);
 });

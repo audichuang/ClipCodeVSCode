@@ -597,17 +597,21 @@
     const payloadFiles = paths.map((p) => {
       const f = lookup(p);
       const status = f?.status ?? 'M';
-      const deleting = unionMode && status.startsWith('D')
-        ? sections.find((s) => s.file === p && s.status?.startsWith('D'))?.commit
-        : undefined;
+      // Every parent of every deleting commit, newest first: a merge can delete a file that
+      // only its second parent had, so `<merge>^` alone found nothing.
+      const beforeRefs = unionMode && status.startsWith('D')
+        ? sections
+          .filter((s) => s.file === p && s.status?.startsWith('D'))
+          .flatMap((s) => [`${s.commit}^1`, `${s.commit}^2`, `${s.commit}^3`])
+        : [];
       return {
         repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status,
-        ...(deleting ? { beforeRef: `${deleting}^` } : {}),
+        ...(beforeRefs.length > 0 ? { beforeRefs } : {}),
       };
     });
     // A two-endpoint compare diffs compareRef1..compareRef2, so a deleted file's pre-deletion
     // content lives at compareRef1. The union above has no single base (compareRef1 is
-    // oldest^, older than an edit-then-delete), so it sends per-file beforeRef instead.
+    // oldest^, older than an edit-then-delete), so it sends per-file beforeRefs instead.
     const baseRef = !commit && uiStore.comparing && sections.length === 0 && hash === snipcodeTreeHash()
       ? uiStore.compareRef1 ?? undefined
       : undefined;
