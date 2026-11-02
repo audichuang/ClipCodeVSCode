@@ -594,9 +594,11 @@
       const f = lookup(p);
       return { repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status: f?.status ?? 'M' };
     });
-    // Compare mode diffs compareRef1..compareRef2, so a deleted file's pre-deletion content
-    // lives at compareRef1, not at the newer side's parents.
-    const baseRef = !commit && uiStore.comparing && hash === snipcodeTreeHash()
+    // A two-endpoint compare diffs compareRef1..compareRef2, so a deleted file's pre-deletion
+    // content lives at compareRef1. A 3+ commit multi-select is a UNION of per-commit changes
+    // (non-empty `sections`) with compareRef1 = oldest^: there the deleting commit's own
+    // parents are right, so no baseRef.
+    const baseRef = !commit && uiStore.comparing && sections.length === 0 && hash === snipcodeTreeHash()
       ? uiStore.compareRef1 ?? undefined
       : undefined;
     vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, baseRef, files: payloadFiles } });

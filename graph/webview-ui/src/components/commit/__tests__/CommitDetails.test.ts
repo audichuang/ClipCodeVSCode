@@ -1591,3 +1591,54 @@ describe('CommitDetails — M12 files toolbar (tree/flat, expand/collapse all)',
   });
 });
 /* SNIPCODE-HOOK end */
+
+describe('CommitDetails — Copy Full Source baseRef', () => {
+  async function copyFirstFile(container: HTMLElement) {
+    await waitFor(() => container.querySelector('.file-item'));
+    globalThis.__postedMessages = [];
+    await fireEvent.contextMenu(container.querySelector<HTMLButtonElement>('.file-item')!, { clientX: 10, clientY: 10 });
+    const item = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll('.menu-item'))
+        .find(m => /Copy Full Source/.test(m.textContent ?? ''));
+      if (!el) throw new Error('menu not ready');
+      return el as HTMLElement;
+    });
+    await fireEvent.click(item);
+    const msg = globalThis.__postedMessages.find(
+      (m) => (m.data as { type?: string }).type === 'snipcodeCopyFullSource'
+    );
+    expect(msg).toBeDefined();
+    return (msg!.data as { payload: { hash: string; baseRef?: string } }).payload;
+  }
+
+  it('a two-ref compare sends compareRef1 as baseRef (deleted files read their pre-image there)', async () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'aaaa';
+    uiStore.compareRef2 = 'bbbb';
+    const { container } = render(CommitDetails);
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'commitDiffData', payload: { hash: '', files: [{ path: 'gone.ts', status: 'D' }], diffs: [] },
+    }}));
+    const payload = await copyFirstFile(container);
+    expect(payload.hash).toBe('bbbb');
+    expect(payload.baseRef).toBe('aaaa');
+  });
+
+  it('a 3+ commit union sends no baseRef: compareRef1 (oldest^) predates the deleting commit', async () => {
+    uiStore.comparing = true;
+    uiStore.compareRef1 = 'c1^';
+    uiStore.compareRef2 = 'c3';
+    uiStore.selectedCommitHashes = ['c3', 'c2', 'c1'];
+    const { container } = render(CommitDetails);
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'multiCommitSectionsData',
+      payload: {
+        files: [{ path: 'gone.ts', status: 'D' }],
+        sections: [{ file: 'gone.ts', commit: 'c3', diff: { file: 'gone.ts', hunks: [], isBinary: false, isImage: false } }],
+      },
+    }}));
+    const payload = await copyFirstFile(container);
+    expect(payload.hash).toBe('c3');
+    expect(payload.baseRef).toBeUndefined();
+  });
+});
