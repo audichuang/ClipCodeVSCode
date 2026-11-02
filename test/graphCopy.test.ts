@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, symlinkSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { buildGraphCopyPayload, UNCOMMITTED_HASH, type GraphCopyDeps, type GraphCopySettings } from '../src/graphCopy.js';
 import { sourceRootName, toClipboardPathFromRoots } from '../src/pathResolver.js';
@@ -300,11 +303,11 @@ test('two repositories with the same relative path keep their identities', async
 });
 
 test('a SINGLE-repo graph copy filters against the workspace-relative path, like SCM', async () => {
-  // The header here is repo-relative (`secret.txt`) and must stay that way — the
-  // `clipcode-root` line names that repo, and the name and the paths have to describe the
-  // same base. But the user's rules are written against what every other surface shows
-  // them, which is workspace-relative (`beta/secret.txt`). Filtering on the header meant an
-  // EXCLUDE rule for a non-primary root silently did nothing on this one surface.
+  // Header and filter use the same rule as SCM/History/IntelliJ: paths are relative to the
+  // WORKSPACE root (non-primary roots labelled `r2/...`), and clipcode-root names the
+  // workspace root, not the repo. The user's rules are written against that same
+  // workspace-relative spelling (`r2/secret.txt`), so filtering on anything else made an
+  // EXCLUDE rule for a non-primary root silently do nothing on this one surface.
   const beta = fakeRepo('/r2', { 'secret.txt': 'SECRET', 'a.txt': 'ok' });
   const filtered: GraphCopyDeps = {
     resolveRepo: (root: string) => (root === '/r2' ? beta : undefined),
@@ -442,5 +445,36 @@ test('the graph surface honours the ordinary exclude filters', async () => {
 
   assert.doesNotMatch(result.text, /SECRET/);
   assert.match(result.text, /src\/a\.ts/);
+  assert.equal(result.copiedFileCount, 1);
+});
+
+test('a workspace opened through a symlink still copies workspace-relative, and filters on that path', async () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'clipcode-sym-')));
+  const target = path.join(base, 'realdir');
+  mkdirSync(path.join(target, 'src'), { recursive: true });
+  const link = path.join(base, 'linkws');
+  symlinkSync(target, link);
+  // git reports the realpath; VS Code reports the symlink the user opened.
+  const repo = fakeRepo(target, { 'src/a.ts': 'A', 'src/secret.ts': 'SECRET' });
+  const d: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === target ? repo : undefined),
+    workspaceRoots: [link],
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: 'src/secret.ts', enabled: true }]
+    }
+  };
+  const result = await buildGraphCopyPayload(d, {
+    hash: 'abc', files: [
+      { repoRootFsPath: target, relativePath: 'src/a.ts', status: 'M' },
+      { repoRootFsPath: target, relativePath: 'src/secret.ts', status: 'M' }
+    ]
+  });
+  assert.ok(result.text.startsWith('// clipcode-root: linkws'), result.text);
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] src\/a\.ts/);
+  assert.doesNotMatch(result.text, new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(result.text, /SECRET/);
   assert.equal(result.copiedFileCount, 1);
 });

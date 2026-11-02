@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import type { ChangeTypeLabel, PayloadFile } from './clipboardFormat.js';
 import { buildGitPayload } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
@@ -111,6 +112,37 @@ function batchKey(repoRootFsPath: string, relativePath: string): string {
   return `${repoRootFsPath}\n${relativePath}`;
 }
 
+function trimSlashes(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function realOrSelf(p: string): string {
+  try { return trimSlashes(realpathSync(p)); } catch { return trimSlashes(p); }
+}
+
+function isUnder(root: string, p: string): boolean {
+  return p === root || p.startsWith(`${root}/`);
+}
+
+/**
+ * Spell a file under the repo the way the workspace spells it. `git rev-parse
+ * --show-toplevel` hands the Graph a REALPATH (`/private/tmp/ws`) while VS Code reports the
+ * workspace through the symlink the user opened (`/tmp/ws`); relativizing by string prefix
+ * then fails and the header leaks an absolute path. When the plain spelling is already
+ * under a root nothing changes; otherwise both sides are realpath'd and the file is
+ * re-anchored on the workspace root's own spelling. A file under no root keeps its path.
+ */
+function workspaceSpelling(workspaceRoots: string[], repoRootFsPath: string, relativePath: string): string {
+  const plain = joinFsPath(repoRootFsPath, relativePath);
+  if (workspaceRoots.some(r => isUnder(trimSlashes(r), trimSlashes(plain)))) return plain;
+  const real = joinFsPath(realOrSelf(repoRootFsPath), relativePath);
+  for (const root of workspaceRoots) {
+    const realRoot = realOrSelf(root);
+    if (isUnder(realRoot, real)) return `${trimSlashes(root)}${real.slice(realRoot.length)}`;
+  }
+  return plain;
+}
+
 function baseNameOf(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? '';
 }
@@ -143,7 +175,7 @@ function workspaceRelativePath(
   relativePath: string
 ): string {
   if (!workspaceRoots?.length) return relativePath;
-  return toClipboardPathFromRoots(workspaceRoots, joinFsPath(repoRootFsPath, relativePath));
+  return toClipboardPathFromRoots(workspaceRoots, workspaceSpelling(workspaceRoots, repoRootFsPath, relativePath));
 }
 
 // No-workspace fallback only: the repo folder name shared by every file, or undefined if
@@ -306,7 +338,9 @@ export async function buildGraphCopyPayload(
       settings.useExcludeFilters === true,
       // The file's OWN relative path — clipboardPath carries the repo-basename prefix in
       // a multi-repo payload, and joining that produced `<root>/<repoName>/<path>`.
-      joinFsPath(file.repoRootFsPath, file.relativePath)
+      deps.workspaceRoots?.length
+        ? workspaceSpelling(deps.workspaceRoots, file.repoRootFsPath, file.relativePath)
+        : joinFsPath(file.repoRootFsPath, file.relativePath)
     )) {
       continue;
     }
