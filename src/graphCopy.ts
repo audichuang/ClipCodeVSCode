@@ -320,12 +320,6 @@ export async function buildGraphCopyPayload(
       break;
     }
 
-    if (file.kind === 'deleted') {
-      files.push({ path: file.clipboardPath, content: file.content ?? DELETED_FILE_MARKER, changeType: file.changeType });
-      copiedFileCount++;
-      continue;
-    }
-
     if (file.kind === 'missing') {
       missingRepoCount++;
       continue;
@@ -353,6 +347,14 @@ export async function buildGraphCopyPayload(
           !fileMatchesFilters(file.filterPath, settings.filterRules ?? [], false, settings.useExcludeFilters === true, physical)) {
         continue;
       }
+    }
+
+    // A deleted entry goes through the filters above and the size limit below like any
+    // other: it carries the pre-deletion body, so skipping them leaked excluded files.
+    if (file.kind === 'deleted' && file.content === undefined) {
+      files.push({ path: file.clipboardPath, content: DELETED_FILE_MARKER, changeType: file.changeType });
+      copiedFileCount++;
+      continue;
     }
 
     const content = file.content;
