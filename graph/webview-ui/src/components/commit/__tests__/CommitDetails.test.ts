@@ -1642,9 +1642,9 @@ describe('CommitDetails — Copy Full Source baseRef', () => {
         ],
       },
     }}));
-    const payload = await copyFirstFile(container) as unknown as { hash: string; baseRef?: string; files: Array<{ beforeRef?: string }> };
+    const payload = await copyFirstFile(container) as unknown as { hash: string; baseRef?: string; files: Array<{ beforeRefs?: string[] }> };
     expect(payload.hash).toBe('c3');
     expect(payload.baseRef).toBeUndefined();
-    expect(payload.files[0].beforeRef).toBe('c2^');
+    expect(payload.files[0].beforeRefs).toEqual(['c2^1', 'c2^2', 'c2^3']);
   });
 });

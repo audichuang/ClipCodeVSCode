@@ -17,9 +17,10 @@ export interface GraphCopyFile {
   relativePath: string;
   oldRelativePath?: string;
   status: string; // canonical 'A'|'M'|'D'|'R'|'C' per spec §5.0;容忍 'R100'/'C75'
-  // A deleted file's own "before" revision, for a multi-commit union where each file was
-  // deleted by a different commit (`<deleting commit>^`). Tried before payload.baseRef.
-  beforeRef?: string;
+  // A deleted file's own "before" revisions, for a multi-commit union where each file was
+  // deleted by a different commit (every parent of each deleting commit, in order).
+  // Tried before payload.baseRef.
+  beforeRefs?: string[];
 }
 
 export interface GraphCopyPayload {
@@ -259,7 +260,7 @@ async function prepareFile(
     // From the webview: never let a ref read as a git option (`git show -x:path`).
     const safe = (ref?: string) => (ref && !ref.startsWith('-') ? [ref] : []);
     const parentRefs = [
-      ...safe(file.beforeRef),
+      ...(file.beforeRefs ?? []).flatMap(safe),
       ...safe(payload.baseRef),
       ...(payload.hash === UNCOMMITTED_HASH
         ? ['HEAD']
