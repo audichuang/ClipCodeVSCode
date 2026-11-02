@@ -141,6 +141,7 @@ export type WebviewMessage =
       type: 'snipcodeCopyFullSource';
       payload: {
         hash: string;
+        baseRef?: string;
         files: Array<{
           repoRootFsPath: string;
           relativePath: string;

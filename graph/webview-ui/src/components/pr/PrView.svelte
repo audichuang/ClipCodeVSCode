@@ -520,7 +520,8 @@
       oldRelativePath: f.oldPath,
       status: f.status,
     }));
-    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: head ?? 'HEAD', files: payloadFiles } });
+    // baseRef: a file deleted by an earlier PR commit is only readable at the merge-base.
+    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash: head ?? 'HEAD', baseRef: mergeBase ?? base ?? undefined, files: payloadFiles } });
   }
 
   function statusColor(s?: string): string {
