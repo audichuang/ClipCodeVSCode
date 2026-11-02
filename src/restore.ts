@@ -199,7 +199,11 @@ export async function executeRestorePlan(
 // another (e.g. a file at "src" plus a file at "src/a.ts"): those outcomes are
 // order-dependent, so the caller serializes them instead of racing. Exported for
 // unit testing the boundary logic (e.g. "src" vs "srcfoo" must NOT conflict).
-export function hasPathDependencies(paths: string[]): boolean {
+// Keys are case-folded and NFC-normalized: on a case-insensitive volume (macOS, Windows)
+// "Config.json" and "config.json" are one file, and racing them interleaved the bytes.
+// On a case-sensitive volume this only serializes a little more often.
+export function hasPathDependencies(rawPaths: string[]): boolean {
+  const paths = rawPaths.map(p => p.normalize('NFC').toLowerCase());
   const set = new Set(paths);
   if (set.size !== paths.length) return true;
   return paths.some(p => {

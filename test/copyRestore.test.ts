@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -239,6 +239,31 @@ test('duplicate-path create ops keep sequential overwrite/skip semantics under p
     assert.equal(result.overwrittenCount, 1);
     assert.equal(result.errors.length, 0);
     assert.equal(await readFile(path.join(root, 'src', 'dup.ts'), 'utf8'), 'second');
+  });
+});
+
+test('paths differing only in case or Unicode form are serialized, like IntelliJ\'s sequential restore', async () => {
+  await withTempDir(async root => {
+    // On a case-insensitive volume (macOS, Windows) these are one file. Racing them wrote
+    // both at once and could leave interleaved bytes ("FIRSTD") while reporting 2 creates.
+    const entries: RestoreEntry[] = [
+      { path: 'Config.json', content: 'FIRST', changeTypes: new Set<string>() },
+      { path: 'config.json', content: 'SECOND', changeTypes: new Set<string>() }
+    ];
+    assert.equal(hasPathDependencies([path.join(root, 'Config.json'), path.join(root, 'config.json')]), true);
+    assert.equal(hasPathDependencies(['/r/Src', '/r/src/a.ts']), true);
+    assert.equal(hasPathDependencies(['/r/caf\u00e9', '/r/cafe\u0301']), true);
+
+    await writeFile(path.join(root, 'probe'), '');
+    const caseInsensitive = await stat(path.join(root, 'PROBE')).then(() => true, () => false);
+    await rm(path.join(root, 'probe'));
+    if (!caseInsensitive) return;
+
+    const plan = await planRestore(root, entries);
+    const result = await executeRestorePlan(plan, { overwriteExisting: false, skipExisting: false });
+    assert.equal(result.createdCount, 1);
+    assert.equal(result.errors.length, 0);
+    assert.equal(await readFile(path.join(root, 'Config.json'), 'utf8'), 'FIRST');
   });
 });
 
