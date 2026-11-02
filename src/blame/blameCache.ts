@@ -2,8 +2,8 @@
 // unsaved edit (which bumps document.version) or a HEAD move invalidates naturally.
 import type { BlameLine } from './blameParser.js';
 
-export function blameCacheKey(repoRoot: string, head: string, docVersion: number, fsPath: string): string {
-  return JSON.stringify([repoRoot, fsPath, head, docVersion]);
+export function blameCacheKey(repoRoot: string, head: string, docVersion: number, uri: string): string {
+  return JSON.stringify([repoRoot, uri, head, docVersion]);
 }
 
 export class BlameCache {

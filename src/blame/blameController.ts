@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { runBlame, defaultSpawnBlame } from './blameRunner.js';
+import { blameRevisionFor, runBlame, defaultSpawnBlame } from './blameRunner.js';
 import { BlameCache, blameCacheKey } from './blameCache.js';
 import { GenerationGate } from './blameGeneration.js';
 import { formatRelativeTime, ageBucket, AGE_BUCKETS } from './blameFormat.js';
@@ -194,7 +194,9 @@ export class BlameController {
     const docVersion = doc.version;
     const info = this.deps.resolveRepoRoot(doc.uri);
     if (!info) return;
-    const cacheKey = blameCacheKey(info.repoRoot, info.head, doc.version, doc.uri.fsPath);
+    // The uri string, not fsPath: a file and its `git:` revision share an fsPath and a
+    // version number, and used to hand each other's blame back.
+    const cacheKey = blameCacheKey(info.repoRoot, info.head, doc.version, doc.uri.toString());
     let lines = this.cache.get(cacheKey);
     if (!lines) {
       const abort = new AbortController();
@@ -208,6 +210,7 @@ export class BlameController {
           // subfolder of (or sibling to) the workspace folder.
           relPath: path.relative(info.repoRoot, doc.uri.fsPath),
           contents: doc.getText(),
+          rev: blameRevisionFor(doc.uri),
           spawnBlame: defaultSpawnBlame,
           signal: abort.signal
         });

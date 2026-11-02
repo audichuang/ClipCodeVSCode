@@ -17,14 +17,33 @@ export interface RunBlameOptions {
   repoRoot: string;
   relPath: string;
   contents: string;
+  // A committed revision the document shows (a `git:` diff side). `--contents -` always
+  // blames against HEAD's history, so an older revision's lines that HEAD later changed
+  // came back as "Not Committed Yet".
+  rev?: string;
   spawnBlame: SpawnBlame;
   signal?: AbortSignal;
 }
 
 export async function runBlame(opts: RunBlameOptions): Promise<BlameLine[]> {
-  const args = ['-C', opts.repoRoot, 'blame', '--porcelain', '--contents', '-', '--', opts.relPath];
-  const stdout = await opts.spawnBlame(opts.gitPath, args, opts.repoRoot, opts.contents, opts.signal);
+  const args = opts.rev
+    ? ['-C', opts.repoRoot, 'blame', '--porcelain', opts.rev, '--', opts.relPath]
+    : ['-C', opts.repoRoot, 'blame', '--porcelain', '--contents', '-', '--', opts.relPath];
+  const stdout = await opts.spawnBlame(opts.gitPath, args, opts.repoRoot, opts.rev ? '' : opts.contents, opts.signal);
   return parseBlamePorcelain(stdout);
+}
+
+// The revision a `git:` document (VS Code's Git extension: query `{"path","ref"}`) shows.
+// '' / '~' are the index and working views, and buffer mode is right for them.
+export function blameRevisionFor(uri: { scheme: string; query: string }): string | undefined {
+  if (uri.scheme !== 'git') return undefined;
+  try {
+    const ref: unknown = JSON.parse(uri.query)?.ref;
+    if (typeof ref !== 'string' || ref === '' || ref === '~' || ref.startsWith('-')) return undefined;
+    return ref;
+  } catch {
+    return undefined;
+  }
 }
 
 export function defaultSpawnBlame(
