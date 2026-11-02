@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.52
 
 - Copy All Open Tabs now copies each open file's saved content on disk, like IntelliJ
   ClipCode (which hands the open files to its regular file copy) and OpenIDEA. It used
@@ -10,6 +10,28 @@
   disk is counted in the "skipped: not UTF-8 text or unreadable" note instead of
   vanishing silently; when every tab is skipped the message says so instead of "No open
   text editors found to copy."
+- Paste & Restore no longer corrupts a file when the payload holds two paths that differ
+  only in case or Unicode form (`Config.json` / `config.json`). On a case-insensitive
+  volume they are one file, and writing both at once could interleave the bytes; they are
+  now written one after the other, so the second is skipped as in IntelliJ.
+- History copy always uses the Git payload layout, like IntelliJ's log copy and the Git
+  Graph copy. It used the regular layout unless a deleted file was selected, so the same
+  commit copied to different bytes. A file that cannot be read at that commit (binary,
+  not UTF-8) now shows "N files could not be resolved: …" instead of vanishing.
+- SCM copy checks a working-tree file's size before decoding it, in IntelliJ's order. An
+  oversized binary used to disappear with no `File skipped: size exceeds limit` entry and
+  no count; a binary or non-UTF-8 file is now counted as skipped, and in the Git layout
+  (a deleted or staged file in the selection) it is kept as `// Unable to read file
+  content`, as IntelliJ does.
+- Git Graph copy of a PR, a two-ref compare, or a 3+ commit selection now puts the
+  pre-deletion content of a deleted file on the clipboard. It looked only at the newest
+  commit's parents, where a file deleted by an earlier commit no longer exists, and fell
+  back to the bare deleted marker. A PR reads it at the merge-base, a compare at its first
+  ref, and a multi-commit selection at the parents of the commit that deleted it.
+- Blame on an older revision (the left side of a diff, a `git:` document) attributes
+  lines to that revision's history. It always blamed against HEAD, so lines HEAD later
+  changed showed as "Not Committed Yet". The merge editor's base/ours/theirs views keep
+  the old behaviour, and a file and its `git:` revision no longer share cached results.
 
 ## 0.3.51
 
