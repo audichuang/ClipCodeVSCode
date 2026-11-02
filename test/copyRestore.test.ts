@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, symlink, writeFile, mkdir } from 'node:fs
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { collectCopyFiles, collectCopyTextFiles } from '../src/copy.js';
+import { collectCopyFiles } from '../src/copy.js';
 import { extractSourceRoot } from '../src/clipboardFormat.js';
 import { buildPayload, parseClipboard } from '../src/clipboardFormat.js';
 import { executeRestorePlan, hasPathDependencies, planRestore, type RestoreEntry } from '../src/restore.js';
@@ -99,10 +99,17 @@ test('copies oversized files as skipped markers and preserves wrappers', async (
   });
 });
 
-test('copies open editor text through the same filters, limits, and multi-root paths', async () => {
+test('copies listed files (open tabs) from disk through the same filters and multi-root paths', async () => {
   await withTempDir(async parent => {
     const primary = path.join(parent, 'app');
     const sibling = path.join(parent, 'shared-lib');
+    const write = async (file: string, content: string) => {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+    };
+    await write(path.join(primary, 'src', 'main.ts'), 'main');
+    await write(path.join(primary, 'debug.log'), 'debug');
+    await write(path.join(sibling, 'src', 'util.ts'), 'util');
     const settings = {
       ...defaultSettings,
       useFilters: true,
@@ -111,32 +118,31 @@ test('copies open editor text through the same filters, limits, and multi-root p
       ]
     };
 
-    const result = await collectCopyTextFiles([primary, sibling], [
-      { absolutePath: path.join(primary, 'src', 'main.ts'), content: 'main' },
-      { absolutePath: path.join(primary, 'debug.log'), content: 'debug' },
-      { absolutePath: path.join(sibling, 'src', 'util.ts'), content: 'util' }
+    const result = await collectCopyFiles([primary, sibling], [
+      path.join(primary, 'src', 'main.ts'),
+      path.join(primary, 'debug.log'),
+      path.join(sibling, 'src', 'util.ts')
     ], settings);
 
     assert.equal(result.copiedFileCount, 2);
-    assert.deepEqual(result.files.map(file => file.path), [
-      'src/main.ts',
-      'shared-lib/src/util.ts'
+    assert.deepEqual(result.files.map(file => [file.path, file.content]), [
+      ['src/main.ts', 'main'],
+      ['shared-lib/src/util.ts', 'util']
     ]);
   });
 });
 
-test('stops copying after the copied-file limit without counting skipped markers', async () => {
+test('listed files stop at the copied-file limit without counting size-skipped markers', async () => {
   await withTempDir(async root => {
-    const settings = {
-      ...defaultSettings,
-      maxFileSizeKB: 1,
-      fileCountLimit: 1
-    };
+    await writeFile(path.join(root, 'large.txt'), 'x'.repeat(1100));
+    await writeFile(path.join(root, 'a.ts'), 'a');
+    await writeFile(path.join(root, 'b.ts'), 'b');
+    const settings = { ...defaultSettings, maxFileSizeKB: 1, fileCountLimit: 1 };
 
-    const result = await collectCopyTextFiles(root, [
-      { absolutePath: path.join(root, 'large.txt'), content: 'x'.repeat(1100) },
-      { absolutePath: path.join(root, 'a.ts'), content: 'a' },
-      { absolutePath: path.join(root, 'b.ts'), content: 'b' }
+    const result = await collectCopyFiles(root, [
+      path.join(root, 'large.txt'),
+      path.join(root, 'a.ts'),
+      path.join(root, 'b.ts')
     ], settings);
 
     assert.equal(result.copiedFileCount, 1);

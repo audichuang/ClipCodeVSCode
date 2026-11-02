@@ -176,4 +176,28 @@ describe('Snipcode copy → restore round-trip (real workspace)', () => {
     assert.deepStrictEqual(calls[0].slice(2), ['Proceed']);
     await assert.rejects(fs.stat(target), { code: 'ENOENT' });
   });
+
+  it('Copy All Open Tabs copies the saved file on disk, not unsaved editor text', async () => {
+    const relative = `${dir}/open-tab.ts`;
+    const target = path.join(repoDir, relative);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, 'saved-on-disk');
+
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const editor = await vscode.window.showTextDocument(vscode.Uri.file(target));
+    try {
+      await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'UNSAVED-'));
+      assert.ok(editor.document.isDirty, 'fixture has unsaved edits');
+
+      await vscode.env.clipboard.writeText('sentinel');
+      await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
+      const clip = await vscode.env.clipboard.readText();
+
+      assert.ok(clip.includes(`// file: ${relative}\nsaved-on-disk`), `disk content copied:\n${clip}`);
+      assert.ok(!clip.includes('UNSAVED-'), 'unsaved buffer text is not copied');
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
 });
