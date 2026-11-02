@@ -109,6 +109,10 @@ Snipcode-only edits inside `graph/` must be fenced with
 - `npm test` = **host** tests only. If you touch `graph/`, also run
   `cd graph && npx vitest run` (and prefer a single file when iterating).
 - Judge pass/fail by the `pass N, fail 0` / `Tests …` text.
+- `test:precommit` does not run e2e, and command handlers in `src/extension.ts` (vscode
+  API: tabs, editors, toasts) are reachable only from `test-e2e/`. When you change one,
+  also run `npm run build:host && npm run compile:e2e && node out-e2e/runTest.js`
+  (skips `test:e2e`'s full graph rebuild); otherwise only CI finds the regression.
 
 **Before every commit, after the final edits, run `npm run test:precommit` from
 this root and require exit code 0.** It rebuilds the current Webview and runs
