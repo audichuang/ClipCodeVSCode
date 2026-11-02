@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Git Graph (and PR/commit) copy now anchors paths on the opened workspace folder, like
+  the SCM and History copies, IntelliJ ClipCode and Orca. In a workspace `M` holding a
+  nested repo `M/repo`, the payload is `// clipcode-root: M` with `repo/src/a.ts`
+  instead of `// clipcode-root: repo` with `src/a.ts`, so pasting it into IntelliJ opened
+  at `M` no longer lands files at `M/src/...`. With several workspace roots no
+  `clipcode-root` line is emitted; with no workspace root the old repo-relative output
+  is kept.
+
 ## 0.3.50
 
 - **Upgrade both tools together.** An absolute path that matches no workspace root

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildGraphCopyPayload, UNCOMMITTED_HASH, type GraphCopyDeps, type GraphCopySettings } from '../src/graphCopy.js';
+import { sourceRootName, toClipboardPathFromRoots } from '../src/pathResolver.js';
 import type { ContentRepo } from '../src/gitContent.js';
 
 const settings: GraphCopySettings = {
@@ -325,9 +326,36 @@ test('a SINGLE-repo graph copy filters against the workspace-relative path, like
 
   assert.doesNotMatch(result.text, /SECRET/);
   assert.equal(result.copiedFileCount, 1);
-  // The header stays repo-relative, and the root line still names the repo.
-  assert.match(result.text, /\/\/ file: \[MODIFIED\] a\.txt/);
-  assert.match(result.text, /\/\/ clipcode-root: r2/);
+  // Anchored on the workspace like SCM: labelled as a non-primary root, and with two
+  // roots no single `clipcode-root` name is emitted.
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] r2\/a\.txt/);
+  assert.doesNotMatch(result.text, /clipcode-root/);
+});
+
+test('a nested repo copies workspace-anchored: clipcode-root is the workspace, path keeps the repo folder', async () => {
+  const repo = fakeRepo('/w/M/repo', { 'src/a.ts': 'A' });
+  const d: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/w/M/repo' ? repo : undefined),
+    workspaceRoots: ['/w/M'],
+    settings
+  };
+  const result = await buildGraphCopyPayload(d, {
+    hash: 'abc', files: [{ repoRootFsPath: '/w/M/repo', relativePath: 'src/a.ts', status: 'M' }]
+  });
+  assert.ok(result.text.startsWith('// clipcode-root: M'), result.text);
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] repo\/src\/a\.ts/);
+  // Identical to what the SCM / History path builder yields for the same file.
+  assert.equal(toClipboardPathFromRoots(['/w/M'], '/w/M/repo/src/a.ts'), 'repo/src/a.ts');
+  assert.equal(sourceRootName(['/w/M']), 'M');
+});
+
+test('with no workspace roots a single-repo copy stays repo-relative and names the repo', async () => {
+  const repo = fakeRepo('/repo', { 'a.ts': 'A' });
+  const result = await buildGraphCopyPayload(deps(repo), {
+    hash: 'abc', files: [{ repoRootFsPath: '/repo', relativePath: 'a.ts', status: 'M' }]
+  });
+  assert.match(result.text, /\/\/ clipcode-root: repo/);
+  assert.match(result.text, /\/\/ file: \[MODIFIED\] a\.ts/);
 });
 
 test('a relative PATH rule matches on the graph surface exactly as it does on SCM', async () => {

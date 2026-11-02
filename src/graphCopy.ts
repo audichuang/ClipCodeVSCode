@@ -5,7 +5,7 @@ import { DELETED_FILE_MARKER, mapGitStatusToChangeType } from './gitCopy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FilterRule } from './settings.js';
 import { readRefContent, type ContentRepo } from './gitContent.js';
-import { toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 
 // Each file's content comes from one `git show` subprocess; fan them out so a
 // large selection doesn't run them strictly one-at-a-time.
@@ -95,12 +95,9 @@ interface PreparedFile {
    * What the FILTER rules are matched against — always workspace-relative, and therefore
    * NOT the same string as clipboardPath.
    *
-   * The two were one field, so a single-repo graph copy filtered against the repo-relative
-   * header (`secret.txt`) while SCM and History filter against the workspace-relative path
-   * (`beta/secret.txt`): an `EXCLUDE PATH beta/secret.txt` rule held everywhere except
-   * here. The header must stay repo-relative — the `clipcode-root` line names that repo and
-   * the two have to describe the same base — so the filter needs its own path. IntelliJ has
-   * always kept them apart (CopyPathFormatter.relativeFilterPath vs toClipboardPath).
+   * Kept as its own field: with no workspace root the header falls back to repo-relative
+   * while the filter path is whatever the other surfaces filter against. IntelliJ keeps
+   * them apart too (CopyPathFormatter.relativeFilterPath vs toClipboardPath).
    */
   filterPath: string;
   /** Carried so dedupe is per repo — two repos legitimately hold the same relative path. */
@@ -119,24 +116,21 @@ function baseNameOf(p: string): string {
 }
 
 /**
- * The clipboard path for a payload that spans repositories.
- *
- * Prefixing EVERY repo with its basename — the first attempt at the same-name collision —
- * produced a labelling no other surface uses and restore cannot read: with workspace roots
- * `[alpha, beta]`, `alpha/secret.txt` resolved to `alpha/alpha/secret.txt`, and an
- * `EXCLUDE PATH secret.txt` rule that held on the SCM and History entries missed it here.
- * Every other surface — those two, and IntelliJ's GitClipboardPayloadBuilder — labels via
- * the workspace roots: the PRIMARY root's files stay unlabelled, the others carry their
- * label. Use the same function they do. Single-repo payloads keep their repo-relative
- * paths (and their `clipcode-root` line, which names that repo) untouched.
+ * The clipboard path of a file. With workspace roots this is the same spelling the SCM and
+ * History surfaces and IntelliJ's GitClipboardPayloadBuilder use (relative to the opened
+ * workspace/project root, non-primary roots labelled), so a nested repo `M/repo` copies as
+ * `repo/src/a.ts` under `clipcode-root: M`. Without any workspace root there is nothing to
+ * anchor on: single-repo payloads stay repo-relative, and a payload spanning repositories
+ * prefixes each repo's basename so two repos holding the same path do not collide.
  */
-function multiRepoClipboardPath(
+function clipboardPathFor(
   workspaceRoots: string[] | undefined,
   repoRootFsPath: string,
-  relativePath: string
+  relativePath: string,
+  multiRepo: boolean
 ): string {
-  if (!workspaceRoots?.length) return `${baseNameOf(repoRootFsPath)}/${relativePath}`;
-  return workspaceRelativePath(workspaceRoots, repoRootFsPath, relativePath);
+  if (workspaceRoots?.length) return workspaceRelativePath(workspaceRoots, repoRootFsPath, relativePath);
+  return multiRepo ? `${baseNameOf(repoRootFsPath)}/${relativePath}` : relativePath;
 }
 
 /**
@@ -152,7 +146,8 @@ function workspaceRelativePath(
   return toClipboardPathFromRoots(workspaceRoots, joinFsPath(repoRootFsPath, relativePath));
 }
 
-// The repo folder name shared by every file, or undefined if they span repos.
+// No-workspace fallback only: the repo folder name shared by every file, or undefined if
+// they span repos. With workspace roots the root name comes from sourceRootName instead.
 function singleRepoRoot(files: GraphCopyFile[]): string | undefined {
   const roots = new Set(files.map(f => f.repoRootFsPath));
   return roots.size === 1 ? baseNameOf([...roots][0]) : undefined;
@@ -208,13 +203,8 @@ async function prepareFile(
   // §5.0:R/C 帶相似度時截到字首後再對應
   const changeType = mapGitStatusToChangeType(file.status.trim().charAt(0).toUpperCase());
   const repoRootFsPath = file.repoRootFsPath;
-  // Two repositories legitimately hold the same relative path. Emitting both as a bare
-  // `a.txt` produced two identical headers, and restore then pointed both at one
-  // destination — the second repository's file was never written. IntelliJ labels the
-  // non-primary root (`other/b.ts`); do the same when the payload spans repositories.
-  const clipboardPath = multiRepo
-    ? multiRepoClipboardPath(deps.workspaceRoots, repoRootFsPath, file.relativePath)
-    : file.relativePath;
+  // Same spelling as the SCM/History surfaces (workspace-root anchored); see clipboardPathFor.
+  const clipboardPath = clipboardPathFor(deps.workspaceRoots, repoRootFsPath, file.relativePath, multiRepo);
   const filterPath = workspaceRelativePath(deps.workspaceRoots, repoRootFsPath, file.relativePath);
 
   if (changeType === 'DELETED') {
@@ -347,10 +337,10 @@ export async function buildGraphCopyPayload(
     postText: settings.postText,
     addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
     files,
-    // Paths are relative to the commit's repo root; record its folder name so
-    // restore can align folder levels. Only when every file is from one repo —
-    // a multi-repo selection has no single source root.
-    sourceRoot: singleRepoRoot(payload.files)
+    // Paths are relative to the workspace root, exactly like SCM/History/IntelliJ, so the
+    // root line names that workspace root (none for several roots). Only with no workspace
+    // at all do paths stay repo-relative, and then the single repo's name is the base.
+    sourceRoot: deps.workspaceRoots?.length ? sourceRootName(deps.workspaceRoots) : singleRepoRoot(payload.files)
   });
 
   return { text, copiedFileCount, skippedFileSizeCount, skippedUnreadableCount, skippedFiles, fileLimitReached, missingRepoCount };
