@@ -478,3 +478,37 @@ test('a workspace opened through a symlink still copies workspace-relative, and 
   assert.doesNotMatch(result.text, /SECRET/);
   assert.equal(result.copiedFileCount, 1);
 });
+
+test('a symlinked workspace excludes a file whether the PATH rule is physical-absolute, alias-absolute or relative', async () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'clipcode-symabs-')));
+  const target = path.join(base, 'physical');
+  mkdirSync(target, { recursive: true });
+  const link = path.join(base, 'linkws');
+  symlinkSync(target, link);
+  const repo = fakeRepo(target, { 'a.ts': 'A', 'secrets.env': 'SECRET' });
+  const rules = [
+    path.join(target, 'secrets.env'),   // physical absolute (what git reports)
+    path.join(link, 'secrets.env'),     // alias absolute (what the workspace spells)
+    'secrets.env'                       // relative
+  ];
+  for (const value of rules) {
+    const d: GraphCopyDeps = {
+      resolveRepo: (root: string) => (root === target ? repo : undefined),
+      workspaceRoots: [link],
+      settings: {
+        ...settings,
+        useFilters: true,
+        useExcludeFilters: true,
+        filterRules: [{ type: 'PATH', action: 'EXCLUDE', value, enabled: true }]
+      }
+    };
+    const result = await buildGraphCopyPayload(d, {
+      hash: 'abc', files: [
+        { repoRootFsPath: target, relativePath: 'a.ts', status: 'M' },
+        { repoRootFsPath: target, relativePath: 'secrets.env', status: 'M' }
+      ]
+    });
+    assert.doesNotMatch(result.text, /SECRET/, `rule ${value}`);
+    assert.equal(result.copiedFileCount, 1, `rule ${value}`);
+  }
+});
