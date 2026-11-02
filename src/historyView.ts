@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { buildGitPayload, buildPayload, type PayloadFile } from './clipboardFormat.js';
+import { buildGitPayload, type PayloadFile } from './clipboardFormat.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { type HistoryRepo, readFileAtCommit } from './gitHistory.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
@@ -98,7 +98,8 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
   const files = dedupeFilesKeepNewest(collected);
 
   const payloadFiles: PayloadFile[] = [];
-  let copied = 0, skippedSize = 0, limitReached = false, usesFallback = false;
+  let copied = 0, skippedSize = 0, limitReached = false;
+  const unresolved: string[] = [];
   for (const f of files) {
     if (settings.setMaxFileCount && copied >= settings.fileCountLimit) { limitReached = true; break; }
     const absPath = (f.change.renameUri ?? f.change.uri).fsPath;
@@ -106,8 +107,10 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
     if (settings.useFilters && !fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath)) continue;
 
     const content = await readFileAtCommit(provider.repo!, f.commit.hash, f.change, f.commit.parents);
-    if (content === undefined) continue;
-    if (f.changeType === 'DELETED') usesFallback = true;
+    // Binary / non-UTF-8 at that commit: left out of the payload, as in IntelliJ, which then
+    // warns "N files could not be resolved" (CopyGitFilesContentAction) instead of dropping
+    // them in silence.
+    if (content === undefined) { unresolved.push(basename(absPath)); continue; }
 
     const size = Buffer.byteLength(content, 'utf8');
     if (size > settings.maxFileSizeKB * 1024) {
@@ -116,11 +119,17 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
     payloadFiles.push({ path: clipboardPath, content, changeType: f.changeType }); copied++;
   }
 
+  if (unresolved.length > 0) {
+    vscode.window.showWarningMessage(`${unresolved.length} files could not be resolved: ${unresolved.join(', ')}`);
+  }
   if (payloadFiles.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
   // Same single-root rule as every other copy path — without it this entry's payload
   // carries no `// clipcode-root:` line and Paste & Restore cannot align folder levels.
   const opts = { headerFormat: settings.headerFormat, preText: settings.preText, postText: settings.postText, addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles, files: payloadFiles, sourceRoot: sourceRootName(roots) };
-  const payload = usesFallback ? buildGitPayload(opts) : buildPayload(opts);
+  // Always the Git layout: IntelliJ copies every log/history selection through
+  // GitClipboardPayloadBuilder.buildGitPayload, and so does the Graph copy here.
+  // buildPayload added blank lines, so the same commit gave different bytes per tool.
+  const payload = buildGitPayload(opts);
   await vscode.env.clipboard.writeText(payload);
   if (settings.showCopyNotification) {
     const s = skippedSize > 0 ? ` (${skippedSize} skipped: size exceeded)` : '';

@@ -134,6 +134,8 @@ describe('Snipcode × git-graph-plus integration', () => {
 
     assert.match(clip, /side1\.ts/, 'History includes the file from merge parent 2');
     assert.match(clip, /side2\.ts/, 'History includes the file from merge parent 3');
+    // Same Git layout as IntelliJ's log copy (buildGitPayload): no blank line after the root line.
+    assert.match(clip, /^\/\/ clipcode-root: [^\n]+\n\/\/ file: /, `Git payload layout:\n${clip}`);
   });
 
   it('END-TO-END copies WORKING-TREE source for the UNCOMMITTED view', async () => {
