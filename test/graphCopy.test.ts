@@ -512,3 +512,72 @@ test('a symlinked workspace excludes a file whether the PATH rule is physical-ab
     assert.equal(result.copiedFileCount, 1, `rule ${value}`);
   }
 });
+
+test('an excluded deleted file stays off the clipboard, pre-deletion content included', async () => {
+  // A deleted entry carries the pre-deletion body, so skipping the filters for it put
+  // `TOKEN=...` on the clipboard on the one surface where EXCLUDE did not hold.
+  const repo = fakeRepo('/repo', { 'secrets.env': 'TOKEN=abc', 'key.pem': 'PRIVATE', 'src/a.ts': 'ok' });
+  const d: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === '/repo' ? repo : undefined),
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [
+        { type: 'PATH', action: 'EXCLUDE', value: 'secrets.env', enabled: true },
+        { type: 'PATTERN', action: 'EXCLUDE', value: '*.pem', enabled: true }
+      ]
+    }
+  };
+  const result = await buildGraphCopyPayload(d, {
+    hash: 'abc', files: [
+      { repoRootFsPath: '/repo', relativePath: 'secrets.env', status: 'D' },
+      { repoRootFsPath: '/repo', relativePath: 'key.pem', status: 'D' },
+      { repoRootFsPath: '/repo', relativePath: 'src/a.ts', status: 'M' }
+    ]
+  });
+  assert.doesNotMatch(result.text, /TOKEN|PRIVATE|secrets\.env|key\.pem/);
+  assert.match(result.text, /\[MODIFIED\] src\/a\.ts/);
+  assert.equal(result.copiedFileCount, 1);
+});
+
+test('a symlinked workspace excludes a deleted file by its physical absolute path', async () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'clipcode-symdel-')));
+  const target = path.join(base, 'physical');
+  mkdirSync(target, { recursive: true });
+  const link = path.join(base, 'linkws');
+  symlinkSync(target, link);
+  const repo = fakeRepo(target, { 'secrets.env': 'TOKEN=abc' });
+  const d: GraphCopyDeps = {
+    resolveRepo: (root: string) => (root === target ? repo : undefined),
+    workspaceRoots: [link],
+    settings: {
+      ...settings,
+      useFilters: true,
+      useExcludeFilters: true,
+      filterRules: [{ type: 'PATH', action: 'EXCLUDE', value: path.join(target, 'secrets.env'), enabled: true }]
+    }
+  };
+  const result = await buildGraphCopyPayload(d, {
+    hash: 'abc', files: [{ repoRootFsPath: target, relativePath: 'secrets.env', status: 'D' }]
+  });
+  assert.doesNotMatch(result.text, /TOKEN|secrets\.env/);
+  assert.equal(result.copiedFileCount, 0);
+});
+
+test('an oversize deleted file is skipped with the size reason, like the History copy', async () => {
+  // Same as the History surface and OpenIDEA's staged/working deletions. OpenIDEA's commit
+  // copy instead bypasses the per-file limit, bounded only by a total payload budget this
+  // extension does not have, so an unchecked body here would be unbounded.
+  const big = 'x'.repeat(2 * 1024);
+  const repo = fakeRepo('/repo', { 'big.ts': big });
+  const d: GraphCopyDeps = { resolveRepo: () => repo, settings: { ...settings, maxFileSizeKB: 1 } };
+  const result = await buildGraphCopyPayload(d, {
+    hash: 'abc', files: [{ repoRootFsPath: '/repo', relativePath: 'big.ts', status: 'D' }]
+  });
+  assert.match(result.text, /\/\/ file: \[DELETED\] big\.ts\n\/\/ File skipped: size exceeds limit \(2048 bytes\)/);
+  assert.doesNotMatch(result.text, /xxxx/);
+  assert.equal(result.skippedFileSizeCount, 1);
+  assert.deepEqual(result.skippedFiles, [{ path: 'big.ts', bytes: 2048 }]);
+  assert.equal(result.copiedFileCount, 0);
+});

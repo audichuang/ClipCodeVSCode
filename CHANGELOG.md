@@ -9,6 +9,11 @@
   at `M` no longer lands files at `M/src/...`. With several workspace roots no
   `clipcode-root` line is emitted; with no workspace root the old repo-relative output
   is kept.
+- Git Graph (and PR/commit) copy no longer puts an excluded deleted file on the
+  clipboard. A deleted entry carries its pre-deletion content, and it skipped the
+  include/exclude filters, so `EXCLUDE PATH secrets.env` still copied `TOKEN=...` from a
+  commit that deleted it. A deleted file over the size limit is now listed as
+  `File skipped: size exceeds limit`, like any other file and like the History copy.
 
 ## 0.3.50
 
