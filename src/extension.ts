@@ -5,10 +5,9 @@ import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
-import { collectCopyFiles, collectCopyTextFiles, type CopyTextFile } from './copy.js';
+import { collectCopyFiles } from './copy.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
-import { targetEncoding } from './fileSystem.js';
 import { mapInOrder } from './concurrency.js';
 import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
@@ -268,35 +267,19 @@ async function copyAllOpenEditors(): Promise<void> {
   }
 
   const settings = readSettings();
-  const files: CopyTextFile[] = [];
-  const seen = new Set<string>();
-  let unreadable = 0;
-
+  // Same path as copying the files from the Explorer, like IntelliJ's CopyAllOpenTabsAction
+  // (it hands FileEditorManager.openFiles to performCopyFilesContent). That reads the saved
+  // bytes on disk, so unsaved edits in a tab are not copied, in all of IntelliJ, OpenIDEA and here.
+  const paths: string[] = [];
   for (const tabGroup of vscode.window.tabGroups.all) {
     for (const tab of tabGroup.tabs) {
       if (!(tab.input instanceof vscode.TabInputText)) continue;
-      const document = await vscode.workspace.openTextDocument(tab.input.uri);
-      // An empty buffer is a real file: `getText() === ''` dropped every open 0-byte
-      // __init__.py / .gitkeep before it could reach collectCopyTextFiles, which copies it.
-      if (document.isUntitled || document.uri.scheme !== 'file') continue;
-      const absolutePath = document.uri.fsPath;
-      // The editor hands back an already-decoded string, so a UTF-16 file copied cleanly
-      // from here while every other path in both tools refused it. Judge the BYTES on
-      // disk, then still copy the buffer's (possibly unsaved) text.
-      if (await targetEncoding(absolutePath) === 'other') {
-        unreadable++;
-        continue;
-      }
-      if (seen.has(absolutePath)) continue;
-      seen.add(absolutePath);
-      files.push({
-        absolutePath,
-        content: document.getText()
-      });
+      if (tab.input.uri.scheme !== 'file') continue;
+      paths.push(tab.input.uri.fsPath);
     }
   }
 
-  const result = await collectCopyTextFiles(roots, files, settings);
+  const result = await collectCopyFiles(roots, paths, settings);
   if (result.files.length === 0) {
     vscode.window.showInformationMessage('No open text editors found to copy.');
     return;
@@ -308,7 +291,7 @@ async function copyAllOpenEditors(): Promise<void> {
     // fileLimitReached was computed and thrown away here: files went missing with nothing
     // said. IntelliJ raises a dedicated "File Limit Reached" notification.
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const dropped = result.skippedUnreadableCount + unreadable;
+    const dropped = result.skippedUnreadableCount;
     const unreadableSuffix = dropped > 0 ? ` ${dropped} skipped: not UTF-8 text or unreadable.` : '';
     notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.${limit}${unreadableSuffix}`, result.payload);
   }

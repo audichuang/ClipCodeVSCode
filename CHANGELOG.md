@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Copy All Open Tabs now copies each open file's saved content on disk, like IntelliJ
+  ClipCode (which hands the open files to its regular file copy) and OpenIDEA. It used
+  to copy the editor buffer, so unsaved edits ended up on the clipboard and the same
+  tabs produced a different payload in each tool. Open tabs now go through exactly the
+  same path as copying those files from the Explorer.
+
 ## 0.3.51
 
 - Git Graph (and PR/commit) copy now anchors paths on the opened workspace folder, like
