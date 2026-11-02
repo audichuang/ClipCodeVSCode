@@ -8,14 +8,18 @@ class Uri {
 }
 
 const workspaceReads: string[] = [];
+// Working-tree bytes by path; anything absent reads as `working:<path>`.
+const workspaceBytes = new Map<string, Uint8Array>();
+const workingBytes = (fsPath: string) => workspaceBytes.get(fsPath) ?? new TextEncoder().encode(`working:${fsPath}`);
 const vscode = {
   Uri,
   workspace: {
     fs: {
       readFile: async (uri: Uri) => {
         workspaceReads.push(uri.fsPath);
-        return new TextEncoder().encode(`working:${uri.fsPath}`);
+        return workingBytes(uri.fsPath);
       },
+      stat: async (uri: Uri) => ({ size: workingBytes(uri.fsPath).length }),
     },
   },
 };
@@ -150,4 +154,50 @@ test('an unreadable placeholder is not a copied file and does not consume the li
   assert.equal(result.copiedFileCount, 1);
   assert.equal(result.skippedUnreadableCount, 1);
   assert.equal(result.fileLimitReached, false);
+});
+
+test('working-tree size is checked before decoding, and an unreadable file is counted (IntelliJ order)', async () => {
+  workspaceBytes.set('/repo/big.png', new Uint8Array(2048).fill(0));
+  workspaceBytes.set('/repo/small.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0]));
+  const changes = [
+    { uri: new Uri('/repo/big.png'), status: 'MODIFIED' },
+    { uri: new Uri('/repo/small.png'), status: 'MODIFIED' },
+    { uri: new Uri('/repo/a.ts'), status: 'MODIFIED' },
+  ];
+  const repository = { rootUri: new Uri('/repo'), state: { workingTreeChanges: changes }, show: async () => { throw new Error('no'); } };
+  const selected = ['big.png', 'small.png', 'a.ts'].map(file => ({ uriKey: `/repo/${file}` }));
+  const { collectGitPayloadFiles } = await extensionModule;
+
+  try {
+    const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, { ...defaultSettings, maxFileSizeKB: 1 });
+    // Regular layout: the oversized file gets the size placeholder, the small binary is counted
+    // and left out (CopyFileContentAction checks size first, then counts unreadable).
+    assert.deepEqual(result.files, [
+      { path: 'big.png', changeType: 'MODIFIED', skippedReason: 'size exceeds limit (2048 bytes)' },
+      { path: 'a.ts', content: 'working:/repo/a.ts', changeType: 'MODIFIED' },
+    ]);
+    assert.equal(result.skippedFileSizeCount, 1);
+    assert.equal(result.skippedUnreadableCount, 1);
+    assert.equal(result.copiedFileCount, 1);
+
+    // With a deleted file the Git layout is used, and there IntelliJ's builder keeps the
+    // unreadable file as a `// Unable to read file content` entry.
+    const withDeleted = {
+      ...repository,
+      state: { workingTreeChanges: [...changes, { uri: new Uri('/repo/gone.ts'), status: 'DELETED' }] },
+      show: async () => 'head:gone',
+    };
+    const mixed = await collectGitPayloadFiles([withDeleted] as never, ['/repo'],
+      [...selected, { uriKey: '/repo/gone.ts' }], { ...defaultSettings, maxFileSizeKB: 1 });
+    assert.deepEqual(mixed.files.map(file => [file.path, file.content ?? file.skippedReason]), [
+      ['big.png', 'size exceeds limit (2048 bytes)'],
+      ['small.png', '// Unable to read file content'],
+      ['a.ts', 'working:/repo/a.ts'],
+      ['gone.ts', 'head:gone'],
+    ]);
+    assert.equal(mixed.usesRegularSpacing, false);
+    assert.equal(mixed.skippedUnreadableCount, 1);
+  } finally {
+    workspaceBytes.clear();
+  }
 });

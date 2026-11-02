@@ -588,11 +588,15 @@ export async function collectGitPayloadFiles(
   // results so the payload is byte-identical to the old serial version. As with
   // the graph copy, tripping the limit mid-batch discards up to a batch of
   // already-issued reads (bounded over-fetch).
+  const sizeLimit = settings.maxFileSizeKB * 1024;
   const fetched = mapInOrder(candidates, GIT_READ_CONCURRENCY, async candidate => ({
     candidate,
-    content: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent)
+    read: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent, sizeLimit)
   }));
-  for await (const { candidate, content } of fetched) {
+  // Working-tree files that are binary / not UTF-8. IntelliJ counts them and, only in the
+  // Git layout (known after the loop), keeps them as an "Unable to read" entry.
+  const unreadableWorkingTree = new Set<PayloadFile>();
+  for await (const { candidate, read } of fetched) {
     // The limit now trips only when a real candidate (post dedup/filter) is left
     // unread — so `fileLimitReached` reflects whether the limit actually dropped
     // a copyable file. The old serial loop checked before dedup/filter and could
@@ -602,11 +606,23 @@ export async function collectGitPayloadFiles(
       fileLimitReached = true;
       break;
     }
-    if (content === undefined) continue;
-
     if (candidate.changeType === 'DELETED' || candidate.forceIndexContent) {
       usesFallbackGitPayload = true;
     }
+
+    if (read.kind === 'tooLarge') {
+      skippedFileSizeCount++;
+      files.push({ path: candidate.clipboardPath, changeType: candidate.changeType, skippedReason: `size exceeds limit (${read.size} bytes)` });
+      continue;
+    }
+    if (read.kind === 'unreadable') {
+      skippedUnreadableCount++;
+      const entry: PayloadFile = { path: candidate.clipboardPath, content: UNREADABLE_FILE_MARKER, changeType: candidate.changeType };
+      unreadableWorkingTree.add(entry);
+      files.push(entry);
+      continue;
+    }
+    const content = read.content;
 
     const size = Buffer.byteLength(content, 'utf8');
     if (size > settings.maxFileSizeKB * 1024) {
@@ -634,7 +650,7 @@ export async function collectGitPayloadFiles(
   }
 
   return {
-    files,
+    files: usesFallbackGitPayload ? files : files.filter(file => !unreadableWorkingTree.has(file)),
     copiedFileCount,
     skippedFileSizeCount,
     skippedUnreadableCount,
@@ -667,11 +683,12 @@ async function readGitChangeContent(
   repository: GitRepository,
   change: GitChange,
   changeType: ChangeTypeLabel,
-  forceIndexContent: boolean
-): Promise<string | undefined> {
+  forceIndexContent: boolean,
+  sizeLimit: number
+): Promise<GitChangeRead> {
   if (changeType === 'DELETED') {
-    return await readRefContent(repository, 'HEAD', (change.originalUri ?? change.uri).fsPath) ??
-      DELETED_FILE_MARKER;
+    return text(await readRefContent(repository, 'HEAD', (change.originalUri ?? change.uri).fsPath) ??
+      DELETED_FILE_MARKER);
   }
 
   if (forceIndexContent) {
@@ -684,11 +701,30 @@ async function readGitChangeContent(
     // working-tree text first and only then emits this same marker. Which of the two is
     // right is an open product question — what is settled is that neither silence nor a
     // silent substitution is acceptable.
-    return await readRefContent(repository, '', (change.renameUri ?? change.uri).fsPath) ??
-      UNREADABLE_FILE_MARKER;
+    return text(await readRefContent(repository, '', (change.renameUri ?? change.uri).fsPath) ??
+      UNREADABLE_FILE_MARKER);
   }
 
-  return readWorkspaceText(change.renameUri ?? change.uri);
+  // Working tree: size first, then decode, the order CopyFileContentAction uses. Decoding
+  // first dropped an oversized binary with no "size exceeds limit" entry and no count.
+  const uri = change.renameUri ?? change.uri;
+  try {
+    const { size } = await vscode.workspace.fs.stat(uri);
+    if (size > sizeLimit) return { kind: 'tooLarge', size };
+    const content = decodeText(await vscode.workspace.fs.readFile(uri));
+    return content === undefined ? { kind: 'unreadable' } : text(content);
+  } catch {
+    return { kind: 'unreadable' };
+  }
+}
+
+type GitChangeRead =
+  | { kind: 'text'; content: string }
+  | { kind: 'tooLarge'; size: number }
+  | { kind: 'unreadable' };
+
+function text(content: string): GitChangeRead {
+  return { kind: 'text', content };
 }
 
 async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
