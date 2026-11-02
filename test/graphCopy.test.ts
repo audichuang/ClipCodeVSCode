@@ -599,3 +599,19 @@ test('a PR / compare copy reads a deleted file from the base ref, not the head c
   });
   assert.match(r.text, /\/\/ file: \[DELETED\] d1\.txt\nD1 body/);
 });
+
+test('a multi-commit union reads each deleted file from its own deleting commit\'s parent', async () => {
+  // Select c3, c2, c1 where c2 deleted gone.ts: hash is c3, whose parents no longer have it.
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async (ref: string, p: string) => {
+      if (ref === 'c2^' && p === 'gone.ts') return 'pre-deletion body';
+      throw new Error(`fatal: path '${p}' does not exist in '${ref}'`);
+    }
+  };
+  const r = await buildGraphCopyPayload(deps(repo), {
+    hash: 'c3',
+    files: [{ repoRootFsPath: '/repo', relativePath: 'gone.ts', status: 'D', beforeRef: 'c2^' }]
+  });
+  assert.match(r.text, /\/\/ file: \[DELETED\] gone\.ts\npre-deletion body/);
+});
