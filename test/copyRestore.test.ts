@@ -132,6 +132,18 @@ test('copies listed files (open tabs) from disk through the same filters and mul
   });
 });
 
+test('a listed file missing on disk (a tab whose file was deleted) is counted as skipped, not dropped silently', async () => {
+  await withTempDir(async root => {
+    await writeFile(path.join(root, 'b.ts'), 'b');
+
+    const result = await collectCopyFiles(root, [path.join(root, 'a.ts'), path.join(root, 'b.ts')], defaultSettings);
+
+    assert.equal(result.copiedFileCount, 1);
+    assert.equal(result.skippedUnreadableCount, 1);
+    assert.deepEqual(result.files.map(file => file.path), ['b.ts']);
+  });
+});
+
 test('listed files stop at the copied-file limit without counting size-skipped markers', async () => {
   await withTempDir(async root => {
     await writeFile(path.join(root, 'large.txt'), 'x'.repeat(1100));

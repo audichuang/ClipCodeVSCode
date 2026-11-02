@@ -6,7 +6,10 @@
   ClipCode (which hands the open files to its regular file copy) and OpenIDEA. It used
   to copy the editor buffer, so unsaved edits ended up on the clipboard and the same
   tabs produced a different payload in each tool. Open tabs now go through exactly the
-  same path as copying those files from the Explorer.
+  same path as copying those files from the Explorer. A tab whose file was deleted on
+  disk is counted in the "skipped: not UTF-8 text or unreadable" note instead of
+  vanishing silently; when every tab is skipped the message says so instead of "No open
+  text editors found to copy."
 
 ## 0.3.51
 

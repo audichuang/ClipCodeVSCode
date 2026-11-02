@@ -200,4 +200,40 @@ describe('Snipcode copy → restore round-trip (real workspace)', () => {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
   });
+
+  it('Copy All Open Tabs counts a tab whose file was deleted on disk', async () => {
+    const kept = path.join(repoDir, dir, 'tab-kept.ts');
+    const gone = path.join(repoDir, dir, 'tab-gone.ts');
+    await fs.mkdir(path.dirname(kept), { recursive: true });
+    await fs.writeFile(kept, 'kept');
+    await fs.writeFile(gone, 'gone');
+
+    // Record every toast: the copy notification goes through withProgress, the empty
+    // outcomes through info/warning messages.
+    const shown: string[] = [];
+    const w = vscode.window as any;
+    const original = { info: w.showInformationMessage, warn: w.showWarningMessage, progress: w.withProgress };
+    w.showInformationMessage = async (m: string) => { shown.push(m); return undefined; };
+    w.showWarningMessage = async (m: string) => { shown.push(m); return undefined; };
+    w.withProgress = async (o: { title?: string }) => { shown.push(o.title ?? ''); return undefined; };
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    try {
+      await vscode.window.showTextDocument(vscode.Uri.file(gone), { preview: false });
+      await vscode.window.showTextDocument(vscode.Uri.file(kept), { preview: false });
+      await fs.rm(gone);
+
+      await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
+      assert.match(shown.join('\n'), /1 open editor file\(s\) copied\. 1 skipped: not UTF-8 text or unreadable\./);
+
+      await fs.rm(kept);
+      shown.length = 0;
+      await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
+      assert.deepStrictEqual(shown, ['No open editor file copied: 2 skipped: not UTF-8 text or unreadable.']);
+    } finally {
+      w.showInformationMessage = original.info;
+      w.showWarningMessage = original.warn;
+      w.withProgress = original.progress;
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
 });
