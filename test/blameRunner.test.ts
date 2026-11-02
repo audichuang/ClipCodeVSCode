@@ -51,5 +51,9 @@ test('blameRevisionFor reads the ref of a git: document (a diff\'s left side), n
   assert.equal(blameRevisionFor(git(JSON.stringify({ path: '/repo/f.ts', ref: '' }))), undefined);
   assert.equal(blameRevisionFor(git(JSON.stringify({ path: '/repo/f.ts', ref: '~' }))), undefined);
   assert.equal(blameRevisionFor(git(JSON.stringify({ path: '/repo/f.ts', ref: '--output=x' }))), undefined);
+  // The merge editor's base / ours / theirs are index stages, not commits: `git blame :2` is fatal.
+  for (const stage of [':1', ':2', ':3']) {
+    assert.equal(blameRevisionFor(git(JSON.stringify({ path: '/repo/f.ts', ref: stage }))), undefined);
+  }
   assert.equal(blameRevisionFor(git('not json')), undefined);
 });
