@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.51
 
 - Git Graph (and PR/commit) copy now anchors paths on the opened workspace folder, like
   the SCM and History copies, IntelliJ ClipCode and Orca. In a workspace `M` holding a
