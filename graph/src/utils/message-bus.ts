@@ -147,6 +147,7 @@ export type WebviewMessage =
           relativePath: string;
           oldRelativePath?: string;
           status: string;
+          beforeRef?: string;
         }>;
       };
     }
@@ -200,7 +201,7 @@ export type ExtensionMessage =
   | { type: 'repoList'; payload: { repos: Array<{ path: string; name: string; type: 'root' | 'submodule' | 'nested' }>; active: string } }
   | { type: 'worktreeData'; payload: WorktreeInfo[] }
   | { type: 'uncommittedDiffData'; payload: { staged: Array<{ path: string; status: string }>; unstaged: Array<{ path: string; status: string }> } }
-  | { type: 'multiCommitSectionsData'; payload: { files: Array<{ path: string; status: string }>; sections: Array<{ file: string; commit: string; diff: DiffData }> } }
+  | { type: 'multiCommitSectionsData'; payload: { files: Array<{ path: string; status: string }>; sections: Array<{ file: string; commit: string; diff: DiffData; status?: string }> } }
   /* SNIPCODE-HOOK start: PR tab (Task G2 / Important 1 & 2) — response to
      getCommitsBetween. `requestId` echoes the request so the webview can
      drop a stale response from a since-abandoned base/repo selection.

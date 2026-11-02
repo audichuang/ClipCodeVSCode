@@ -17,6 +17,9 @@ export interface GraphCopyFile {
   relativePath: string;
   oldRelativePath?: string;
   status: string; // canonical 'A'|'M'|'D'|'R'|'C' per spec §5.0;容忍 'R100'/'C75'
+  // A deleted file's own "before" revision, for a multi-commit union where each file was
+  // deleted by a different commit (`<deleting commit>^`). Tried before payload.baseRef.
+  beforeRef?: string;
 }
 
 export interface GraphCopyPayload {
@@ -253,9 +256,11 @@ async function prepareFile(
     // EVERY parent, not just the first. A merge can delete a file that only the second
     // parent ever had, and asking `hash^` alone then found nothing and fell back to the
     // marker — while the History surface, which tries all parents, returned the body.
+    // From the webview: never let a ref read as a git option (`git show -x:path`).
+    const safe = (ref?: string) => (ref && !ref.startsWith('-') ? [ref] : []);
     const parentRefs = [
-      // From the webview: never let it read as a git option (`git show -x:path`).
-      ...(payload.baseRef && !payload.baseRef.startsWith('-') ? [payload.baseRef] : []),
+      ...safe(file.beforeRef),
+      ...safe(payload.baseRef),
       ...(payload.hash === UNCOMMITTED_HASH
         ? ['HEAD']
         : [`${payload.hash}^1`, `${payload.hash}^2`, `${payload.hash}^3`])

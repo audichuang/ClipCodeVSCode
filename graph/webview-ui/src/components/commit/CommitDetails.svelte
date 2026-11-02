@@ -62,7 +62,7 @@
   let filesRepoRoot = $state('');
   /* SNIPCODE-HOOK end */
   let diffs = $state<DiffData[]>([]);
-  let sections = $state<Array<{ file: string; commit: string; diff: DiffData }>>([]);
+  let sections = $state<Array<{ file: string; commit: string; diff: DiffData; status?: string }>>([]);
   let selectedFile = $state<string | null>(null);
   // Files Ctrl/Cmd-clicked for "Create Patch from selected" (committed view only).
   let selectedPatchFiles = $state<Set<string>>(new Set());
@@ -590,14 +590,24 @@
     lookup: (p: string) => CommitFile | undefined,
     root: string
   ): void {
+    // A 3+ commit multi-select is a UNION of per-commit changes (non-empty `sections`, newest
+    // first): a deleted file's pre-deletion content is at the parent of the commit that
+    // deleted it, which may be any of the selected commits, not `hash`.
+    const unionMode = !commit && uiStore.comparing && sections.length > 0 && hash === snipcodeTreeHash();
     const payloadFiles = paths.map((p) => {
       const f = lookup(p);
-      return { repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status: f?.status ?? 'M' };
+      const status = f?.status ?? 'M';
+      const deleting = unionMode && status.startsWith('D')
+        ? sections.find((s) => s.file === p && s.status?.startsWith('D'))?.commit
+        : undefined;
+      return {
+        repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status,
+        ...(deleting ? { beforeRef: `${deleting}^` } : {}),
+      };
     });
     // A two-endpoint compare diffs compareRef1..compareRef2, so a deleted file's pre-deletion
-    // content lives at compareRef1. A 3+ commit multi-select is a UNION of per-commit changes
-    // (non-empty `sections`) with compareRef1 = oldest^: there the deleting commit's own
-    // parents are right, so no baseRef.
+    // content lives at compareRef1. The union above has no single base (compareRef1 is
+    // oldest^, older than an edit-then-delete), so it sends per-file beforeRef instead.
     const baseRef = !commit && uiStore.comparing && sections.length === 0 && hash === snipcodeTreeHash()
       ? uiStore.compareRef1 ?? undefined
       : undefined;

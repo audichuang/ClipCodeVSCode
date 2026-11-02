@@ -1624,21 +1624,27 @@ describe('CommitDetails — Copy Full Source baseRef', () => {
     expect(payload.baseRef).toBe('aaaa');
   });
 
-  it('a 3+ commit union sends no baseRef: compareRef1 (oldest^) predates the deleting commit', async () => {
+  it('a 3+ commit union sends no baseRef, and each deleted file carries its deleting commit\'s parent', async () => {
     uiStore.comparing = true;
     uiStore.compareRef1 = 'c1^';
     uiStore.compareRef2 = 'c3';
     uiStore.selectedCommitHashes = ['c3', 'c2', 'c1'];
     const { container } = render(CommitDetails);
+    const diff = (file: string) => ({ file, hunks: [], isBinary: false, isImage: false });
     window.dispatchEvent(new MessageEvent('message', { data: {
       type: 'multiCommitSectionsData',
       payload: {
         files: [{ path: 'gone.ts', status: 'D' }],
-        sections: [{ file: 'gone.ts', commit: 'c3', diff: { file: 'gone.ts', hunks: [], isBinary: false, isImage: false } }],
+        // c1 edited gone.ts, c2 (a middle commit) deleted it; newest first like the host.
+        sections: [
+          { file: 'gone.ts', commit: 'c2', diff: diff('gone.ts'), status: 'D' },
+          { file: 'gone.ts', commit: 'c1', diff: diff('gone.ts'), status: 'M' },
+        ],
       },
     }}));
-    const payload = await copyFirstFile(container);
+    const payload = await copyFirstFile(container) as unknown as { hash: string; baseRef?: string; files: Array<{ beforeRef?: string }> };
     expect(payload.hash).toBe('c3');
     expect(payload.baseRef).toBeUndefined();
+    expect(payload.files[0].beforeRef).toBe('c2^');
   });
 });

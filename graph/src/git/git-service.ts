@@ -1924,7 +1924,7 @@ export class GitService {
   // that order per file.
   async multiCommitSections(hashes: string[]): Promise<{
     files: Array<{ path: string; status: string; oldPath?: string }>;
-    sections: Array<{ file: string; commit: string; diff: DiffData }>;
+    sections: Array<{ file: string; commit: string; diff: DiffData; status?: string }>;
   }> {
     if (hashes.length === 0) throw new GitError('multiCommitSections requires at least one commit', null, []);
     for (const h of hashes) this.assertSafeRef(h, 'diff');
@@ -1947,7 +1947,7 @@ export class GitService {
       }),
     );
     const files = this.mergeNameStatus(perCommit.map(p => p.files));
-    const sections: Array<{ file: string; commit: string; diff: DiffData }> = [];
+    const sections: Array<{ file: string; commit: string; diff: DiffData; status?: string }> = [];
     for (const { commit, files: cf, parents, isStash } of perCommit) {
       const allDiffs = isStash
         ? await this.showStashDiff(commit, parents)
@@ -1961,7 +1961,9 @@ export class GitService {
           const perFile = await this.showCommitDiff(commit, f.path);
           d = perFile[0];
         }
-        if (d) sections.push({ file: f.path, commit, diff: d });
+        // status: which commit of the union deleted a file — Copy Full Source reads the
+        // pre-deletion content from that commit's parent.
+        if (d) sections.push({ file: f.path, commit, diff: d, status: f.status });
       }
     }
     return { files, sections };
