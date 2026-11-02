@@ -106,7 +106,12 @@ export async function* listFilesRecursive(
   onUnreadable?: (dirPath: string) => void
 ): AsyncGenerator<string> {
   const info = await lstat(inputPath).catch(() => undefined);
-  if (!info) return;
+  if (!info) {
+    // A picked path that is gone (an open tab whose file was deleted, a selection removed
+    // before the copy ran) is an omission too. Mid-walk races stay silent.
+    if (isSelection) onUnreadable?.(inputPath);
+    return;
+  }
 
   let isDirectory = info.isDirectory();
   if (info.isSymbolicLink()) {

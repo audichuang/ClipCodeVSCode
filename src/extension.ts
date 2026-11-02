@@ -270,18 +270,25 @@ async function copyAllOpenEditors(): Promise<void> {
   // Same path as copying the files from the Explorer, like IntelliJ's CopyAllOpenTabsAction
   // (it hands FileEditorManager.openFiles to performCopyFilesContent). That reads the saved
   // bytes on disk, so unsaved edits in a tab are not copied, in all of IntelliJ, OpenIDEA and here.
-  const paths: string[] = [];
+  // A Set, so a file open in two groups is read (or counted as skipped) once.
+  const paths = new Set<string>();
   for (const tabGroup of vscode.window.tabGroups.all) {
     for (const tab of tabGroup.tabs) {
       if (!(tab.input instanceof vscode.TabInputText)) continue;
       if (tab.input.uri.scheme !== 'file') continue;
-      paths.push(tab.input.uri.fsPath);
+      paths.add(tab.input.uri.fsPath);
     }
   }
 
-  const result = await collectCopyFiles(roots, paths, settings);
+  const result = await collectCopyFiles(roots, [...paths], settings);
   if (result.files.length === 0) {
-    vscode.window.showInformationMessage('No open text editors found to copy.');
+    // Tabs whose files were deleted or are not UTF-8 text are not "no open editors".
+    if (result.skippedUnreadableCount > 0) {
+      vscode.window.showWarningMessage(
+        `No open editor file copied: ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.`);
+    } else {
+      vscode.window.showInformationMessage('No open text editors found to copy.');
+    }
     return;
   }
 
