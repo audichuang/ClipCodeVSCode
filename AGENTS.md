@@ -33,7 +33,8 @@ TS-side pins for the shared invariants:
   `replaceAll(str, str)` — a string replacement expands `$&`/`$$` and corrupts
   paths containing them, even in this tool's own round-trip.
 - The `// clipcode-root:` line is emitted only for a **single-root copy context**
-  (one workspace / source root, or a single-repo graph copy) — not merely "one
+  (one workspace / source root; the Graph copy anchors on the workspace root too, like
+  SCM and History) — not merely "one
   VS Code window". Every copy entry point owes it, the History view included.
 - `GENERIC_FILE_HEADER` spells the token out as `[Ff][Ii][Ll][Ee]:` instead of using
   `/i`: Kotlin's `IGNORE_CASE` folds the Turkish dotless `ı` (U+0131) onto `i` and JS

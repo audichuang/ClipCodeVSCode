@@ -41,8 +41,8 @@ interface TargetCandidate {
  * while the headers stayed workspace-relative — broke exactly that: with the workspace
  * opened at `repo/src`, a payload said root `repo` and path `a.txt`, so restoring into
  * `repo` saw the name already matching and offered no adjustment, landing the file at
- * `repo/a.txt` instead of `repo/src/a.txt`. The graph surface is consistent the other way
- * round — it emits repo-relative paths AND the repo root — and keeps its own rule.
+ * `repo/a.txt` instead of `repo/src/a.txt`. The graph surface follows the same rule
+ * (workspace-relative paths, workspace root name), settled 2026-11-02.
  *
  * Multiple roots means the paths are labelled per root, so no single name describes them
  * and none is emitted. Mirror of ClipboardPathResolver.singleRootName.
