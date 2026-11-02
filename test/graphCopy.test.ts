@@ -566,9 +566,8 @@ test('a symlinked workspace excludes a deleted file by its physical absolute pat
 });
 
 test('an oversize deleted file is skipped with the size reason, like the History copy', async () => {
-  // Same as the History surface and OpenIDEA's staged/working deletions. OpenIDEA's commit
-  // copy instead bypasses the per-file limit, bounded only by a total payload budget this
-  // extension does not have, so an unchecked body here would be unbounded.
+  // Same as the History surface, IntelliJ and OpenIDEA (whose commit copy also applies the
+  // per-file limit to deleted files since 0.1.33-fork.8).
   const big = 'x'.repeat(2 * 1024);
   const repo = fakeRepo('/repo', { 'big.ts': big });
   const d: GraphCopyDeps = { resolveRepo: () => repo, settings: { ...settings, maxFileSizeKB: 1 } };
@@ -580,4 +579,23 @@ test('an oversize deleted file is skipped with the size reason, like the History
   assert.equal(result.skippedFileSizeCount, 1);
   assert.deepEqual(result.skippedFiles, [{ path: 'big.ts', bytes: 2048 }]);
   assert.equal(result.copiedFileCount, 0);
+});
+
+test('a PR / compare copy reads a deleted file from the base ref, not the head commit\'s parents', async () => {
+  // PR head H: an EARLIER commit of the PR deleted d1.txt, so H^1..^3 no longer have it.
+  // IntelliJ diffs against the merge-base and reads the deleted file from there
+  // (BranchDiffProvider + GitContentResolver beforeRevision).
+  const repo: ContentRepo = {
+    rootUri: { fsPath: '/repo' },
+    show: async (ref: string, p: string) => {
+      if (ref === 'base123' && p === 'd1.txt') return 'D1 body';
+      throw new Error(`fatal: path '${p}' does not exist in '${ref}'`);
+    }
+  };
+  const r = await buildGraphCopyPayload(deps(repo), {
+    hash: 'head456',
+    baseRef: 'base123',
+    files: [{ repoRootFsPath: '/repo', relativePath: 'd1.txt', status: 'D' }]
+  });
+  assert.match(r.text, /\/\/ file: \[DELETED\] d1\.txt\nD1 body/);
 });

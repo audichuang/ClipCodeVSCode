@@ -21,6 +21,11 @@ export interface GraphCopyFile {
 
 export interface GraphCopyPayload {
   hash: string;
+  // The "before" side when the files are a diff between two refs rather than one commit
+  // against its parents: the PR merge-base, or compare mode's first ref. A file deleted by
+  // an earlier commit of the range is absent from `hash`'s parents, so without this the
+  // copy fell back to the bare marker where IntelliJ reads the pre-deletion content.
+  baseRef?: string;
   files: GraphCopyFile[];
 }
 
@@ -248,9 +253,13 @@ async function prepareFile(
     // EVERY parent, not just the first. A merge can delete a file that only the second
     // parent ever had, and asking `hash^` alone then found nothing and fell back to the
     // marker — while the History surface, which tries all parents, returned the body.
-    const parentRefs = payload.hash === UNCOMMITTED_HASH
-      ? ['HEAD']
-      : [`${payload.hash}^1`, `${payload.hash}^2`, `${payload.hash}^3`];
+    const parentRefs = [
+      // From the webview: never let it read as a git option (`git show -x:path`).
+      ...(payload.baseRef && !payload.baseRef.startsWith('-') ? [payload.baseRef] : []),
+      ...(payload.hash === UNCOMMITTED_HASH
+        ? ['HEAD']
+        : [`${payload.hash}^1`, `${payload.hash}^2`, `${payload.hash}^3`])
+    ];
     let before: string | undefined;
     if (repo) {
       const absolute = joinFsPath(repoRootFsPath, file.relativePath);

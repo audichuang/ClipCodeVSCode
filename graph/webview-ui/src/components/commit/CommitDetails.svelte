@@ -594,7 +594,12 @@
       const f = lookup(p);
       return { repoRootFsPath: root, relativePath: p, oldRelativePath: f?.oldPath, status: f?.status ?? 'M' };
     });
-    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, files: payloadFiles } });
+    // Compare mode diffs compareRef1..compareRef2, so a deleted file's pre-deletion content
+    // lives at compareRef1, not at the newer side's parents.
+    const baseRef = !commit && uiStore.comparing && hash === snipcodeTreeHash()
+      ? uiStore.compareRef1 ?? undefined
+      : undefined;
+    vscode.postMessage({ type: 'snipcodeCopyFullSource', payload: { hash, baseRef, files: payloadFiles } });
     fileContextMenu = null;
   }
 
