@@ -58,9 +58,10 @@ export interface GraphCopyDeps {
   readBatch?(repoRootFsPath: string, hash: string, relativePaths: string[]): Promise<Map<string, string | undefined>>;
   /**
    * The workspace folders, in order — the same list Paste & Restore resolves against.
-   * A payload spanning repositories must label its paths the way THIS list says, because
-   * that is the only labelling the restore side can read back. Optional; without it a
-   * multi-repo payload falls back to repo basenames, which restore cannot align.
+   * Every payload (single- or multi-repo) labels its paths and `clipcode-root` the way THIS
+   * list says, because that is the only labelling the restore side can read back.
+   * Optional; without it a single-repo payload stays repo-relative and a multi-repo one
+   * falls back to repo basenames, which restore cannot align.
    */
   workspaceRoots?: string[];
   settings: GraphCopySettings;
@@ -86,18 +87,17 @@ function joinFsPath(root: string, relativePath: string): string {
 interface PreparedFile {
   clipboardPath: string;
   /**
-   * The path relative to ITS OWN repo, kept separate from clipboardPath because a
-   * multi-repo payload prefixes the latter with the repo basename. Joining that prefixed
-   * path onto the repo root produced `<root>/<repoName>/<path>`, a path that exists
+   * The path relative to ITS OWN repo, kept separate from clipboardPath because that is
+   * workspace-relative (or, with no workspace, basename-prefixed for a multi-repo payload).
+   * Joining it onto the repo root produced `<root>/<repoName>/<path>`, a path that exists
    * nowhere, so every absolute-path filter rule silently stopped matching.
    */
   relativePath: string;
   /**
-   * What the FILTER rules are matched against — always workspace-relative, and therefore
-   * NOT the same string as clipboardPath.
-   *
-   * Kept as its own field: with no workspace root the header falls back to repo-relative
-   * while the filter path is whatever the other surfaces filter against. IntelliJ keeps
+   * What the FILTER rules are matched against — always workspace-relative. With a workspace
+   * it is the same string as clipboardPath; the fields differ only with no workspace root,
+   * where the header falls back to repo-relative (or basename-prefixed for a multi-repo
+   * payload) while the filter path stays whatever the other surfaces filter against. IntelliJ keeps
    * them apart too (CopyPathFormatter.relativeFilterPath vs toClipboardPath).
    */
   filterPath: string;
@@ -336,8 +336,8 @@ export async function buildGraphCopyPayload(
       settings.filterRules ?? [],
       settings.useIncludeFilters === true,
       settings.useExcludeFilters === true,
-      // The file's OWN relative path — clipboardPath carries the repo-basename prefix in
-      // a multi-repo payload, and joining that produced `<root>/<repoName>/<path>`.
+      // The file's OWN relative path — clipboardPath is workspace-relative (or basename-prefixed
+      // with no workspace), and joining that onto the repo root produced `<root>/<repoName>/<path>`.
       deps.workspaceRoots?.length
         ? workspaceSpelling(deps.workspaceRoots, file.repoRootFsPath, file.relativePath)
         : joinFsPath(file.repoRootFsPath, file.relativePath)

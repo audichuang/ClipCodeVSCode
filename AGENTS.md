@@ -66,8 +66,10 @@ TS-side pins for the shared invariants:
 - Filtering uses `PreparedFile.filterPath` / the clipboard path from
   `toClipboardPathFromRoots`, never a repo-relative header, and `matchesRule` refuses a
   relative PATH rule when that path is absolute — see the work-root `AGENTS.md`. The graph
-  surface labels a MULTI-repo payload through the workspace roots for the same reason:
-  prefixing every repo with its basename is a spelling restore cannot read back
+  surface lets the workspace roots decide EVERY payload's paths and `clipcode-root`
+  (single- or multi-repo alike), the same list Paste & Restore resolves against. Only
+  with no workspace root does it fall back to repo-relative paths (single repo) or repo
+  basenames (multi-repo); that basename prefix is a spelling restore cannot read back
   (`alpha/secret.txt` resolved to `alpha/alpha/secret.txt`).
 - `listFilesRecursive` walks a directory symlink only when it IS the selected input, never
   during recursion. Right-clicking a linked folder used to copy nothing; following links

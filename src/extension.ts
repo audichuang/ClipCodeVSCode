@@ -152,8 +152,8 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
     readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
     readBatch: (repoRootFsPath, hash, relativePaths) =>
       readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths, gitEnv),
-    // The same list Paste & Restore resolves against, so a multi-repo payload is labelled
-    // the one way the restore side can read back.
+    // The same list Paste & Restore resolves against: it decides every graph payload's
+    // paths and clipcode-root, the one labelling the restore side can read back.
     workspaceRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
     settings,
   };
