@@ -297,7 +297,7 @@ describe('PrView — Copy Full Source', () => {
     expect(btn?.disabled).toBe(true);
   });
 
-  it('posts snipcodeCopyFullSource with repoRootFsPath and oldRelativePath mapped from files', async () => {
+  it('posts snipcodeCopyFullSource with repoRootFsPath, oldRelativePath and the merge-base as baseRef', async () => {
     const { container } = setupWithFiles();
     const btn = await waitFor(() => {
       const b = container.querySelector<HTMLButtonElement>('.pr-copy-btn');
@@ -308,6 +308,8 @@ describe('PrView — Copy Full Source', () => {
     const req = lastMessageOf('snipcodeCopyFullSource');
     expect(req?.payload).toEqual({
       hash: 'feat',
+      // A file deleted by an earlier PR commit is only readable at the merge-base.
+      baseRef: 'mb',
       files: [
         { repoRootFsPath: '/repo', relativePath: 'src/a.ts', oldRelativePath: undefined, status: 'M' },
         { repoRootFsPath: '/repo', relativePath: 'src/old.ts', oldRelativePath: 'src/older.ts', status: 'R' },
