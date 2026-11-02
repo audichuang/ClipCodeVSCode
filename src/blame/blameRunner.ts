@@ -34,12 +34,13 @@ export async function runBlame(opts: RunBlameOptions): Promise<BlameLine[]> {
 }
 
 // The revision a `git:` document (VS Code's Git extension: query `{"path","ref"}`) shows.
-// '' / '~' are the index and working views, and buffer mode is right for them.
+// '' / '~' are the index and working views and ':1'..':3' the merge editor's index stages;
+// buffer mode is right for all of them (`git blame :2` is a fatal "bad revision").
 export function blameRevisionFor(uri: { scheme: string; query: string }): string | undefined {
   if (uri.scheme !== 'git') return undefined;
   try {
     const ref: unknown = JSON.parse(uri.query)?.ref;
-    if (typeof ref !== 'string' || ref === '' || ref === '~' || ref.startsWith('-')) return undefined;
+    if (typeof ref !== 'string' || ref === '' || ref === '~' || ref.startsWith('-') || ref.startsWith(':')) return undefined;
     return ref;
   } catch {
     return undefined;
