@@ -517,15 +517,43 @@ export function nonPortableName(
     }
   }
   if (root === undefined || relative === undefined) {
-    // Under no root: the clipboard path is absolute.
-    const rest = absolute.slice(path.parse(absolute).root.length);
-    const value = rest.split(path.sep).join('/');
-    return value === '' || portable(value) ? undefined : absolute;
+    // Under no root the header is the absolute path (decision X15): a control character
+    // anywhere in it would split the header line, so it refuses the file; otherwise only
+    // the file's own name is judged. Its folders are not relative segments a reader
+    // restores, so `:` or `"` there is allowed (it may not resolve on paste, as before).
+    // Mirror of IntelliJ PortableName.checkedPath + headerStaysOneLine.
+    if (CONTROL_CHARACTER.test(absolute)) return absolute;
+    const name = path.basename(absolute);
+    return name === '' || portable(name) ? undefined : absolute;
   }
   const value = relative.split(path.sep).join('/');
   if (portable(value)) return undefined;
   const prefix = toClipboardPathFromRoots(workspaceRoots, root);
   return prefix ? `${prefix}/${value}` : value;
+}
+
+const CONTROL_CHARACTER = /[\x00-\x1F]/;
+
+/**
+ * nonPortableName for a file a Git copy names by its git path ([gitPath], `/`-separated,
+ * as git stores it) at [absolutePath] (the same file in the filesystem's spelling). Every
+ * character the filesystem path keeps is judged there; the git path adds the one it may
+ * lose: on Windows a `\` committed elsewhere is a separator in [absolutePath], so `a\b.png`
+ * would copy as `a/b.png`. Decision X1 (2026-11-09).
+ */
+export function nonPortableGitName(
+  workspaceRoots: string[],
+  repoRoot: string,
+  gitPath: string,
+  absolutePath: string
+): string | undefined {
+  const named = nonPortableName(workspaceRoots, absolutePath);
+  if (named !== undefined || !gitPath.includes('\\')) return named;
+  const prefix = toClipboardPathFromRoots(workspaceRoots, repoRoot);
+  const shown = prefix ? `${prefix}/${gitPath}` : gitPath;
+  // Under no root (an absolute header, X15) only the file's own name counts.
+  if (isAbsolutePath(normalizeSystemPath(prefix))) return gitPath.split('/').pop()!.includes('\\') ? shown : undefined;
+  return shown;
 }
 
 function sanitizeRelativePath(value: string): string | undefined {

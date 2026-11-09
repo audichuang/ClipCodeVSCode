@@ -39,6 +39,36 @@ export function makeRawBlobReader(gitPath: string, gitEnv?: Record<string, strin
   });
 }
 
+/**
+ * Lists the paths that differ between two commits as git stores them, with
+ * `git diff-tree -r -z --name-only --no-renames` (NUL-separated, so no quoting and a newline
+ * in a name stays in it; no renames, so both sides of a rename are listed). undefined when
+ * git could not be asked. History's X1 check needs these: the Git extension only hands it
+ * file paths, which on Windows read a committed `\` as a separator.
+ */
+export function makeChangedPathLister(gitPath: string): (repoRoot: string, from: string, to: string) => Promise<string[] | undefined> {
+  return (repoRoot, from, to) => new Promise<string[] | undefined>(resolve => {
+    let settled = false;
+    const done = (value: string[] | undefined) => { if (!settled) { settled = true; resolve(value); } };
+    // Refs come from git's own log, but never let one read as an option.
+    if (from.startsWith('-') || to.startsWith('-')) { done(undefined); return; }
+    try {
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+      const child = spawn(gitPath, ['-C', repoRoot, 'diff-tree', '-r', '-z', '--name-only', '--no-renames', from, to],
+        { stdio: ['ignore', 'pipe', 'ignore'], env });
+      const chunks: Buffer[] = [];
+      child.on('error', () => done(undefined));
+      child.stdout.on('data', (d: Buffer) => chunks.push(d));
+      child.stdout.on('error', () => done(undefined));
+      child.on('close', code => done(code === 0
+        ? Buffer.concat(chunks).toString('utf8').split('\0').filter(p => p !== '')
+        : undefined));
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 /** One `git cat-file --batch` response: `<oid> <type> <size>\n<bytes>\n` or `<input> missing\n`. */
 function parseSingleBatch(stdout: Buffer): RawBlob {
   const lineEnd = stdout.indexOf(0x0a);

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import Module from 'node:module';
 import { after, test } from 'node:test';
+import path from 'node:path';
+import { parseClipboard } from '../src/clipboardFormat.js';
+import { copyNoticeDetails } from '../src/nonTextDialog.js';
 import { defaultSettings } from '../src/settings.js';
 
 class Uri {
@@ -346,25 +349,58 @@ test('staged and deleted reads go through the raw reader first (no textconv outp
   assert.deepEqual(asked.sort(), ['/repo :logo.png', '/repo HEAD:gone.ts']);
 });
 
-test('SCM copy does not apply the files copy\'s "Name not portable" rule: every change is read and carried', {
+test('SCM copy: a non-portable changed path is never read, gets no header, is named, and does not use the file-count limit (X1)', {
   skip: process.platform === 'win32' ? 'Windows cannot create these names' : undefined
 }, async () => {
-  // Spec non-text-files.md "What is carried": OpenIDEA's Git-change copy does not report
-  // this category, so these paths keep their behaviour from before the files-copy rule.
-  const names = ['q"x.ts', 'c:d.ts', 't\tab.ts', 'ok 檔 😀.ts'];
+  // Decision X1 (2026-11-09): Git-change copies apply the files copy's rule to each changed
+  // path. Before, the relative path fell back to the absolute one and was written into the
+  // header as is, so a name holding a newline forged a second header.
+  // Its second line is a header the default format reads (the comment marker is optional).
+  const injected = 'x\nfile: [DELETED] src/main.rs';
+  const names = ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts', injected, 'ok 檔 😀.ts', 'later.ts'];
+  const shown: string[] = [];
   const repository = {
     rootUri: new Uri('/repo'),
-    state: { workingTreeChanges: names.map(name => ({ uri: new Uri(`/repo/${name}`), status: 'MODIFIED' })) },
+    state: {
+      workingTreeChanges: [
+        ...names.map(name => ({ uri: new Uri(`/repo/${name}`), status: 'MODIFIED' })),
+        // A deleted entry with such a name is skipped too: its header would carry the same name.
+        { uri: new Uri('/repo/gone\nfile: y.ts'), status: 'DELETED' }
+      ]
+    },
+    show: async (_ref: string, file: string) => { shown.push(file); return 'head'; }
   };
   workspaceReads.length = 0;
-  const { collectGitPayloadFiles } = await extensionModule;
-  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [],
-    { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 3 }, { includeNonText: true });
+  const { collectGitPayloadFiles, gitChangesPayload, gitNoticeCounts } = await extensionModule;
+  const settings = { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 };
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [], settings, { includeNonText: true });
 
-  // The clipboard path falls back to the absolute path, as before (toClipboardPathFromRoots).
-  assert.deepEqual(result.files.map(f => f.path), ['/repo/q"x.ts', '/repo/c:d.ts', '/repo/t\tab.ts']);
-  assert.equal(result.limitLeftOut, 1);
-  assert.ok(!('nonPortableCount' in result));
+  assert.deepEqual(result.files, [{ path: 'ok 檔 😀.ts', content: 'working:/repo/ok 檔 😀.ts', changeType: 'MODIFIED' }]);
+  // Reads run ahead of the bookkeeping (later.ts may be read past the limit), never a refused name.
+  assert.deepEqual(workspaceReads.filter(p => !p.endsWith('later.ts')), ['/repo/ok 檔 😀.ts']);
+  assert.deepEqual(shown, []);
+  assert.equal(result.limitLeftOut, 1, 'only later.ts is left out by the limit');
+  assert.equal(result.nonPortableCount, 6);
+  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts', injected, 'gone\nfile: y.ts']);
+  const payload = gitChangesPayload(result, settings, ['/repo']);
+  assert.deepEqual(parseClipboard(payload, settings.headerFormat).map(e => e.path), ['ok 檔 😀.ts']);
+  assert.ok(copyNoticeDetails(gitNoticeCounts(result))
+    .includes('Name not portable: 6 (a\\b.png, q"x.ts, c:d.ts and 3 more).'), copyNoticeDetails(gitNoticeCounts(result)).join('\n'));
+});
+
+test('SCM copy: normal names are read and carried with nothing named (X1)', async () => {
+  const names = ['src/a.ts', 'my docs/說明 文件.md', 'emoji 😀/🎉.ts'];
+  const root = path.resolve('/repo');
+  const repository = {
+    rootUri: new Uri(root),
+    state: { workingTreeChanges: names.map(name => ({ uri: new Uri(path.join(root, ...name.split('/'))), status: 'MODIFIED' })) },
+  };
+  const { collectGitPayloadFiles } = await extensionModule;
+  const result = await collectGitPayloadFiles([repository] as never, [root], [],
+    { ...defaultSettings, setMaxFileCount: false }, { includeNonText: false });
+  assert.deepEqual(result.files.map(f => f.path), names);
+  assert.equal(result.nonPortableCount, 0);
+  assert.deepEqual(result.nonPortablePaths, []);
 });
 
 function textChanges(n: number) {

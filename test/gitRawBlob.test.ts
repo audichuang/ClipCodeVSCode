@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { readRefClassified, readRefContent, type ContentRepo } from '../src/gitContent.js';
-import { makeRawBlobReader, withRawBlobs } from '../src/gitRawBlob.js';
+import { EMPTY_TREE } from '../src/gitHistory.js';
+import { makeChangedPathLister, makeRawBlobReader, withRawBlobs } from '../src/gitRawBlob.js';
 
 // VS Code's Repository.buffer() runs `git show --textconv <ref>:<path>`, so with a textconv
 // driver configured it hands back the driver's TEXT OUTPUT, not the blob. Classified as text,
@@ -84,4 +85,26 @@ test('a git that cannot be spawned falls back to buffer()', async () => {
     const read = await readRefClassified(repo, 'HEAD', path.join(root, 'a.png'));
     assert.ok(read && 'nonText' in read);
   });
+});
+
+test('makeChangedPathLister lists the raw git paths of a commit, a `\\` and a newline kept inside the name', {
+  skip: process.platform === 'win32' ? 'Git for Windows refuses a `\\` in an index path' : undefined
+}, async () => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'clipcode-difftree-')));
+  try {
+    git(root, 'init', '-q');
+    const oid = execFileSync('git', ['-C', root, 'hash-object', '-w', '--stdin'], { input: 'x' }).toString().trim();
+    for (const name of ['a\\b.png', 'x\nfile: [DELETED] src/main.rs', 'ok dir/檔.ts']) {
+      git(root, 'update-index', '--add', '--cacheinfo', `100644,${oid},${name}`);
+    }
+    git(root, 'commit', '-q', '-m', 'm');
+    const head = git(root, 'rev-parse', 'HEAD').toString().trim();
+    const list = makeChangedPathLister('git');
+    assert.deepEqual((await list(root, EMPTY_TREE, head))?.sort(),
+      ['a\\b.png', 'ok dir/檔.ts', 'x\nfile: [DELETED] src/main.rs'].sort());
+    assert.equal(await list(root, 'no-such-ref', head), undefined);
+    assert.equal(await list(root, '--output=/tmp/x', head), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
