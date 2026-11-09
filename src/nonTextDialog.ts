@@ -17,6 +17,17 @@ const NOTICE_PATHS = 3;
 /** Display width a dialog path is shortened to. */
 const PATH_WIDTH = 70;
 const ELLIPSIS = '…';
+/**
+ * Decision X2: Include is left out when its payload would be over 50 MiB, the whole-payload
+ * ceiling every implementation shares, so no Include payload is larger than what the others
+ * accept. Exclude and text-only copies have no such limit.
+ */
+export const INCLUDE_PAYLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+
+export interface NonTextDialogOptions {
+  /** Overrides INCLUDE_PAYLOAD_LIMIT_BYTES (tests). */
+  payloadLimitBytes?: number;
+}
 
 /** What the dialog reads off an Include result; every copy surface's result provides it. */
 export interface NonTextSummary {
@@ -66,11 +77,19 @@ export interface NonTextDialog {
   buttons: NonTextChoice[];
 }
 
-export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSettings, 'headerFormat'>): NonTextDialog {
-  const includeAllowed = !headerFormatUnescapable(settings.headerFormat);
+export function nonTextDialog(
+  include: NonTextSummary,
+  settings: Pick<ClipCodeSettings, 'headerFormat'>,
+  options: NonTextDialogOptions = {}
+): NonTextDialog {
+  const unescapable = headerFormatUnescapable(settings.headerFormat);
+  // The estimate never reads below the raw total of the files it carries.
+  const estimate = Math.max(include.estimatedBytes, include.nonTextTotalBytes);
+  const overPayloadLimit = estimate > (options.payloadLimitBytes ?? INCLUDE_PAYLOAD_LIMIT_BYTES);
+  const includeAllowed = !unescapable && !overPayloadLimit;
   const lines = [
     `Non-text files: ${include.nonTextFiles.length} (${formatSize(include.nonTextTotalBytes)})`,
-    `Estimated payload with them: ${formatSize(include.estimatedBytes)}`
+    `Estimated payload with them: ${formatSize(estimate)}`
   ];
   for (const file of include.nonTextFiles.slice(0, DIALOG_PATHS)) {
     lines.push(`${shortenPath(file.path, PATH_WIDTH)}  ${formatSize(file.size)}`);
@@ -93,7 +112,14 @@ export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSe
   if (include.nonPortableCount) {
     lines.push(namedCount('Name not portable', include.nonPortableCount, include.nonPortablePaths ?? []));
   }
-  if (!includeAllowed) {
+  if (overPayloadLimit) {
+    // A VS Code modal cannot disable a button (X26): Include is left out and Exclude is the default.
+    lines.push(
+      'Include is unavailable: the payload would be more than 50 MiB ' +
+      `(non-text files: ${formatSize(include.nonTextTotalBytes)}).`
+    );
+  }
+  if (unescapable) {
     lines.push(
       `Include is unavailable: the header format "${settings.headerFormat}" cannot be escaped, ` +
       'so Base64 lines would read as file headers.'
@@ -170,11 +196,12 @@ export type ShowNonTextDialog = (
 export async function askAboutNonText<T extends NonTextSummary>(
   settings: Pick<ClipCodeSettings, 'headerFormat'>,
   run: (includeNonText: boolean) => Promise<T>,
-  show: ShowNonTextDialog
+  show: ShowNonTextDialog,
+  options: NonTextDialogOptions = {}
 ): Promise<T | undefined> {
   const include = await run(true);
   if (include.nonTextFiles.length === 0) return include;
-  const dialog = nonTextDialog(include, settings);
+  const dialog = nonTextDialog(include, settings, options);
   const choice = await show(dialog.message, { modal: true, detail: dialog.detail }, ...dialog.buttons);
   if (choice === 'Include' && dialog.buttons.includes('Include')) return include;
   if (choice === 'Exclude') return run(false);
