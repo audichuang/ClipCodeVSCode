@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { type HistoryRepo, readClassifiedAtCommit } from './gitHistory.js';
 import { collectHistoryCopy, historyCopyNotice } from './historyCopy.js';
+import { makeRawBlobReader, withRawBlobs } from './gitRawBlob.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
 import { askAboutNonText } from './nonTextDialog.js';
@@ -8,7 +9,7 @@ import { notifyCopied } from './notify.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 
 interface GitExtension { readonly enabled: boolean; readonly onDidChangeEnablement: vscode.Event<boolean>; getAPI(version: 1): GitAPI; }
-interface GitAPI { readonly repositories: HistoryRepo[]; readonly onDidOpenRepository: vscode.Event<HistoryRepo>; readonly onDidCloseRepository: vscode.Event<HistoryRepo>; }
+interface GitAPI { readonly git?: { readonly path?: string }; readonly repositories: HistoryRepo[]; readonly onDidOpenRepository: vscode.Event<HistoryRepo>; readonly onDidCloseRepository: vscode.Event<HistoryRepo>; }
 
 const LAST_REPO_KEY = 'clipcode.history.lastRepoRoot';
 
@@ -76,12 +77,14 @@ export function registerHistoryView(context: vscode.ExtensionContext): void {
       if (pick) useRepo(pick.repo);
     }),
     vscode.commands.registerCommand('clipcode.history.copyFullSource', async (clicked?: HistoryNode, selected?: HistoryNode[]) => {
-      await copyFullSource(provider, treeView, resolveSourceNodes(clicked, selected, treeView.selection));
+      await copyFullSource(provider, treeView, resolveSourceNodes(clicked, selected, treeView.selection), api?.git?.path ?? 'git');
     }),
   );
 }
 
-async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.TreeView<HistoryNode>, sources: HistoryNode[]): Promise<void> {
+async function copyFullSource(
+  provider: HistoryTreeProvider, treeView: vscode.TreeView<HistoryNode>, sources: HistoryNode[], gitPath: string
+): Promise<void> {
   if (sources.length === 0) { vscode.window.showWarningMessage('No files selected.'); return; }
   const settings = readSettings();
   const roots = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
@@ -95,11 +98,13 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
     return;
   }
   const files = dedupeFilesKeepNewest(collected);
+  // Raw blob reads (`git cat-file`): the Git extension's buffer() applies textconv.
+  const repo = withRawBlobs(provider.repo!, makeRawBlobReader(gitPath));
 
   const result = await askAboutNonText(
     settings,
     includeNonText => collectHistoryCopy(
-      files, f => readClassifiedAtCommit(provider.repo!, f.commit.hash, f.change, f.commit.parents), settings, roots, { includeNonText }),
+      files, f => readClassifiedAtCommit(repo, f.commit.hash, f.change, f.commit.parents), settings, roots, { includeNonText }),
     (message, options, ...buttons) => vscode.window.showWarningMessage(message, options, ...buttons)
   );
   if (!result) return;

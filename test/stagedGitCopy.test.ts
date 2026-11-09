@@ -314,3 +314,34 @@ test('SCM Include: non-text files count toward the file-count limit and the left
     workspaceBytes.clear();
   }
 });
+
+test('staged and deleted reads go through the raw reader first (no textconv output)', async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]);
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: {
+      indexChanges: [
+        { uri: new Uri('/repo/logo.png'), status: 'INDEX_MODIFIED' },
+        { uri: new Uri('/repo/gone.ts'), status: 'INDEX_DELETED' },
+      ],
+    },
+    // What the Git extension returns with a textconv driver configured.
+    buffer: async () => new TextEncoder().encode('TEXTCONV OUTPUT\n'),
+  };
+  const asked: string[] = [];
+  const rawReader = async (root: string, ref: string, rel: string) => {
+    asked.push(`${root} ${ref}:${rel}`);
+    return { bytes: rel === 'logo.png' ? png : new TextEncoder().encode('head:deleted') };
+  };
+  const selected = ['logo.png', 'gone.ts'].map(file => ({ uriKey: `/repo/${file}`, staged: true }));
+
+  const { collectGitPayloadFiles } = await extensionModule;
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected,
+    { ...defaultSettings, setMaxFileCount: false }, { includeNonText: true, rawReader });
+
+  assert.deepEqual(result.files, [
+    { path: 'logo.png', nonText: png, changeType: 'MODIFIED' },
+    { path: 'gone.ts', content: 'head:deleted', changeType: 'DELETED' },
+  ]);
+  assert.deepEqual(asked.sort(), ['/repo :logo.png', '/repo HEAD:gone.ts']);
+});
