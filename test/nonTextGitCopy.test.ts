@@ -156,14 +156,14 @@ test('History notice: says how many files the limit left out and reports exclude
   assert.deepEqual(historyCopyNotice(exclude, settings), {
     unresolvedWarning: '1 files could not be resolved: gone.ts',
     message: '1 Git file(s) copied. File limit 1 reached. Non-text files left out: 1. Left out by the file-count limit: 2.',
-    emptyWarning: 'No Git changes copied. Non-text files left out: 1. Left out by the file-count limit: 2.'
+    emptyWarning: 'Nothing to copy. Non-text files left out: 1. Left out by the file-count limit: 2.'
   });
 
   const include = await collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: true });
   assert.deepEqual(historyCopyNotice(include, settings), {
     unresolvedWarning: undefined,
     message: '1 Git file(s) copied. File limit 1 reached. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.',
-    emptyWarning: 'No Git changes copied. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.'
+    emptyWarning: 'Nothing to copy. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.'
   });
 });
 

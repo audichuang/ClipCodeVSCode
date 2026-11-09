@@ -183,6 +183,15 @@ export function nothingToCopyNotice(
   return parts.join(' ');
 }
 
+/**
+ * The Git surfaces' warning when nothing is left to copy (spec case 29 → case 30): what was
+ * skipped is named after "Nothing to copy.", the files copy's wording. With nothing skipped
+ * either, the surface's own plain message (there were no changes to copy).
+ */
+export function gitNothingToCopyNotice(details: readonly string[], noChanges: string): string {
+  return details.length > 0 ? ['Nothing to copy.', ...details].join(' ') : noChanges;
+}
+
 /** `Label: n (a, b, c and N more)` — the first NOTICE_PATHS paths, or just `Label: n` with none. */
 function namedCount(label: string, count: number, paths: string[]): string {
   const named = paths.slice(0, NOTICE_PATHS);

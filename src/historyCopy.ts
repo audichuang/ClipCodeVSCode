@@ -2,7 +2,7 @@ import { buildGitPayload, type PayloadFile } from './clipboardFormat.js';
 import type { FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FileNode } from './historyTree.js';
-import { copyNoticeDetails, type NonTextSummary } from './nonTextDialog.js';
+import { copyNoticeDetails, gitNothingToCopyNotice, type NonTextSummary } from './nonTextDialog.js';
 import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { EMPTY_TREE } from './gitHistory.js';
 import { nonPortableGitName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
@@ -146,7 +146,7 @@ export function historyCopyNotice(
   // Unreadable files have their own warning above, so they are not repeated here.
   const details = copyNoticeDetails({ ...result, skippedUnreadableCount: 0, unreadablePaths: [] });
   // Nothing to copy: what was skipped by name (or left out) is said, not "no changes".
-  const emptyWarning = details.length > 0 ? `No Git changes copied. ${details.join(' ')}` : 'No Git changes found to copy.';
+  const emptyWarning = gitNothingToCopyNotice(details, 'No Git changes found to copy.');
   return { unresolvedWarning, message: [`${result.copiedFileCount} Git file(s) copied${s}.${l}`, ...details].join(' '), emptyWarning };
 }
 
