@@ -156,14 +156,28 @@ test('History notice: says how many files the limit left out and reports exclude
   assert.deepEqual(historyCopyNotice(exclude, settings), {
     unresolvedWarning: '1 files could not be resolved: gone.ts',
     message: '1 Git file(s) copied. File limit 1 reached. Non-text files left out: 1. Left out by the file-count limit: 2.',
-    emptyWarning: 'Nothing to copy. Non-text files left out: 1. Left out by the file-count limit: 2.'
+    // Something was copied: no empty warning.
+    emptyWarning: undefined
   });
 
   const include = await collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: true });
   assert.deepEqual(historyCopyNotice(include, settings), {
     unresolvedWarning: undefined,
     message: '1 Git file(s) copied. File limit 1 reached. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.',
-    emptyWarning: 'Nothing to copy. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.'
+    // Something was copied: no empty warning.
+    emptyWarning: undefined
+  });
+});
+
+test('case 30 on History: every selected file unreadable gives one "Nothing to copy." warning naming them', async () => {
+  const files = [historyFile('src/gone.ts', 'MODIFIED'), historyFile('lost.ts', 'MODIFIED')];
+  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat };
+  const result = await collectHistoryCopy(files, async () => undefined, settings, ['/repo']);
+  assert.deepEqual(historyCopyNotice(result, settings), {
+    // Not a second toast: the empty warning already names them.
+    unresolvedWarning: undefined,
+    message: '0 Git file(s) copied.',
+    emptyWarning: 'Nothing to copy. Unreadable: 2 (src/gone.ts, lost.ts).'
   });
 });
 
