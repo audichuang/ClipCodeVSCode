@@ -86,12 +86,13 @@ test('files copy: non-portable files and folders are skipped, named with their r
     await put(path.join(root, 'src', 'tab\there.ts'), 't');
     await put(path.join(root, 'src', 'bad:dir', 'inner.ts'), 'never read');
     await put(path.join(root, 'src', 'bad:dir', 'deep', 'more.ts'), 'never read');
-    await put(path.join(root, 'src', 'ok name 檔案 😀.ts'), 'ok');
+    await put(path.join(root, 'src', 'zz ok name 檔案 😀.ts'), 'ok');
 
-    // A limit of 1: the five refused entries come first in the walk and must not use it up.
+    // A limit of 1: the five refused entries come first in the walk and must not use it up
+    // (the copied file sorts last: once it fills the limit, a later skip is silent).
     const settings = { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 };
     const result = await collectCopyFiles(root, [path.join(root, 'src')], settings, { includeNonText: true });
-    assert.deepEqual(result.files.map(f => [f.path, f.content]), [['src/ok name 檔案 😀.ts', 'ok']]);
+    assert.deepEqual(result.files.map(f => [f.path, f.content]), [['src/zz ok name 檔案 😀.ts', 'ok']]);
     assert.equal(result.fileLimitReached, false);
     assert.equal(result.limitLeftOut, 0);
     assert.equal(result.nonPortableCount, 5);
