@@ -129,6 +129,18 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   return parts;
 }
 
+/**
+ * Decision X3: a copy whose payload would carry no file entry at all (everything selected was
+ * skipped, filtered or left out) must not write the clipboard. Returns the warning to show in
+ * that case — "Nothing to copy." followed by the skipped categories, the same sentences as the
+ * completion notice — or undefined when there is something to write. A size placeholder is a
+ * file entry, so a selection of only oversized files still copies, as before non-text support.
+ */
+export function nothingToCopyNotice(result: NonTextNoticeCounts & { files: readonly unknown[] }): string | undefined {
+  if (result.files.length > 0) return undefined;
+  return ['Nothing to copy.', ...copyNoticeDetails(result)].join(' ');
+}
+
 /** `Label: n (a, b, c and N more)` — the first NOTICE_PATHS paths, or just `Label: n` with none. */
 function namedCount(label: string, count: number, paths: string[]): string {
   const named = paths.slice(0, NOTICE_PATHS);
