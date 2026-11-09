@@ -333,7 +333,11 @@ export async function collectCopyFiles(
         state.symlinkedFolderPaths.push(toClipboardPathFromRoots(roots, absolute));
       }
     };
-    for await (const filePath of listFilesRecursive(inputPath, enterDirectory, true, onUnreadable, onSymlinkedFolder, onNonUtf8Name)) {
+    // A workspace root opened through a symlink is the folder the user is working in, not
+    // a link met in a tree: it is walked (links inside it still are not).
+    const walkSelectedLink = roots.some(root => path.resolve(root) === path.resolve(inputPath));
+    const walk = listFilesRecursive(inputPath, { shouldEnterDirectory: enterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name, walkSelectedLink });
+    for await (const filePath of walk) {
       const absolutePath = path.resolve(filePath);
       if (seen.has(absolutePath)) continue;
       seen.add(absolutePath);
