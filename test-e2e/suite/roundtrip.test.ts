@@ -227,9 +227,13 @@ describe('Snipcode copy → restore round-trip (real workspace)', () => {
 
       await fs.rm(kept);
       shown.length = 0;
+      // Every tab skipped: the clipboard keeps what it had (decision X3).
+      const sentinel = 'clipcode-e2e-sentinel: open tabs carried nothing';
+      await vscode.env.clipboard.writeText(sentinel);
       await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
       assert.strictEqual(shown.length, 1, shown.join('\n'));
-      assert.match(shown[0], /^No open editor file copied\. Unreadable: 2 \([^)]*tab-gone\.ts, [^)]*tab-kept\.ts\)\.$/);
+      assert.match(shown[0], /^Nothing to copy\. Unreadable: 2 \([^)]*tab-gone\.ts, [^)]*tab-kept\.ts\)\.$/);
+      assert.strictEqual(await vscode.env.clipboard.readText(), sentinel);
     } finally {
       w.showInformationMessage = original.info;
       w.showWarningMessage = original.warn;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { parseClipboard } from '../src/clipboardFormat.js';
 import { collectCopyFiles, LEFT_OUT_CAP, type CopyResult } from '../src/copy.js';
-import { copyNoticeDetails, nonTextDialog, shortenPath } from '../src/nonTextDialog.js';
+import { copyNoticeDetails, nonTextDialog, nothingToCopyNotice, shortenPath } from '../src/nonTextDialog.js';
 import { parseBody, placeholderLine, sha256Hex } from '../src/nonText.js';
 import { formatSize } from '../src/restoreSummary.js';
 import { defaultSettings, normalizeSettings, type ClipCodeSettings } from '../src/settings.js';
@@ -601,4 +601,48 @@ test('dialog paths: the folder part shrinks first and the file name with its ext
   assert.ok(!combined.includes('…́'), combined);
   assert.ok(!/e…/.test(combined), combined);
   assert.equal(shortenPath('short/name.png', 70), 'short/name.png');
+});
+
+// Decision X3: a copy that carries no file entry does not write the clipboard; the warning
+// says "Nothing to copy." and names what was skipped, category by category.
+test('X3: every item skipped → "Nothing to copy." with the skipped categories named', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'real', 'a.ts'), 'a');
+    await symlink(path.join(root, 'real'), path.join(root, 'linked'), 'dir');
+    const result = await collectCopyFiles(root, [path.join(root, 'linked'), path.join(root, 'gone.ts')], defaultSettings, INCLUDE);
+    assert.deepEqual(result.files, []);
+    assert.equal(nothingToCopyNotice(result), 'Nothing to copy. Unreadable: 1 (gone.ts). Symlinked folder: 1 (linked).');
+  });
+});
+
+test('X3: only non-text files and Exclude chosen → "Nothing to copy." says they were left out', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'img', 'a.png'), png(1));
+    await put(path.join(root, 'img', 'b.png'), png(2));
+    const result = await collectCopyFiles(root, [path.join(root, 'img')], defaultSettings, EXCLUDE);
+    assert.equal(nothingToCopyNotice(result), 'Nothing to copy. Non-text files left out: 2.');
+  });
+});
+
+test('X3: a folder with nothing in it → "Nothing to copy." alone (no wrapper-only payload)', async () => {
+  await withTempDir(async root => {
+    await mkdir(path.join(root, 'empty'));
+    const result = await collectCopyFiles(root, [path.join(root, 'empty')], defaultSettings, INCLUDE);
+    assert.equal(nothingToCopyNotice(result), 'Nothing to copy.');
+  });
+});
+
+test('X3: only size placeholders still copy (pre-feature behaviour), and any copied file copies', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'big', 'huge.txt'), 'a'.repeat(3 * 1024));
+    const settings = normalizeSettings({ ...defaultSettings, maxFileSizeKB: 1, maxNonTextFileSizeKB: 1 });
+    const big = await collectCopyFiles(root, [path.join(root, 'big')], settings, INCLUDE);
+    assert.equal(big.files.length, 1);
+    assert.ok(big.files[0].skippedReason);
+    assert.equal(nothingToCopyNotice(big), undefined);
+
+    await put(path.join(root, 'ok.ts'), 'ok');
+    const mixed = await collectCopyFiles(root, [path.join(root, 'ok.ts'), path.join(root, 'gone.ts')], defaultSettings, INCLUDE);
+    assert.equal(nothingToCopyNotice(mixed), undefined);
+  });
 });

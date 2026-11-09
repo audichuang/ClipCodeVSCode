@@ -6,7 +6,7 @@ import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { capLeftOut, collectCopyFiles, UNREADABLE_PATHS_KEPT, type CopyResult } from './copy.js';
-import { askAboutNonText, copyNoticeDetails, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
+import { askAboutNonText, copyNoticeDetails, nothingToCopyNotice, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
 import { classifyBytes, type FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { normalizeFsPath, readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
@@ -255,6 +255,11 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   const settings = readSettings();
   const result = await collectFilesAskingAboutNonText(roots, selectedUris.map(item => item.fsPath), settings);
   if (!result) return;
+  const nothing = nothingToCopyNotice(result);
+  if (nothing) {
+    vscode.window.showWarningMessage(nothing);
+    return;
+  }
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
@@ -328,16 +333,18 @@ async function copyAllOpenEditors(): Promise<void> {
     }
   }
 
+  if (paths.size === 0) {
+    vscode.window.showInformationMessage('No open text editors found to copy.');
+    return;
+  }
+
   const result = await collectFilesAskingAboutNonText(roots, [...paths], settings);
   if (!result) return;
-  if (result.files.length === 0) {
-    // Tabs whose files were deleted, or non-text files left out, are not "no open editors".
-    const details = copyNoticeDetails(result);
-    if (details.length > 0) {
-      vscode.window.showWarningMessage(`No open editor file copied. ${details.join(' ')}`);
-    } else {
-      vscode.window.showInformationMessage('No open text editors found to copy.');
-    }
+  // Tabs whose files were deleted, or non-text files left out, are not "no open editors":
+  // what was skipped is named, and the clipboard is left alone (decision X3).
+  const nothing = nothingToCopyNotice(result);
+  if (nothing) {
+    vscode.window.showWarningMessage(nothing);
     return;
   }
 

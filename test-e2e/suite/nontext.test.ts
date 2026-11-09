@@ -111,3 +111,71 @@ describe('Snipcode non-text files (real workspace)', () => {
     await fs.rm(path.join(repoDir, create.path.split('/')[0]), { recursive: true, force: true });
   });
 });
+
+// Decision X3: a copy that would carry no file entry leaves the clipboard alone and says
+// "Nothing to copy." with what was skipped; a wrapper-only payload is never written.
+describe('Snipcode copy with every item skipped (real workspace)', () => {
+  const dir = 'e2e-nothing-to-copy';
+  const SENTINEL = 'clipcode-e2e-sentinel: must survive a copy that carries nothing';
+
+  before(async () => {
+    const ext = vscode.extensions.getExtension('audichuang.clipcode-vscode');
+    assert.ok(ext, 'extension present');
+    await ext!.activate();
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.join(repoDir, dir), { recursive: true, force: true });
+  });
+
+  async function copyWithSentinel(target: string): Promise<{ clip: string; messages: string[] }> {
+    await vscode.env.clipboard.writeText(SENTINEL);
+    const warnings = stubWarnings();
+    try {
+      const uri = vscode.Uri.file(target);
+      await vscode.commands.executeCommand('clipcode.copyToClipboard', uri, [uri]);
+    } finally {
+      warnings.restore();
+    }
+    return { clip: await vscode.env.clipboard.readText(), messages: warnings.calls.map(call => String(call[0])) };
+  }
+
+  // A `"` cannot be part of a file name on NTFS, so the scenario does not exist on Windows.
+  (process.platform === 'win32' ? it.skip : it)('a folder holding only a non-portable name keeps the clipboard', async () => {
+    const root = path.join(repoDir, dir, 'only-bad-name');
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'q"uote.txt'), 'hello\n');
+
+    const { clip, messages } = await copyWithSentinel(root);
+    assert.equal(clip, SENTINEL, 'clipboard untouched');
+    const notice = messages.find(m => m.startsWith('Nothing to copy.'));
+    assert.ok(notice, `"Nothing to copy." shown; got ${JSON.stringify(messages)}`);
+    assert.ok(notice!.includes('Name not portable: 1') && notice!.includes('q"uote.txt'), notice);
+  });
+
+  it('a lone symlinked folder keeps the clipboard', async () => {
+    const base = path.join(repoDir, dir);
+    await fs.mkdir(path.join(base, 'real'), { recursive: true });
+    await fs.writeFile(path.join(base, 'real', 'a.txt'), 'a\n');
+    const link = path.join(base, 'linked');
+    await fs.symlink(path.join(base, 'real'), link, 'dir');
+
+    const { clip, messages } = await copyWithSentinel(link);
+    assert.equal(clip, SENTINEL, 'clipboard untouched');
+    const notice = messages.find(m => m.startsWith('Nothing to copy.'));
+    assert.ok(notice, `"Nothing to copy." shown; got ${JSON.stringify(messages)}`);
+    assert.ok(notice!.includes('Symlinked folder: 1') && notice!.includes('linked'), notice);
+  });
+
+  it('a folder holding only an oversized text file still copies its size placeholder', async () => {
+    const root = path.join(repoDir, dir, 'only-big');
+    await fs.mkdir(root, { recursive: true });
+    // Over the default maxFileSizeKB (500): copied as a size placeholder, as before non-text support.
+    await fs.writeFile(path.join(root, 'big.txt'), 'a'.repeat(600 * 1024));
+
+    const { clip, messages } = await copyWithSentinel(root);
+    assert.notEqual(clip, SENTINEL, 'clipboard written');
+    assert.ok(clip.includes('big.txt'), clip.slice(0, 300));
+    assert.ok(!messages.some(m => m.startsWith('Nothing to copy.')), JSON.stringify(messages));
+  });
+});
