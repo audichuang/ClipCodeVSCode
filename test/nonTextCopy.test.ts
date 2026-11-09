@@ -15,6 +15,8 @@ import { defaultSettings, normalizeSettings, type ClipCodeSettings } from '../sr
 const INCLUDE = { includeNonText: true };
 const EXCLUDE = { includeNonText: false };
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+// Windows ignores POSIX modes, so chmod 000 does not make anything unreadable there.
+const noModeDenial = process.platform === 'win32' ? 'Windows ignores POSIX modes' : undefined;
 
 /** A tiny "PNG": the signature has a NUL-free start, the IHDR length field carries NULs. */
 function png(seed: number, size = 64): Buffer {
@@ -225,7 +227,7 @@ test('file-count limit: the left-out count is capped, the walk stops there and s
   });
 });
 
-test('case 16: unreadable files dropped during folder expansion are named', { skip: isRoot && 'root reads mode 000 files' }, async () => {
+test('case 16: unreadable files dropped during folder expansion are named', { skip: noModeDenial || (isRoot && 'root reads mode 000 files') }, async () => {
   await withTempDir(async root => {
     await put(path.join(root, 'src', 'ok.ts'), 'ok');
     await put(path.join(root, 'src', 'locked.ts'), 'secret');
@@ -249,7 +251,7 @@ test('case 16: unreadable files dropped during folder expansion are named', { sk
   });
 });
 
-test('case 19: a selected unreadable folder is named, the selected file is copied', { skip: isRoot && 'root lists mode 000 folders' }, async () => {
+test('case 19: a selected unreadable folder is named, the selected file is copied', { skip: noModeDenial || (isRoot && 'root lists mode 000 folders') }, async () => {
   await withTempDir(async root => {
     await put(path.join(root, 'shut', 'inner.ts'), 'inner');
     await put(path.join(root, 'ok.ts'), 'ok');

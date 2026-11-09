@@ -251,6 +251,10 @@ test('a failed write or delete is reported in user text, never the raw OS messag
   assert.equal(ioErrorText(Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' })), 'Folder is not writable');
   assert.equal(ioErrorText(Object.assign(new Error('x'), { code: 'ENOSPC' })), 'The disk is full');
   assert.equal(ioErrorText(new Error('anything else')), 'Could not apply the change');
+  if (process.platform === 'win32') {
+    t.diagnostic('Windows ignores POSIX modes: chmod does not deny writes, the live part is skipped');
+    return;
+  }
   if (process.getuid?.() === 0) {
     t.diagnostic('running as root: chmod does not deny writes, the live part is skipped');
     return;
