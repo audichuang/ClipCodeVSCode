@@ -686,17 +686,48 @@ test('X3: a folder with nothing in it → "Nothing to copy." alone (no wrapper-o
   });
 });
 
-test('X3: only size placeholders still copy (pre-feature behaviour), and any copied file copies', async () => {
+// Spec X3 (OpenIDEA PR #208): "a files selection would copy nothing but size placeholders"
+// is nothing to copy too. This test used to pin the opposite (placeholder-only payloads were
+// written), which was the pre-feature status quo, not the rule.
+test('X3: a selection that would copy only size placeholders is "Nothing to copy." naming them', async () => {
   await withTempDir(async root => {
     await put(path.join(root, 'big', 'huge.txt'), 'a'.repeat(3 * 1024));
+    await put(path.join(root, 'big', 'huge.png'), png(7, 3 * 1024));
     const settings = normalizeSettings({ ...defaultSettings, maxFileSizeKB: 1, maxNonTextFileSizeKB: 1 });
-    const big = await collectCopyFiles(root, [path.join(root, 'big')], settings, INCLUDE);
-    assert.equal(big.files.length, 1);
-    assert.ok(big.files[0].skippedReason);
-    assert.equal(nothingToCopyNotice(big), undefined);
+    for (const options of [INCLUDE, EXCLUDE]) {
+      const big = await collectCopyFiles(root, [path.join(root, 'big')], settings, options);
+      assert.equal(big.files.length, 2);
+      assert.ok(big.files.every(f => f.skippedReason));
+      assert.equal(nothingToCopyNotice(big), 'Nothing to copy. Over the size limit: 2 (big/huge.png, big/huge.txt).');
+    }
 
+    // Placeholders next to an unreadable item: both categories are named.
+    const withGone = await collectCopyFiles(root, [path.join(root, 'big', 'huge.txt'), path.join(root, 'gone.ts')], settings, INCLUDE);
+    assert.equal(nothingToCopyNotice(withGone), 'Nothing to copy. Unreadable: 1 (gone.ts). Over the size limit: 1 (big/huge.txt).');
+
+    // One carried file (text or Base64) is something to copy, placeholders and all.
     await put(path.join(root, 'ok.ts'), 'ok');
-    const mixed = await collectCopyFiles(root, [path.join(root, 'ok.ts'), path.join(root, 'gone.ts')], defaultSettings, INCLUDE);
+    const mixed = await collectCopyFiles(root, [path.join(root, 'ok.ts'), path.join(root, 'big')], settings, INCLUDE);
     assert.equal(nothingToCopyNotice(mixed), undefined);
+    await put(path.join(root, 'small.png'), png(3));
+    const withImage = await collectCopyFiles(root, [path.join(root, 'small.png'), path.join(root, 'big')], settings, INCLUDE);
+    assert.equal(withImage.nonTextFiles.length, 1);
+    assert.equal(nothingToCopyNotice(withImage), undefined);
+  });
+});
+
+// Case 37: the non-text limit is inclusive (X20). Green before this test was added; it guards
+// the boundary. The text limit stays at its default so both files are read and classified.
+test('case 37: a non-text file of exactly maxNonTextFileSizeKB × 1024 bytes is carried, one byte more is a size placeholder', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'at.png'), png(1, 1024));
+    await put(path.join(root, 'over.png'), png(2, 1025));
+    const settings = normalizeSettings({ ...defaultSettings, maxNonTextFileSizeKB: 1 });
+    const result = await collectCopyFiles(root, [path.join(root, 'at.png'), path.join(root, 'over.png')], settings, INCLUDE);
+    assert.deepEqual(result.nonTextFiles, [{ path: 'at.png', size: 1024 }]);
+    assert.equal(result.nonTextOverLimitCount, 1);
+    assert.equal(result.unreadOverLimitCount, 0);
+    assert.deepEqual(result.files.map(f => [f.path, f.skippedReason]),
+      [['at.png', undefined], ['over.png', 'size exceeds limit (1025 bytes)']]);
   });
 });
