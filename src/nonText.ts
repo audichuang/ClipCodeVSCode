@@ -11,7 +11,8 @@ export const BASE64_LINE_LEN = 76;
 const PLACEHOLDER_LINE = /^\/\/ File skipped: non-text file, ([0-9]+) bytes, sha256 ([0-9a-f]{64}); base64 follows$/;
 const MAX_U64 = (1n << 64n) - 1n;
 const BASE64_ALPHABET = /^[A-Za-z0-9+/]*={0,2}$/;
-const ASCII_WS_ALL = /[ \t\n\v\f\r]+/g;
+// Rust is_ascii_whitespace (OpenIDEA nontext.rs): space, \t, \n, \f, \r — NOT \v.
+const ASCII_WS_ALL = /[ \t\n\f\r]+/g;
 
 export type NonTextError = 'base64' | 'size' | 'sha256';
 export type NonTextParse = { bytes: Uint8Array } | { error: NonTextError };

@@ -54,8 +54,11 @@ test('strict decode rejects what Buffer.from(base64) silently accepts', () => {
   assert.equal(decodeStrictBase64('A==='), undefined);
 });
 
-test('strict decode ignores ASCII whitespace only', () => {
-  assert.deepEqual(decodeStrictBase64(` ${B64.slice(0, 3)}\r\n\t${B64.slice(3)} \v\f\n`), BYTES);
+test('strict decode ignores ASCII whitespace only (Rust is_ascii_whitespace: no VT)', () => {
+  assert.deepEqual(decodeStrictBase64(` ${B64.slice(0, 3)}\r\n\t${B64.slice(3)} \f\n`), BYTES);
+  // VT (0x0B) is not ASCII whitespace for OpenIDEA's nontext.rs, so the entry is corrupt there;
+  // tolerating it here made the same payload restore on one side and fail on the other.
+  assert.equal(decodeStrictBase64(`${B64.slice(0, 3)}\v${B64.slice(3)}`), undefined);
   assert.equal(decodeStrictBase64(`${B64.slice(0, 3)}\u00a0${B64.slice(3)}`), undefined);
 });
 
