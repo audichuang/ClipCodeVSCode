@@ -299,3 +299,25 @@ test('paste UI text: non-text count and size, corrupt and unchanged rows, reason
     assert.equal(resultNotice(plan, { ...result, errors: ['x: Folder is not writable'] }), 'Created 1, Overwritten 1, Unchanged 1, Skipped 3');
   });
 });
+
+test('target identity folds NFC/NFD only on a case-insensitive volume', async () => {
+  await withRoot(async root => {
+    // Not yet on disk, so realpath anchors on the root and the basenames stay as spelled.
+    const nfc = 'café.txt';
+    const nfd = 'café.txt';
+    const op = (name: string) => ({
+      relativePath: name, absolutePath: path.join(root, name), content: 'x', existed: false, rootPath: root
+    });
+    const plan = { roots: [root], createOperations: [op(nfc), op(nfd)], deleteOperations: [], skippedOperations: [] };
+
+    // Case-sensitive (Linux ext4): two distinct files, nothing collides.
+    const sensitive = await markTargetCollisions(plan, async () => false);
+    assert.deepEqual(sensitive.createOperations.map(o => o.relativePath), [nfc, nfd]);
+    assert.deepEqual(sensitive.skippedOperations, []);
+
+    // Case-insensitive (APFS, NTFS): one file, both entries are TARGET_COLLISION.
+    const insensitive = await markTargetCollisions(plan, async () => true);
+    assert.deepEqual(insensitive.createOperations, []);
+    assert.deepEqual(insensitive.skippedOperations.map(s => s.reason), ['TARGET_COLLISION', 'TARGET_COLLISION']);
+  });
+});

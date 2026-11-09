@@ -379,13 +379,17 @@ export function ioErrorText(error: unknown): string {
  * same spelling twice is not a collision — it stays planned twice, in order (shared
  * restoreCases). Mirror of OpenIDEA transfer.rs plan_import's target-identity check.
  */
-export async function markTargetCollisions(plan: RestorePlan): Promise<RestorePlan> {
+export async function markTargetCollisions(
+  plan: RestorePlan,
+  /** Injected by tests: this machine's tmp volume decides otherwise. */
+  probe: (existingPath: string) => Promise<boolean> = isCaseInsensitive
+): Promise<RestorePlan> {
   const caseCache = new Map<string, boolean>();
   const groups = new Map<string, Set<string>>();
   const identities = new Map<string, string>();
   for (const absolutePath of [...plan.createOperations, ...plan.deleteOperations].map(op => op.absolutePath)) {
     if (identities.has(absolutePath)) continue;
-    const identity = await targetIdentity(absolutePath, caseCache);
+    const identity = await targetIdentity(absolutePath, caseCache, probe);
     identities.set(absolutePath, identity);
     const spellings = groups.get(identity) ?? new Set<string>();
     spellings.add(absolutePath);
@@ -407,10 +411,14 @@ export async function markTargetCollisions(plan: RestorePlan): Promise<RestorePl
 }
 
 /**
- * realpath of the nearest existing ancestor plus the remaining segments, lower-cased when
- * that ancestor sits on a case-insensitive volume.
+ * realpath of the nearest existing ancestor plus the remaining segments, NFC-normalized and
+ * lower-cased when that ancestor sits on a case-insensitive volume.
  */
-async function targetIdentity(absolutePath: string, caseCache: Map<string, boolean>): Promise<string> {
+async function targetIdentity(
+  absolutePath: string,
+  caseCache: Map<string, boolean>,
+  probe: (existingPath: string) => Promise<boolean>
+): Promise<string> {
   const trail: string[] = [];
   let current = absolutePath;
   let resolved: string | undefined;
@@ -423,13 +431,16 @@ async function targetIdentity(absolutePath: string, caseCache: Map<string, boole
     current = parent;
   }
   const anchor = resolved ?? current;
-  const identity = path.join(anchor, ...trail).normalize('NFC');
+  const identity = path.join(anchor, ...trail);
   let insensitive = caseCache.get(anchor);
   if (insensitive === undefined) {
-    insensitive = await isCaseInsensitive(anchor);
+    insensitive = await probe(anchor);
     caseCache.set(anchor, insensitive);
   }
-  return insensitive ? identity.toLowerCase() : identity;
+  // Unicode folding only where letter case folds too (APFS, NTFS). On a case-sensitive
+  // volume (ext4) the NFC and NFD spellings are two distinct files, and grouping them
+  // skipped both as TARGET_COLLISION. OpenIDEA folds case only, under the same probe.
+  return insensitive ? identity.normalize('NFC').toLowerCase() : identity;
 }
 
 /**
