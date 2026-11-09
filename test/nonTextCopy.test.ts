@@ -520,6 +520,7 @@ test('X7: a symlink to a file outside every copy root is not read and is named U
         assert.deepEqual([...result.unreadablePaths].sort(), ['src/id.png', 'src/secret.txt']);
         assert.equal(result.symlinkedFolderCount, 0);
         assert.deepEqual(result.nonTextFiles, [], 'an out-of-root image is not offered for Include');
+        assert.ok(reads.some(p => p.endsWith('keep.ts')), 'the spy sees the read that does happen');
         assert.ok(
           !reads.some(p => p.endsWith('secret.txt') || p.endsWith('id.png')),
           `the link and its target are never read (read: ${reads.join(', ')})`
