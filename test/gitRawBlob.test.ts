@@ -38,7 +38,9 @@ async function withTextconvRepo(run: (root: string) => Promise<void>): Promise<v
     const script = path.join(root, '.textconv.sh');
     await writeFile(script, '#!/bin/sh\necho "TEXTCONV OUTPUT"\n');
     await chmod(script, 0o755);
-    git(root, 'config', 'diff.fake.textconv', script);
+    // git runs the command through sh, which eats Windows backslashes: forward slashes + explicit sh.
+    git(root, 'config', 'core.autocrlf', 'false');
+    git(root, 'config', 'diff.fake.textconv', `sh "${script.replace(/\\/g, '/')}"`);
     await writeFile(path.join(root, '.gitattributes'), '*.png diff=fake\n');
     await writeFile(path.join(root, 'a.png'), PNG);
     await writeFile(path.join(root, 'notes.png'), 'plain text in a png\n');
