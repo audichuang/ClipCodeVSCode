@@ -345,3 +345,23 @@ test('staged and deleted reads go through the raw reader first (no textconv outp
   ]);
   assert.deepEqual(asked.sort(), ['/repo :logo.png', '/repo HEAD:gone.ts']);
 });
+
+test('SCM copy: non-portable names are never read, named, and do not use the file-count limit', {
+  skip: process.platform === 'win32' ? 'Windows cannot create these names' : undefined
+}, async () => {
+  const names = ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts', 'ok 檔 😀.ts', 'later.ts'];
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: { workingTreeChanges: names.map(name => ({ uri: new Uri(`/repo/${name}`), status: 'MODIFIED' })) },
+  };
+  workspaceReads.length = 0;
+  const { collectGitPayloadFiles } = await extensionModule;
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [],
+    { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 }, { includeNonText: true });
+
+  assert.deepEqual(result.files, [{ path: 'ok 檔 😀.ts', content: 'working:/repo/ok 檔 😀.ts', changeType: 'MODIFIED' }]);
+  assert.ok(!workspaceReads.some(p => /[\\":\t]/.test(p)), workspaceReads.join('\n'));
+  assert.equal(result.limitLeftOut, 1, 'only later.ts is left out by the limit');
+  assert.equal(result.nonPortableCount, 4);
+  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts']);
+});

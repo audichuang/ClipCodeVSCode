@@ -111,7 +111,7 @@ async function copyFullSource(
 
   const notice = historyCopyNotice(result, settings);
   if (notice.unresolvedWarning) vscode.window.showWarningMessage(notice.unresolvedWarning);
-  if (result.files.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
+  if (result.files.length === 0) { vscode.window.showWarningMessage(notice.emptyWarning); return; }
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) notifyCopied(notice.message, result.payload);
 }

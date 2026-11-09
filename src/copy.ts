@@ -3,7 +3,7 @@ import { buildPayload, type PayloadFile } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
 import { directoryExcluded, fileMatchesFilters } from './filterMatcher.js';
 import { fileSize, listFilesRecursive, readClassifiedFile } from './fileSystem.js';
-import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 /**
@@ -95,6 +95,14 @@ export interface CopyResult {
   symlinkedFolderCount: number;
   /** First UNREADABLE_PATHS_KEPT of those, as clipboard paths (the link's own path). */
   symlinkedFolderPaths: string[];
+  /**
+   * Files and folders whose real name a payload header cannot carry (pathResolver
+   * nonPortableName): never read, not counted toward the file-count limit; a folder costs
+   * its whole subtree and is named once.
+   */
+  nonPortableCount: number;
+  /** First UNREADABLE_PATHS_KEPT of those, with the real name (a `\` kept as typed). */
+  nonPortablePaths: string[];
   /** Exclude only: non-text files within the text limit that were left out. */
   excludedNonTextCount: number;
   fileLimitReached: boolean;
@@ -139,6 +147,8 @@ interface CopyState {
   unreadablePaths: string[];
   symlinkedFolderCount: number;
   symlinkedFolderPaths: string[];
+  nonPortableCount: number;
+  nonPortablePaths: string[];
   excludedNonTextCount: number;
   fileLimitReached: boolean;
   limitLeftOut: number;
@@ -167,6 +177,8 @@ export async function collectCopyFiles(
     unreadablePaths: [],
     symlinkedFolderCount: 0,
     symlinkedFolderPaths: [],
+    nonPortableCount: 0,
+    nonPortablePaths: [],
     excludedNonTextCount: 0,
     fileLimitReached: false,
     limitLeftOut: 0,
@@ -190,10 +202,30 @@ export async function collectCopyFiles(
     if (state.limitLeftOut >= leftOutCap) state.limitLeftOutCapped = true;
     else state.limitLeftOut++;
   };
-  const pruneExcludedDirectory = (dirPath: string): boolean => {
-    if (!settings.useFilters || !settings.useExcludeFilters) return true;
+  // A name the payload cannot carry: skipped and named. Past the file-count limit it is
+  // as silent as an unreadable folder there (and, not being a candidate, not left out).
+  const nonPortableSeen = new Set<string>();
+  const isNonPortable = (absolutePath: string): boolean => {
+    const name = nonPortableName(roots, absolutePath);
+    if (name === undefined) return false;
+    // A folder selected and also inside a selected folder is named once.
+    if (!state.fileLimitReached && !nonPortableSeen.has(absolutePath)) {
+      nonPortableSeen.add(absolutePath);
+      state.nonPortableCount++;
+      if (state.nonPortablePaths.length < UNREADABLE_PATHS_KEPT) state.nonPortablePaths.push(name);
+    }
+    return true;
+  };
+  const enterDirectory = (dirPath: string): boolean => {
     const absolute = path.resolve(dirPath);
-    return !directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute);
+    if (
+      settings.useFilters && settings.useExcludeFilters &&
+      directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute)
+    ) {
+      return false;
+    }
+    // A folder (or a symlinked one) with such a name costs its whole subtree, named once.
+    return !isNonPortable(absolute);
   };
   const noteUnreadable = (absolutePath: string) => {
     state.skippedUnreadableCount++;
@@ -284,7 +316,7 @@ export async function collectCopyFiles(
         state.symlinkedFolderPaths.push(toClipboardPathFromRoots(roots, absolute));
       }
     };
-    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory, true, onUnreadable, onSymlinkedFolder)) {
+    for await (const filePath of listFilesRecursive(inputPath, enterDirectory, true, onUnreadable, onSymlinkedFolder)) {
       const absolutePath = path.resolve(filePath);
       if (seen.has(absolutePath)) continue;
       seen.add(absolutePath);
@@ -302,6 +334,8 @@ export async function collectCopyFiles(
       ) {
         continue;
       }
+      // Not read and not a candidate: it never consumes the file-count limit.
+      if (isNonPortable(absolutePath)) continue;
 
       // The limit check needs an exact copiedFileCount, so drain first whenever the
       // buffered candidates could still push the count up to the limit. Below that

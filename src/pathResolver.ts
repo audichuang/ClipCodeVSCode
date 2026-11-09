@@ -464,6 +464,58 @@ function ambiguous(relativePath: string, candidates: TargetCandidate[]): Rejecte
   };
 }
 
+/**
+ * True when [value] is already the exact relative path a payload header carries, so the
+ * paste side's sanitizer (below) keeps it unchanged. The copy side's portability rule: a
+ * `\` in a real name, `..`, `<>:"|?*`, a control character or an edge space changes the
+ * value, so the file is skipped and named "Name not portable" instead of restoring under
+ * another name (or not at all). Mirror of OpenIDEA paths.rs `is_exportable_relative_path`.
+ */
+export function isExportableRelativePath(value: string): boolean {
+  return sanitizeRelativePath(value) === value;
+}
+
+/**
+ * The real name of [absolutePath] when the copy must refuse it as not portable, else
+ * undefined. Judged on the NATIVE path components below the root the clipboard path is
+ * relative to (the primary root first, else the deepest root holding it), never on the
+ * clipboard path itself: that one is slash-normalised, so `a\b.png` on Linux already reads
+ * `a/b.png` there. A path under no root is judged on every component after its filesystem
+ * root (the drive or `/`), the directories the paste side keeps. The returned name keeps
+ * a `\` as typed, prefixed like the clipboard path (a root label, or nothing).
+ */
+export function nonPortableName(workspaceRoots: string[], absolutePath: string): string | undefined {
+  const absolute = path.resolve(absolutePath);
+  const below = (root: string): string | undefined => {
+    const relative = path.relative(path.resolve(root), absolute);
+    if (relative === '' || path.isAbsolute(relative)) return undefined;
+    if (relative === '..' || relative.startsWith(`..${path.sep}`)) return undefined;
+    return relative;
+  };
+  const [primary, ...others] = workspaceRoots;
+  let root: string | undefined;
+  let relative: string | undefined;
+  if (primary !== undefined && (relative = below(primary)) !== undefined) {
+    root = primary;
+  } else {
+    for (const candidate of [...others].sort((a, b) => path.resolve(b).length - path.resolve(a).length)) {
+      relative = below(candidate);
+      if (relative !== undefined) { root = candidate; break; }
+    }
+  }
+  if (root === undefined || relative === undefined) {
+    // Under no root, or the root itself: the clipboard path is absolute.
+    if (workspaceRoots.some(r => path.resolve(r) === absolute)) return undefined;
+    const rest = absolute.slice(path.parse(absolute).root.length);
+    const value = rest.split(path.sep).join('/');
+    return value === '' || isExportableRelativePath(value) ? undefined : absolute;
+  }
+  const value = relative.split(path.sep).join('/');
+  if (isExportableRelativePath(value)) return undefined;
+  const prefix = toClipboardPathFromRoots(workspaceRoots, root);
+  return prefix ? `${prefix}/${value}` : value;
+}
+
 function sanitizeRelativePath(value: string): string | undefined {
 // asciiTrim, not String.trim(): the two stdlibs disagree on U+001C-U+001F and U+FEFF, and
 // here that disagreement decided the FILENAME each tool wrote — `// file: a.txt\u001C`
