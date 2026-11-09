@@ -242,10 +242,13 @@ test('History copy: non-portable names are never read, get no header, are named,
   assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', INJECTED, 'gone\nfile: y.ts']);
   assert.match(historyCopyNotice(result, settings).message, /Name not portable: 5 \(a\\b\.png, q"x\.ts, c:d\.ts and 2 more\)\./);
 
-  // Everything refused: the warning names them instead of "No Git changes found".
+  // Everything refused (case 29 → case 30): "Nothing to copy." names them, not "No Git changes found".
   const none = await collectHistoryCopy(files.slice(0, 3), async () => ({ text: 'x' }), settings, ['/repo']);
   assert.equal(historyCopyNotice(none, settings).emptyWarning,
-    'No Git changes copied. Name not portable: 3 (a\\b.png, q"x.ts, c:d.ts).');
+    'Nothing to copy. Name not portable: 3 (a\\b.png, q"x.ts, c:d.ts).');
+  // No change at all is still the plain message.
+  const empty = await collectHistoryCopy([], async () => ({ text: 'x' }), settings, ['/repo']);
+  assert.equal(historyCopyNotice(empty, settings).emptyWarning, 'No Git changes found to copy.');
 });
 
 test('History copy judges the git path: a `\\` committed elsewhere is refused even where the file path lost it (X1)', async () => {

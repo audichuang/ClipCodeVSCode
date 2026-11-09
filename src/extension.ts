@@ -6,7 +6,7 @@ import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { capLeftOut, collectCopyFiles, UNREADABLE_PATHS_KEPT, type CopyResult } from './copy.js';
-import { askAboutNonText, copyNoticeDetails, nothingToCopyNotice, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
+import { askAboutNonText, copyNoticeDetails, gitNothingToCopyNotice, nothingToCopyNotice, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
 import { classifyBytes, type FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { normalizeFsPath, readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
@@ -180,8 +180,7 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   const result = await askAboutNonText(settings, includeNonText => buildGraphCopyPayload(deps, payload, { includeNonText }), showNonTextDialog);
   if (!result) return;
   if (result.copiedFileCount === 0 && result.skippedFileSizeCount === 0) {
-    const details = copyNoticeDetails(gitNoticeCounts(result));
-    vscode.window.showWarningMessage(details.length > 0 ? `No source copied. ${details.join(' ')}` : 'No source copied.');
+    vscode.window.showWarningMessage(gitNothingToCopyNotice(copyNoticeDetails(gitNoticeCounts(result)), 'No source copied.'));
     return;
   }
   await vscode.env.clipboard.writeText(result.text);
@@ -383,11 +382,8 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   if (!result) return;
 
   if (result.files.length === 0) {
-    // Whatever was left out is said, not "no changes".
-    const details = copyNoticeDetails(gitNoticeCounts(result));
-    vscode.window.showWarningMessage(details.length > 0
-      ? `No Git changes copied. ${details.join(' ')}`
-      : 'No Git changes found to copy.');
+    // Whatever was left out is said after "Nothing to copy.", not "no changes".
+    vscode.window.showWarningMessage(gitNothingToCopyNotice(copyNoticeDetails(gitNoticeCounts(result)), 'No Git changes found to copy.'));
     return;
   }
 

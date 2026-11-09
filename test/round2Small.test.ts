@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { copyNoticeDetails, nonTextDialog, nothingToCopyNotice } from '../src/nonTextDialog.js';
+import { copyNoticeDetails, gitNothingToCopyNotice, nonTextDialog, nothingToCopyNotice } from '../src/nonTextDialog.js';
 import { formatSize, skipReasonText } from '../src/restoreSummary.js';
 
 // Round-2 small decided items: X6 (collision reason), X9 (no "0+"), X21 (zero-count lines), X28 (one size format).
@@ -48,6 +48,16 @@ test('X9: a left-out number of 0 says "File limit N reached." and never "0+"', (
   assert.equal(
     nothingToCopyNotice({ ...base, files: [], fileLimitReached: true, fileCountLimit: 30 }),
     'Nothing to copy. File limit 30 reached.');
+});
+
+// Spec case 29 → case 30: a Git copy left with nothing to copy names what was skipped after
+// "Nothing to copy." (SCM and Graph said "No Git changes copied." / "No source copied.");
+// with nothing skipped either, each surface keeps its plain "no changes" message.
+test('case 30: Git surfaces with nothing left say "Nothing to copy." and the skipped categories', () => {
+  const details = copyNoticeDetails({ ...base, nonPortableCount: 1, nonPortablePaths: ['q"uote.txt'] });
+  assert.equal(gitNothingToCopyNotice(details, 'No Git changes found to copy.'), 'Nothing to copy. Name not portable: 1 (q"uote.txt).');
+  assert.equal(gitNothingToCopyNotice([], 'No Git changes found to copy.'), 'No Git changes found to copy.');
+  assert.equal(gitNothingToCopyNotice([], 'No source copied.'), 'No source copied.');
 });
 
 test('X21: dialog lines whose count is 0 are omitted', () => {
