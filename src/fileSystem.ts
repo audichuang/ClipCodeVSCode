@@ -165,8 +165,9 @@ export async function writeTextFile(filePath: string, content: string): Promise<
 
 /**
  * Writes [bytes] by REPLACING the directory entry, creating missing parent folders: a
- * temporary file in the same folder is written, given the old file's permission mode,
- * synced and renamed over [filePath]. A hard link or symlink at [filePath] is never
+ * temporary file in the same folder is written (owner-only meanwhile), given the old
+ * file's permission mode (or the umask default for a new file), synced and renamed over
+ * [filePath]. A hard link or symlink at [filePath] is never
  * written through — writing in place rewrote the file a hard link's OTHER name holds,
  * outside the workspace too. The temporary file is removed when anything fails.
  * Mirror of OpenIDEA fsutil.rs write_bytes_file.
@@ -176,7 +177,9 @@ export async function writeBytesFile(filePath: string, bytes: Uint8Array): Promi
   await mkdir(dir, { recursive: true });
   // Exclusive create under a fresh random name: never an existing entry or link.
   const temp = path.join(dir, `.snip-write.${randomBytes(8).toString('hex')}`);
-  const handle = await open(temp, 'wx', 0o666);
+  // Owner-only while the bytes land: created at 0o666 the temp held a 0600 file's content
+  // world-readable until the chmod below.
+  const handle = await open(temp, 'wx', 0o600);
   let renamed = false;
   try {
     try {
@@ -185,7 +188,8 @@ export async function writeBytesFile(filePath: string, bytes: Uint8Array): Promi
         if (error.code === 'ENOENT') return undefined;
         throw error;
       });
-      if (existing?.isFile()) await handle.chmod(existing.mode & 0o7777);
+      // An existing file keeps its mode; anything else gets what a plain create would.
+      await handle.chmod(existing?.isFile() ? existing.mode & 0o7777 : 0o666 & ~process.umask());
       await handle.sync();
     } finally {
       await handle.close();

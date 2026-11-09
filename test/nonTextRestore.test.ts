@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, stat, writeFile, type FileHandle } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -365,6 +365,47 @@ test('an overwrite keeps the target permission mode and leaves no temporary file
       assert.equal((await stat(target)).mode & 0o7777, 0o755, name);
     }
     assert.deepEqual((await readdir(root)).sort(), ['run.sh', 'tool.bin']);
+  });
+});
+
+test('the temporary file is never looser than 0600 while the content is written', { skip: process.platform === 'win32' }, async () => {
+  await withRoot(async root => {
+    // Spy on the content write: the temp's mode at that moment is what another user could
+    // open it with. Opening at 0o666 let a 0600 file's bytes sit world-readable there.
+    const probeHandle = await open(path.join(root, '.probe'), 'w');
+    const proto = Object.getPrototypeOf(probeHandle) as { writeFile: (this: FileHandle, ...args: unknown[]) => Promise<void> };
+    await probeHandle.close();
+    await rm(path.join(root, '.probe'));
+    const modesDuringWrite: number[] = [];
+    const original = proto.writeFile;
+    proto.writeFile = async function (this: FileHandle, ...args: unknown[]) {
+      modesDuringWrite.push((await this.stat()).mode & 0o7777);
+      await original.apply(this, args);
+      modesDuringWrite.push((await this.stat()).mode & 0o7777);
+    };
+    try {
+      const secret = path.join(root, 'secret.bin');
+      await writeFile(secret, 'old');
+      await chmod(secret, 0o600);
+      await writeBytesFile(secret, new Uint8Array([1, 2, 3]));
+      assert.equal((await stat(secret)).mode & 0o7777, 0o600);
+
+      const script = path.join(root, 'run.sh');
+      await writeFile(script, 'old');
+      await chmod(script, 0o755);
+      await writeTextFile(script, 'new');
+      assert.equal((await stat(script)).mode & 0o7777, 0o755);
+
+      // A new file still gets the ordinary mode a plain create would give it.
+      const fresh = path.join(root, 'fresh.txt');
+      await writeTextFile(fresh, 'new');
+      const umask = process.umask();
+      assert.equal((await stat(fresh)).mode & 0o7777, 0o666 & ~umask);
+    } finally {
+      proto.writeFile = original;
+    }
+    assert.equal(modesDuringWrite.length, 6);
+    for (const mode of modesDuringWrite) assert.equal(mode & 0o077, 0, `temp mode ${mode.toString(8)} during write`);
   });
 });
 
