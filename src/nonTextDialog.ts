@@ -29,7 +29,7 @@ export interface NonTextSummary {
   unreadOverLimitCount: number;
   /** Candidates the file-count limit cut off. */
   limitLeftOut: number;
-  /** More than limitLeftOut were cut off (the files copy stops counting at LEFT_OUT_CAP). */
+  /** More than limitLeftOut were cut off (the files copy stops counting once its past-limit budget is spent). */
   limitLeftOutCapped?: boolean;
   /** UTF-8 byte length of the payload. */
   estimatedBytes: number;

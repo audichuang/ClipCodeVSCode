@@ -9,6 +9,8 @@ import { copyNoticeDetails, nonTextDialog, shortenPath } from '../src/nonTextDia
 import { parseBody, placeholderLine, sha256Hex } from '../src/nonText.js';
 import { formatSize } from '../src/restoreSummary.js';
 import { defaultSettings, normalizeSettings, type ClipCodeSettings } from '../src/settings.js';
+// The module object itself (not an import-star copy) so a test can count the walker's calls.
+import fsp = require('node:fs/promises');
 
 // Files-mode copy of non-text files (spec non-text-files.md, cases 7, 11, 15, 16, 19).
 
@@ -17,6 +19,7 @@ const EXCLUDE = { includeNonText: false };
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 // Windows ignores POSIX modes, so chmod 000 does not make anything unreadable there.
 const noModeDenial = process.platform === 'win32' ? 'Windows ignores POSIX modes' : undefined;
+const noPosixNames = process.platform === 'win32' ? 'Windows cannot create `:` in a name' : undefined;
 
 /** A tiny "PNG": the signature has a NUL-free start, the IHDR length field carries NULs. */
 function png(seed: number, size = 64): Buffer {
@@ -224,6 +227,83 @@ test('file-count limit: the left-out count is capped, the walk stops there and s
       assert.equal(exact.limitLeftOutCapped, false);
     }
     assert.equal(LEFT_OUT_CAP, 1000);
+  });
+});
+
+/** Runs [run] counting the folder walk's lstat and readdir calls. */
+async function countingWalk<T>(run: () => Promise<T>): Promise<{ result: T; lstat: number; readdir: number }> {
+  const counts = { lstat: 0, readdir: 0 };
+  const mutable = fsp as unknown as Record<'lstat' | 'readdir', (...args: unknown[]) => unknown>;
+  const original = { lstat: mutable.lstat, readdir: mutable.readdir };
+  for (const name of ['lstat', 'readdir'] as const) {
+    mutable[name] = (...args: unknown[]) => { counts[name]++; return original[name](...args); };
+  }
+  try {
+    return { result: await run(), ...counts };
+  } finally {
+    Object.assign(mutable, original);
+  }
+}
+
+test('file-count limit: entries skipped past the limit spend the left-out budget, so the walk stops there too', async t => {
+  const N = 60;
+  // Four files fill limit 2 and leave two out; then N folders of one skipped kind each.
+  const kinds: { name: string; skip?: string; make: (dir: string, target: string) => Promise<void>; settings?: (names: string[]) => Partial<ClipCodeSettings> }[] = [
+    { name: 'non-portable file', skip: noPosixNames, make: dir => put(path.join(dir, 'stamp:log.txt'), 'x') },
+    { name: 'non-portable folder', skip: noPosixNames, make: dir => put(path.join(`${dir}:x`, 'ok.txt'), 'x') },
+    { name: 'symlinked folder', make: (dir, target) => symlink(target, dir, 'dir') },
+    { name: 'filter-excluded file', make: dir => put(path.join(dir, 'f.log'), 'x'),
+      settings: () => ({ useFilters: true, useExcludeFilters: true, filterRules: [{ type: 'PATTERN', action: 'EXCLUDE', value: '*.log', enabled: true }] }) },
+    { name: 'excluded folder', make: dir => put(path.join(dir, 'f.txt'), 'x'),
+      settings: names => ({ useFilters: true, useExcludeFilters: true, filterRules: names.map(value => ({ type: 'PATH', action: 'EXCLUDE', value, enabled: true })) }) },
+    { name: 'unreadable folder', skip: noModeDenial || (isRoot ? 'root lists mode 000 folders' : undefined),
+      make: async dir => { await put(path.join(dir, 'f.txt'), 'x'); await chmod(dir, 0o000); } }
+  ];
+  for (const kind of kinds) {
+    await t.test(kind.name, { skip: kind.skip }, async () => {
+      await withTempDir(async root => {
+        for (const n of ['a1.txt', 'a2.txt', 'a3.txt', 'a4.txt']) await put(path.join(root, n), 'x');
+        const target = path.join(root, 'zz-target');
+        await put(path.join(target, 't.txt'), 't');
+        const dirs = Array.from({ length: N }, (_, i) => path.join(root, `d${String(i).padStart(3, '0')}`));
+        for (const dir of dirs) await kind.make(dir, target);
+        try {
+          const settings = normalizeSettings({ ...defaultSettings, fileCountLimit: 2, ...kind.settings?.(dirs.map(dir => path.basename(dir))) });
+          const full = await collectCopyFiles(root, [root], settings, EXCLUDE);
+          const { result, lstat, readdir } = await countingWalk(() => collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 }));
+          // a3, a4 left out, the first skip spends the third unit, the second skip stops the walk.
+          assert.equal(result.limitLeftOut, 2);
+          assert.equal(result.limitLeftOutCapped, true);
+          assert.ok(copyNoticeDetails(result).includes('Left out by the file-count limit: 2+.'));
+          assert.equal(result.payload, full.payload, 'what was copied does not depend on the cap');
+          // Walking to the end costs over N of each; stopping costs a handful.
+          assert.ok(lstat <= 12, `lstat ${lstat}`);
+          assert.ok(readdir <= 4, `readdir ${readdir}`);
+        } finally {
+          if (kind.name === 'unreadable folder') for (const dir of dirs) await chmod(dir, 0o755);
+        }
+      });
+    });
+  }
+});
+
+test('file-count limit: a count the skipped entries did not cut short stays exact', async () => {
+  await withTempDir(async root => {
+    for (const n of ['a1.txt', 'a2.txt', 'a3.txt', 'a4.txt']) await put(path.join(root, n), 'x');
+    await mkdir(path.join(root, 'real'));
+    await symlink(path.join(root, 'real'), path.join(root, 'b-link1'), 'dir');
+    const settings = { ...defaultSettings, fileCountLimit: 2 };
+    // Two left out and one skip: the budget of 3 is spent exactly, the walk finished.
+    const exact = await collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 });
+    assert.equal(exact.limitLeftOut, 2);
+    assert.equal(exact.limitLeftOutCapped, false);
+    // One more skip than the budget holds: the count is unfinished.
+    await symlink(path.join(root, 'real'), path.join(root, 'b-link2'), 'dir');
+    const over = await collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 });
+    assert.equal(over.limitLeftOut, 2);
+    assert.equal(over.limitLeftOutCapped, true);
+    // Neither is reported: past the limit a skipped entry is silent.
+    assert.equal(over.symlinkedFolderCount, 0);
   });
 });
 
