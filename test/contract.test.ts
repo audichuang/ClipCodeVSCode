@@ -224,19 +224,16 @@ for (const c of fixtures.nonTextBuildCases) {
   });
 }
 
-// Needs planRestore to understand non-text entries (ticket T2); the todo is removed there.
-test('nonText restore: every payload plans the frozen cross-tool operations', { todo: 'T2' }, async t => {
+test('nonText restore: every payload plans the frozen cross-tool operations', async t => {
   const parent = await realpath(await mkdtemp(path.join(os.tmpdir(), 'clipcode-nontext-restore-')));
   try {
     for (const c of fixtures.nonTextRestoreCases) {
       await t.test(c.name, async () => {
         const root = await realpath(await mkdtemp(path.join(parent, 'root-')));
         const plan = await planRestore([root], parseClipboard(c.payload, c.headerFormat));
-        const nonText = (op: (typeof plan.createOperations)[number]) =>
-          (op as { nonText?: { bytes: Uint8Array } }).nonText;
         assert.deepEqual({
           creates: plan.createOperations.map(op => {
-            const bytes = nonText(op)?.bytes;
+            const bytes = op.nonText?.bytes;
             return bytes ? { path: op.relativePath, base64: Buffer.from(bytes).toString('base64') } : { path: op.relativePath, content: op.content };
           }),
           skips: plan.skippedOperations.map(op => ({ rawPath: op.rawPath, reason: op.reason }))
