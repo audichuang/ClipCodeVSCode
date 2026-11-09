@@ -8,7 +8,7 @@ import type { FilterRule } from './settings.js';
 import { readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
 import type { FileContent } from './fileSystem.js';
 import type { NonTextSummary } from './nonTextDialog.js';
-import { isExportableRelativePath, nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { defaultSettings } from './settings.js';
 
@@ -133,10 +133,7 @@ interface PreparedFile {
   /** Carried so dedupe is per repo — two repos legitimately hold the same relative path. */
   repoRootFsPath: string;
   changeType: ChangeTypeLabel;
-  /** nonPortable: a name the payload cannot carry — never read, skipped and named. */
-  kind: 'deleted' | 'missing' | 'content' | 'nonPortable';
-  /** nonPortable only: the real name the notice shows. */
-  nonPortableName?: string;
+  kind: 'deleted' | 'missing' | 'content';
   /** Deleted: the pre-deletion TEXT only (a [DELETED] body is never read on paste). */
   content?: FileContent;
 }
@@ -211,26 +208,6 @@ function workspaceRelativePath(
   return toClipboardPathFromRoots(workspaceRoots, workspaceSpelling(workspaceRoots, repoRootFsPath, relativePath));
 }
 
-/**
- * The real name of a file the payload cannot carry, else undefined (pathResolver
- * nonPortableName, the files copy's rule). The git path is judged on its own first: it is
- * `/`-separated with a `\` always part of a name, which the filesystem helpers on Windows
- * would read as a separator. With workspace roots the folders between root and repo count too.
- */
-function graphNonPortableName(
-  workspaceRoots: string[] | undefined,
-  repoRootFsPath: string,
-  relativePath: string,
-  multiRepo: boolean
-): string | undefined {
-  const fromRoots = workspaceRoots?.length
-    ? nonPortableName(workspaceRoots, workspaceSpelling(workspaceRoots, repoRootFsPath, relativePath))
-    : undefined;
-  if (fromRoots !== undefined) return fromRoots;
-  if (isExportableRelativePath(relativePath)) return undefined;
-  return !workspaceRoots?.length && multiRepo ? `${baseNameOf(repoRootFsPath)}/${relativePath}` : relativePath;
-}
-
 // No-workspace fallback only: the repo folder name shared by every file, or undefined if
 // they span repos. With workspace roots the root name comes from sourceRootName instead.
 function singleRepoRoot(files: GraphCopyFile[]): string | undefined {
@@ -260,9 +237,9 @@ async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Pr
     // an exact path match against vscode.git's discovery fails on SSH/symlink/
     // case differences (→ "No source copied" even though the files exist).
     if (changeType === 'DELETED') continue;
-    // Never read: skipped by name in the bookkeeping loop. This also keeps a path with a
-    // line break (a control character) out of the newline-delimited `cat-file --batch`.
-    if (graphNonPortableName(deps.workspaceRoots, file.repoRootFsPath, file.relativePath, false) !== undefined) continue;
+    // `cat-file --batch` is newline-delimited, so a path containing a line break
+    // would corrupt request/response alignment — route those to the per-file reader.
+    if (file.relativePath.includes('\n') || file.relativePath.includes('\r')) continue;
     (byRepo.get(file.repoRootFsPath) ?? byRepo.set(file.repoRootFsPath, []).get(file.repoRootFsPath)!).push(file.relativePath);
     requested++;
   }
@@ -291,13 +268,6 @@ async function prepareFile(
   // Same spelling as the SCM/History surfaces (workspace-root anchored); see clipboardPathFor.
   const clipboardPath = clipboardPathFor(deps.workspaceRoots, repoRootFsPath, file.relativePath, multiRepo);
   const filterPath = workspaceRelativePath(deps.workspaceRoots, repoRootFsPath, file.relativePath);
-  const unportable = graphNonPortableName(deps.workspaceRoots, repoRootFsPath, file.relativePath, multiRepo);
-  if (unportable !== undefined) {
-    return {
-      clipboardPath, filterPath, relativePath: file.relativePath, repoRootFsPath, changeType, kind: 'nonPortable',
-      nonPortableName: unportable
-    };
-  }
 
   if (changeType === 'DELETED') {
     // The PRE-DELETION content, not a bare marker: that is what IntelliJ puts on the
@@ -404,8 +374,6 @@ export async function buildGraphCopyPayload(
   let limitLeftOutCapped = false;
   const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
   const unreadablePaths: string[] = [];
-  let nonPortableCount = 0;
-  const nonPortablePaths: string[] = [];
 
   // Fetch every committed blob in one `git cat-file --batch` per repo, then apply
   // the limit/size/order bookkeeping sequentially over the in-order results so the
@@ -428,14 +396,6 @@ export async function buildGraphCopyPayload(
     const key = `${file.repoRootFsPath}\u0000${file.clipboardPath}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    // Before the limit check: such a file is not a candidate, so it never trips the limit.
-    if (file.kind === 'nonPortable') {
-      if (passesFilters(deps, file)) {
-        nonPortableCount++;
-        if (nonPortablePaths.length < UNREADABLE_PATHS_KEPT) nonPortablePaths.push(file.nonPortableName!);
-      }
-      continue;
-    }
     if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
       fileLimitReached = true;
       break;
@@ -508,7 +468,6 @@ export async function buildGraphCopyPayload(
       const key = `${file.repoRootFsPath}\u0000${clipboardPath}`;
       if (seen.has(key) && file !== payload.files[index]) continue;
       seen.add(key);
-      if (graphNonPortableName(deps.workspaceRoots, file.repoRootFsPath, file.relativePath, multiRepo) !== undefined) continue;
       const filterPath = workspaceRelativePath(deps.workspaceRoots, file.repoRootFsPath, file.relativePath);
       if (passesFilters(deps, { filterPath, repoRootFsPath: file.repoRootFsPath, relativePath: file.relativePath })) {
         // Stop at the first one past the cap: the number only has to say "a lot".
@@ -535,8 +494,6 @@ export async function buildGraphCopyPayload(
     fileLimitReached, missingRepoCount, limitLeftOut, limitLeftOutCapped, unreadablePaths, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
     // A blob is always read whole (cat-file), so nothing here is "over both limits, unread".
     unreadOverLimitCount: 0,
-    nonPortableCount,
-    nonPortablePaths,
     estimatedBytes: Buffer.byteLength(text, 'utf8')
   };
 }

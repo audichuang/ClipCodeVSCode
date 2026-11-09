@@ -346,10 +346,12 @@ test('staged and deleted reads go through the raw reader first (no textconv outp
   assert.deepEqual(asked.sort(), ['/repo :logo.png', '/repo HEAD:gone.ts']);
 });
 
-test('SCM copy: non-portable names are never read, named, and do not use the file-count limit', {
+test('SCM copy does not apply the files copy\'s "Name not portable" rule: every change is read and carried', {
   skip: process.platform === 'win32' ? 'Windows cannot create these names' : undefined
 }, async () => {
-  const names = ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts', 'ok 檔 😀.ts', 'later.ts'];
+  // Spec non-text-files.md "What is carried": OpenIDEA's Git-change copy does not report
+  // this category, so these paths keep their behaviour from before the files-copy rule.
+  const names = ['q"x.ts', 'c:d.ts', 't\tab.ts', 'ok 檔 😀.ts'];
   const repository = {
     rootUri: new Uri('/repo'),
     state: { workingTreeChanges: names.map(name => ({ uri: new Uri(`/repo/${name}`), status: 'MODIFIED' })) },
@@ -357,13 +359,12 @@ test('SCM copy: non-portable names are never read, named, and do not use the fil
   workspaceReads.length = 0;
   const { collectGitPayloadFiles } = await extensionModule;
   const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [],
-    { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 }, { includeNonText: true });
+    { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 3 }, { includeNonText: true });
 
-  assert.deepEqual(result.files, [{ path: 'ok 檔 😀.ts', content: 'working:/repo/ok 檔 😀.ts', changeType: 'MODIFIED' }]);
-  assert.ok(!workspaceReads.some(p => /[\\":\t]/.test(p)), workspaceReads.join('\n'));
-  assert.equal(result.limitLeftOut, 1, 'only later.ts is left out by the limit');
-  assert.equal(result.nonPortableCount, 4);
-  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts']);
+  // The clipboard path falls back to the absolute path, as before (toClipboardPathFromRoots).
+  assert.deepEqual(result.files.map(f => f.path), ['/repo/q"x.ts', '/repo/c:d.ts', '/repo/t\tab.ts']);
+  assert.equal(result.limitLeftOut, 1);
+  assert.ok(!('nonPortableCount' in result));
 });
 
 function textChanges(n: number) {

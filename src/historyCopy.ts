@@ -3,8 +3,8 @@ import type { FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FileNode } from './historyTree.js';
 import { copyNoticeDetails, type NonTextSummary } from './nonTextDialog.js';
-import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
-import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { LEFT_OUT_CAP } from './copy.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 // The History view's "Copy Full Source" collection, kept free of `vscode` so it is unit
@@ -37,34 +37,22 @@ export async function collectHistoryCopy(
   let copied = 0, skippedSize = 0, limitReached = false, limitLeftOut = 0, limitLeftOutCapped = false;
   const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
   const unresolved: string[] = [];
-  let nonPortableCount = 0;
-  const nonPortablePaths: string[] = [];
 
   const pathsOf = (f: FileNode) => {
     const absPath = (f.change.renameUri ?? f.change.uri).fsPath;
-    const roots = workspaceRoots.length ? workspaceRoots : [f.repoRoot];
-    const clipboardPath = toClipboardPathFromRoots(roots, absPath);
+    const clipboardPath = toClipboardPathFromRoots(workspaceRoots.length ? workspaceRoots : [f.repoRoot], absPath);
     const kept = !settings.useFilters ||
       fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath);
-    // A name the payload cannot carry: skipped and named, never read (files copy's rule).
-    return { absPath, clipboardPath, kept, unportable: kept ? nonPortableName(roots, absPath) : undefined };
+    return { absPath, clipboardPath, kept };
   };
 
   for (const [fileIndex, f] of files.entries()) {
-    // Before the limit check: such a file is not a candidate, so it never trips the limit.
-    const unportable = pathsOf(f).unportable;
-    if (unportable !== undefined) {
-      nonPortableCount++;
-      if (nonPortablePaths.length < UNREADABLE_PATHS_KEPT) nonPortablePaths.push(unportable);
-      continue;
-    }
     if (settings.setMaxFileCount && copied >= settings.fileCountLimit) {
       limitReached = true;
       // What the limit left out (filters applied, nothing read), for the dialog and notice.
       // Counted up to the cap, then it stops: the number only has to say "a lot".
       for (let i = fileIndex; i < files.length; i++) {
-        const p = pathsOf(files[i]);
-        if (!p.kept || p.unportable !== undefined) continue;
+        if (!pathsOf(files[i]).kept) continue;
         if (limitLeftOut >= leftOutCap) { limitLeftOutCapped = true; break; }
         limitLeftOut++;
       }
@@ -113,7 +101,7 @@ export async function collectHistoryCopy(
   return {
     files: payloadFiles, payload, copiedFileCount: copied, skippedFileSizeCount: skippedSize, fileLimitReached: limitReached,
     unresolved, excludedNonTextCount, limitLeftOut, limitLeftOutCapped, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
-    unreadOverLimitCount: 0, nonPortableCount, nonPortablePaths, estimatedBytes: Buffer.byteLength(payload, 'utf8')
+    unreadOverLimitCount: 0, estimatedBytes: Buffer.byteLength(payload, 'utf8')
   };
 }
 
@@ -133,7 +121,7 @@ export function historyCopyNotice(
   const l = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
   // Unreadable files have their own warning above, so they are not repeated here.
   const details = copyNoticeDetails({ ...result, skippedUnreadableCount: 0, unreadablePaths: [] });
-  // Nothing to copy: what was skipped by name (or left out) is said, not "no changes".
+  // Nothing to copy: whatever was left out is said, not "no changes".
   const emptyWarning = details.length > 0 ? `No Git changes copied. ${details.join(' ')}` : 'No Git changes found to copy.';
   return { unresolvedWarning, message: [`${result.copiedFileCount} Git file(s) copied${s}.${l}`, ...details].join(' '), emptyWarning };
 }

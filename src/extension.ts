@@ -16,7 +16,7 @@ import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
-import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
 import { confirmationText, existingTargets, resultNotice, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -292,8 +292,6 @@ export function gitNoticeCounts(result: {
   limitLeftOut: number;
   limitLeftOutCapped?: boolean;
   unreadablePaths?: string[];
-  nonPortableCount?: number;
-  nonPortablePaths?: string[];
 }) {
   return {
     nonTextFiles: result.nonTextFiles,
@@ -301,9 +299,7 @@ export function gitNoticeCounts(result: {
     limitLeftOut: result.limitLeftOut,
     limitLeftOutCapped: result.limitLeftOutCapped,
     skippedUnreadableCount: result.skippedUnreadableCount - result.excludedNonTextCount,
-    unreadablePaths: result.unreadablePaths ?? [],
-    nonPortableCount: result.nonPortableCount,
-    nonPortablePaths: result.nonPortablePaths
+    unreadablePaths: result.unreadablePaths ?? []
   };
 }
 
@@ -376,7 +372,7 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   if (!result) return;
 
   if (result.files.length === 0) {
-    // Everything skipped by name is an omission to name, not "no changes".
+    // Whatever was left out is said, not "no changes".
     const details = copyNoticeDetails(gitNoticeCounts(result));
     vscode.window.showWarningMessage(details.length > 0
       ? `No Git changes copied. ${details.join(' ')}`
@@ -632,8 +628,6 @@ export async function collectGitPayloadFiles(
   let nonTextTotalBytes = 0;
   let nonTextOverLimitCount = 0;
   let unreadOverLimitCount = 0;
-  let nonPortableCount = 0;
-  const nonPortablePaths: string[] = [];
 
   // Phase 1 — selection / dedup / filter (no I/O, so order + dedup stay
   // deterministic). Produces the ordered candidate list.
@@ -658,14 +652,6 @@ export async function collectGitPayloadFiles(
           absolutePath
         )
       ) {
-        continue;
-      }
-      // A name the payload cannot carry is skipped and named, never read, and never
-      // consumes the file-count limit — the files copy's rule (copy.ts).
-      const unportable = nonPortableName(workspaceRoots, absolutePath);
-      if (unportable !== undefined) {
-        nonPortableCount++;
-        if (nonPortablePaths.length < UNREADABLE_PATHS_KEPT) nonPortablePaths.push(unportable);
         continue;
       }
 
@@ -797,9 +783,7 @@ export async function collectGitPayloadFiles(
     nonTextFiles,
     nonTextTotalBytes,
     nonTextOverLimitCount,
-    unreadOverLimitCount,
-    nonPortableCount,
-    nonPortablePaths
+    unreadOverLimitCount
   };
 }
 
