@@ -76,8 +76,10 @@ TS-side pins for the shared invariants:
   `onSymlinkedFolder`, and the copy counts and names it as "Symlinked folder: n (a, b, c)" in
   the non-text dialog and the completion notice (spec `non-text-files.md` "What is carried" +
   user decision D2, 2026-11-09; this replaces the old "walk it when selected" rule). A link the
-  exclude rules prune stays silent like a pruned folder. A symlink to a FILE is still followed
-  and carries its target's bytes under the link's path. Following directory links is a trap —
+  exclude rules prune stays silent like a pruned folder. A symlink to a FILE is followed and
+  carries its target's bytes under the link's path only when its realpath lies inside a copy
+  root; one pointing out of every root is never read and is named Unreadable (`collectCopyFiles`,
+  user decision X7, 2026-11-09). Following directory links is a trap —
   a cross-linked tree (pnpm's `.pnpm`, Bazel) has a path count that grows like a sum of falling
   factorials, and with the default 30-file limit the copy becomes 30 aliases of the same few
   files while the real tree is dropped.

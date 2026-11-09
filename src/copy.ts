@@ -1,9 +1,10 @@
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPayload, type PayloadFile } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
 import { directoryExcluded, fileMatchesFilters } from './filterMatcher.js';
 import { fileSize, listFilesRecursive, readClassifiedFile } from './fileSystem.js';
-import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { escapesAllRoots, nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 /**
@@ -309,7 +310,16 @@ export async function collectCopyFiles(
       // (which listFilesRecursive does yield) rejected out of collectCopyFiles and the
       // whole copy produced nothing at all. IntelliJ skips the file and copies the rest.
       try {
-        const size = await fileSize(candidate.absolutePath);
+        // X7 (spec "What is carried"): a symlink to a file is followed only when its real
+        // target lies inside a copy root. One pointing out of every root (`CLAUDE.md ->
+        // ~/.agents/...`, a credentials file) is never read and is named Unreadable, like a
+        // dangling link: the clipboard often goes to an LLM. lstat doubles as the size of
+        // a regular file, so this costs no extra call there.
+        const info = await lstat(candidate.absolutePath);
+        if (info.isSymbolicLink() && escapesAllRoots(roots, candidate.absolutePath)) {
+          return { candidate, size: 0, content: undefined, failed: true };
+        }
+        const size = info.isSymbolicLink() ? await fileSize(candidate.absolutePath) : info.size;
         return { candidate, size, content: size > readLimit ? undefined : await readClassifiedFile(candidate.absolutePath) };
       } catch {
         return { candidate, size: 0, content: undefined, failed: true };
