@@ -530,6 +530,34 @@ test('X7: a symlink to a file outside every copy root is not read and is named U
   });
 });
 
+test('X7: a regular file reached through a directory link out of every root is not read', async () => {
+  await withTempDir(async root => {
+    await withTempDir(async outside => {
+      // `secrets -> ~/.ssh`: the Explorer shows the link as a folder and lets the user pick
+      // the file inside it. The leaf is a regular file; only an ancestor is a link.
+      await put(path.join(outside, 's.txt'), 'token=hunter2');
+      await put(path.join(outside, 'plain.txt'), 'outside on purpose');
+      await put(path.join(root, 'keep.ts'), 'keep');
+      await symlink(outside, path.join(root, 'linkdir'), 'dir');
+      const viaLink = path.join(root, 'linkdir', 's.txt');
+
+      const { result, reads } = await recordingReads(() =>
+        collectCopyFiles(root, [viaLink, path.join(root, 'keep.ts')], defaultSettings, INCLUDE));
+      assert.deepEqual(result.files.map(f => f.path), ['keep.ts']);
+      assert.ok(!result.payload.includes('hunter2'));
+      assert.equal(result.skippedUnreadableCount, 1);
+      assert.deepEqual(result.unreadablePaths, ['linkdir/s.txt']);
+      assert.ok(!reads.some(p => p.endsWith('s.txt')), `never read (read: ${reads.join(', ')})`);
+
+      // A file lexically outside every root (Copy Open Editors of /etc/hosts) is not judged
+      // by containment: it is carried, as before.
+      const outsideFile = await collectCopyFiles(root, [path.join(outside, 'plain.txt')], defaultSettings, INCLUDE);
+      assert.deepEqual(outsideFile.files.map(f => f.content), ['outside on purpose']);
+      assert.equal(outsideFile.skippedUnreadableCount, 0);
+    });
+  });
+});
+
 test('X7: a link in one copy root to a file in another root is followed', async () => {
   await withTempDir(async base => {
     const a = path.join(base, 'a');

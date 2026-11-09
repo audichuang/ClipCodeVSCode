@@ -617,3 +617,36 @@ test('a multi-commit union reads each deleted file from its own deleting commit\
   });
   assert.match(r.text, /\/\/ file: \[DELETED\] gone\.ts\npre-deletion body/);
 });
+
+test('X7 on Graph uncommitted: a working-tree link out of every root is not read and is named Unreadable', {
+  skip: process.platform === 'win32' ? 'file symlinks need privileges on Windows' : undefined
+}, async () => {
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'clipcode-graph-x7-')));
+  try {
+    const root = path.join(base, 'repo');
+    mkdirSync(root);
+    writeFileSync(path.join(base, 'secret.txt'), 'token=hunter2');
+    writeFileSync(path.join(root, 'keep.ts'), 'keep');
+    symlinkSync(path.join(base, 'secret.txt'), path.join(root, 'CLAUDE.md'), 'file');
+    const reads: string[] = [];
+    const files = ['CLAUDE.md', 'keep.ts'].map(relativePath => ({ repoRootFsPath: root, relativePath, status: 'M' }));
+    // With a workspace open on the repo, and with none (the repo root is the copy root).
+    for (const workspaceRoots of [[root], undefined]) {
+      reads.length = 0;
+      const r = await buildGraphCopyPayload({
+        resolveRepo: () => undefined,
+        readWorking: async (abs: string) => { reads.push(abs); return { text: abs.endsWith('keep.ts') ? 'keep' : 'LEAKED' }; },
+        workspaceRoots,
+        settings
+      }, { hash: UNCOMMITTED_HASH, files });
+      assert.ok(!reads.some(p => p.endsWith('CLAUDE.md')), `the link is never read (read: ${reads.join(', ')})`);
+      assert.doesNotMatch(r.text, /LEAKED/);
+      assert.equal(r.copiedFileCount, 1);
+      assert.equal(r.skippedUnreadableCount, 1);
+      assert.deepEqual(r.unreadablePaths, ['CLAUDE.md']);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});

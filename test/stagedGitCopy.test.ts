@@ -465,3 +465,39 @@ test('SCM: the notice names the first unreadable paths, not a non-text file Excl
   assert.deepEqual(result.unreadablePaths, ['broken.ts']);
   assert.deepEqual(copyNoticeDetails(gitNoticeCounts(result)), ['Unreadable: 1 (broken.ts).']);
 });
+
+test('X7 on SCM: a working-tree link out of every root is not read and is named Unreadable', {
+  skip: process.platform === 'win32' ? 'file symlinks need privileges on Windows' : undefined
+}, async () => {
+  const { mkdtemp, rm, symlink, writeFile } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const base = await mkdtemp(path.join(os.tmpdir(), 'clipcode-scm-x7-'));
+  try {
+    const root = path.join(base, 'repo');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(root);
+    await writeFile(path.join(base, 'secret.txt'), 'token=hunter2');
+    await writeFile(path.join(root, 'keep.ts'), 'keep');
+    // repo/CLAUDE.md -> ../secret.txt
+    await symlink(path.join(base, 'secret.txt'), path.join(root, 'CLAUDE.md'), 'file');
+    const link = path.join(root, 'CLAUDE.md');
+    const keep = path.join(root, 'keep.ts');
+    const repository = {
+      rootUri: new Uri(root),
+      state: { workingTreeChanges: [
+        { uri: new Uri(link), status: 'MODIFIED' },
+        { uri: new Uri(keep), status: 'MODIFIED' }
+      ] }
+    };
+    const { collectGitPayloadFiles } = await extensionModule;
+    workspaceReads.length = 0;
+    const result = await collectGitPayloadFiles([repository] as never, [root], [], defaultSettings);
+    assert.ok(!workspaceReads.includes(link), `the link is never read (read: ${workspaceReads.join(', ')})`);
+    assert.deepEqual(result.files.map(f => f.path), ['keep.ts']);
+    assert.equal(result.copiedFileCount, 1);
+    assert.equal(result.skippedUnreadableCount, 1);
+    assert.deepEqual(result.unreadablePaths, ['CLAUDE.md']);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});

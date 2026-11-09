@@ -8,7 +8,7 @@ import type { FilterRule } from './settings.js';
 import { readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
 import type { FileContent } from './fileSystem.js';
 import type { NonTextSummary } from './nonTextDialog.js';
-import { nonPortableGitName, nonPortableHeader, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableGitName, nonPortableHeader, sourceRootName, toClipboardPathFromRoots, workingTreeReadEscapes } from './pathResolver.js';
 import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { defaultSettings } from './settings.js';
 
@@ -342,7 +342,13 @@ async function prepareFile(
   const key = batchKey(file.repoRootFsPath, file.relativePath);
   let content: FileContent | undefined;
   if (payload.hash === UNCOMMITTED_HASH && deps.readWorking) {
-    content = await deps.readWorking(absolutePath);            // working-tree (uncommitted) view — reads disk
+    // X7: a working-tree link out of every copy root is never read (content stays
+    // undefined → named Unreadable). The repo root counts as a copy root, so a repo with no
+    // workspace (or outside it) still follows links that stay inside the repo.
+    const copyRoots = [...(deps.workspaceRoots ?? []), repoRootFsPath];
+    content = workingTreeReadEscapes(copyRoots, absolutePath)
+      ? undefined
+      : await deps.readWorking(absolutePath);                  // working-tree (uncommitted) view — reads disk
   } else if (batch.has(key)) {
     content = batch.get(key);                                  // resolved by the single cat-file batch (git -C root)
   } else {
