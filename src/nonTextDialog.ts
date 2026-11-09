@@ -192,6 +192,21 @@ export function gitNothingToCopyNotice(details: readonly string[], noChanges: st
   return details.length > 0 ? ['Nothing to copy.', ...details].join(' ') : noChanges;
 }
 
+/**
+ * The one "carries no file" rule of every Git surface (SCM, Graph, History): no copied file
+ * and no size placeholder. "Unable to read" markers do not count — a payload of nothing but
+ * markers overwrote the clipboard with "0 Git file(s) copied". Returns the warning to show
+ * instead of writing the clipboard, or undefined when there is something to write.
+ */
+export function gitCopyNothingToCopy(
+  result: { copiedFileCount: number; skippedFileSizeCount: number },
+  details: readonly string[],
+  noChanges: string
+): string | undefined {
+  if (result.copiedFileCount > 0 || result.skippedFileSizeCount > 0) return undefined;
+  return gitNothingToCopyNotice(details, noChanges);
+}
+
 /** `Label: n (a, b, c and N more)` — the first NOTICE_PATHS paths, or just `Label: n` with none. */
 function namedCount(label: string, count: number, paths: string[]): string {
   const named = paths.slice(0, NOTICE_PATHS);

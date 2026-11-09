@@ -501,3 +501,28 @@ test('X7 on SCM: a working-tree link out of every root is not read and is named 
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('X3 on SCM: Exclude on staged-only images or unreadable staged blobs carries no file — nothing to copy, named', async () => {
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: { indexChanges: [
+      { uri: new Uri('/repo/a.png'), status: 'INDEX_MODIFIED' },
+      { uri: new Uri('/repo/b.png'), status: 'INDEX_ADDED' },
+      { uri: new Uri('/repo/broken.ts'), status: 'INDEX_MODIFIED' }
+    ] },
+    buffer: async (_ref: string, file: string) => {
+      if (file.endsWith('broken.ts')) throw new Error('index read failed');
+      return PNG;
+    }
+  };
+  const selected = ['a.png', 'b.png', 'broken.ts'].map(file => ({ uriKey: `/repo/${file}`, staged: true }));
+  const { collectGitPayloadFiles, gitNoticeCounts } = await extensionModule;
+  const { copyNoticeDetails, gitCopyNothingToCopy } = await import('../src/nonTextDialog.js');
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected,
+    { ...defaultSettings, setMaxFileCount: false }, { includeNonText: false });
+  // The payload holds only "Unable to read" markers (the old `files.length === 0` gate wrote it).
+  assert.ok(result.files.length > 0 && result.files.every(f => f.content === '// Unable to read file content'));
+  assert.equal(
+    gitCopyNothingToCopy(result, copyNoticeDetails(gitNoticeCounts(result)), 'No Git changes found to copy.'),
+    'Nothing to copy. Non-text files left out: 2. Unreadable: 1 (broken.ts).');
+});
