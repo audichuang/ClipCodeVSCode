@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
-import { collectCopyFiles } from './copy.js';
+import { collectCopyFiles, type CopyResult } from './copy.js';
+import { copyNoticeDetails, nonTextDialog } from './nonTextDialog.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
@@ -246,18 +247,34 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   }
 
   const settings = readSettings();
-  const result = await collectCopyFiles(roots, selectedUris.map(item => item.fsPath), settings);
+  const result = await collectFilesAskingAboutNonText(roots, selectedUris.map(item => item.fsPath), settings);
+  if (!result) return;
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    // Files dropped as binary/non-UTF-8/unreadable were counted and then thrown away, so
-    // they still went missing in silence — which is the whole complaint this counter exists
-    // to answer.
-    const unreadable = result.skippedUnreadableCount > 0
-      ? ` ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.` : '';
-    notifyCopied(`${result.copiedFileCount} file(s) copied${suffix}.${limit}${unreadable}`, result.payload);
+    // Files left out (unreadable, non-text under Exclude, cut by the limit) are named in
+    // the notice: going missing in silence is the complaint these counters answer.
+    notifyCopied([`${result.copiedFileCount} file(s) copied${suffix}.`, ...copyNoticeDetails(result)].join(' '), result.payload);
   }
+}
+
+/**
+ * Runs the Include copy and, when it carries at least one non-text file, asks whether to
+ * keep them (Include), leave them out (Exclude: the payload as before non-text support)
+ * or copy nothing (Cancel / Esc → undefined). A copy without non-text files never asks.
+ */
+async function collectFilesAskingAboutNonText(
+  roots: string[],
+  inputPaths: string[],
+  settings: ClipCodeSettings
+): Promise<CopyResult | undefined> {
+  const include = await collectCopyFiles(roots, inputPaths, settings, { includeNonText: true });
+  if (include.nonTextFiles.length === 0) return include;
+  const dialog = nonTextDialog(include, settings);
+  const choice = await vscode.window.showWarningMessage(dialog.message, { modal: true, detail: dialog.detail }, ...dialog.buttons);
+  if (choice === 'Include' && dialog.buttons.includes('Include')) return include;
+  if (choice === 'Exclude') return collectCopyFiles(roots, inputPaths, settings, { includeNonText: false });
+  return undefined;
 }
 
 async function copyAllOpenEditors(): Promise<void> {
@@ -281,12 +298,13 @@ async function copyAllOpenEditors(): Promise<void> {
     }
   }
 
-  const result = await collectCopyFiles(roots, [...paths], settings);
+  const result = await collectFilesAskingAboutNonText(roots, [...paths], settings);
+  if (!result) return;
   if (result.files.length === 0) {
-    // Tabs whose files were deleted or are not UTF-8 text are not "no open editors".
-    if (result.skippedUnreadableCount > 0) {
-      vscode.window.showWarningMessage(
-        `No open editor file copied: ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.`);
+    // Tabs whose files were deleted, or non-text files left out, are not "no open editors".
+    const details = copyNoticeDetails(result);
+    if (details.length > 0) {
+      vscode.window.showWarningMessage(`No open editor file copied. ${details.join(' ')}`);
     } else {
       vscode.window.showInformationMessage('No open text editors found to copy.');
     }
@@ -296,12 +314,11 @@ async function copyAllOpenEditors(): Promise<void> {
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) {
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    // fileLimitReached was computed and thrown away here: files went missing with nothing
-    // said. IntelliJ raises a dedicated "File Limit Reached" notification.
-    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const dropped = result.skippedUnreadableCount;
-    const unreadableSuffix = dropped > 0 ? ` ${dropped} skipped: not UTF-8 text or unreadable.` : '';
-    notifyCopied(`${result.copiedFileCount} open editor file(s) copied${suffix}.${limit}${unreadableSuffix}`, result.payload);
+    // The limit's left-out count is part of the details: files must not go missing with
+    // nothing said (IntelliJ raises a dedicated "File Limit Reached" notification).
+    notifyCopied(
+      [`${result.copiedFileCount} open editor file(s) copied${suffix}.`, ...copyNoticeDetails(result)].join(' '),
+      result.payload);
   }
 }
 
@@ -494,6 +511,7 @@ function readSettings(): ClipCodeSettings {
     setMaxFileCount: config.get<boolean>('setMaxFileCount'),
     fileCountLimit: config.get<number>('fileCountLimit'),
     maxFileSizeKB: config.get<number>('maxFileSizeKB'),
+    maxNonTextFileSizeKB: config.get<number>('maxNonTextFileSizeKB'),
     showCopyNotification: config.get<boolean>('showCopyNotification'),
     useFilters: config.get<boolean>('useFilters'),
     useIncludeFilters: config.get<boolean>('useIncludeFilters'),

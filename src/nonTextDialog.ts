@@ -1,0 +1,124 @@
+import { headerFormatUnescapable } from './clipboardFormat.js';
+import type { CopyResult } from './copy.js';
+import { formatSize } from './restoreSummary.js';
+import type { ClipCodeSettings } from './settings.js';
+
+// User text for a files copy that found non-text files (spec non-text-files.md, "Asking the
+// user"). Pure, so the numbers can be checked against the Include result in unit tests.
+// Every number here is read off the Include CopyResult itself, never a parallel estimate.
+
+export type NonTextChoice = 'Include' | 'Exclude';
+
+/** Paths listed in the dialog before "and N more". */
+const DIALOG_PATHS = 10;
+/** Unreadable paths named in the completion notice. */
+const NOTICE_PATHS = 3;
+/** Display width a dialog path is shortened to. */
+const PATH_WIDTH = 70;
+const ELLIPSIS = '…';
+
+export interface NonTextDialog {
+  message: string;
+  detail: string;
+  /** 'Include' first when offered; Cancel is the dialog's own close button (undefined). */
+  buttons: NonTextChoice[];
+}
+
+export function nonTextDialog(include: CopyResult, settings: ClipCodeSettings): NonTextDialog {
+  const includeAllowed = !headerFormatUnescapable(settings.headerFormat);
+  const lines = [
+    `Non-text files: ${include.nonTextFiles.length} (${formatSize(include.nonTextTotalBytes)})`,
+    `Estimated payload with them: ${formatSize(include.estimatedBytes)}`
+  ];
+  for (const file of include.nonTextFiles.slice(0, DIALOG_PATHS)) {
+    lines.push(`${shortenPath(file.path, PATH_WIDTH)}  ${formatSize(file.size)}`);
+  }
+  if (include.nonTextFiles.length > DIALOG_PATHS) {
+    lines.push(`and ${include.nonTextFiles.length - DIALOG_PATHS} more`);
+  }
+  if (include.nonTextOverLimitCount > 0) {
+    lines.push(`Over the non-text limit (not copied): ${include.nonTextOverLimitCount}`);
+  }
+  if (include.unreadOverLimitCount > 0) {
+    lines.push(`Over both size limits (not read, copied as size placeholders): ${include.unreadOverLimitCount}`);
+  }
+  if (include.limitLeftOut > 0) {
+    lines.push(`Left out by the file-count limit: ${include.limitLeftOut}`);
+  }
+  if (!includeAllowed) {
+    lines.push(
+      `Include is unavailable: the header format "${settings.headerFormat}" cannot be escaped, ` +
+      'so Base64 lines would read as file headers.'
+    );
+  }
+  return {
+    message: includeAllowed
+      ? 'The selection has non-text files. Include them as Base64?'
+      : 'The selection has non-text files. They can only be left out.',
+    detail: lines.join('\n'),
+    buttons: includeAllowed ? ['Include', 'Exclude'] : ['Exclude']
+  };
+}
+
+/**
+ * The parts of the completion notice that are about what did NOT go in as text, each a
+ * sentence. Never says "binary" or "non-UTF-8" (spec: "non-text file").
+ */
+export function copyNoticeDetails(result: CopyResult): string[] {
+  const parts: string[] = [];
+  if (result.nonTextFiles.length > 0) parts.push(`Non-text files copied as Base64: ${result.nonTextFiles.length}.`);
+  if (result.excludedNonTextCount > 0) parts.push(`Non-text files left out: ${result.excludedNonTextCount}.`);
+  if (result.limitLeftOut > 0) parts.push(`Left out by the file-count limit: ${result.limitLeftOut}.`);
+  if (result.skippedUnreadableCount > 0) {
+    const named = result.unreadablePaths.slice(0, NOTICE_PATHS);
+    const more = result.skippedUnreadableCount - named.length;
+    const list = named.join(', ') + (more > 0 ? ` and ${more} more` : '');
+    parts.push(`Unreadable: ${result.skippedUnreadableCount} (${list}).`);
+  }
+  return parts;
+}
+
+function graphemes(text: string): string[] {
+  return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text), s => s.segment);
+}
+
+/**
+ * Shortens a `/`-separated path to at most [width] characters (grapheme clusters) so
+ * the file name stays visible: the folder part shrinks first, down to its first segment
+ * and an ellipsis; only then is the file name shortened in the middle, keeping its
+ * extension. Cuts fall between whole characters and the ellipsis sits directly against
+ * the text after it.
+ */
+export function shortenPath(filePath: string, width = PATH_WIDTH): string {
+  const all = graphemes(filePath);
+  if (all.length <= width) return filePath;
+  const slash = filePath.lastIndexOf('/');
+  const name = graphemes(slash === -1 ? filePath : filePath.slice(slash + 1));
+  const folder = slash === -1 ? [] : graphemes(filePath.slice(0, slash));
+
+  if (folder.length > 0) {
+    // Room for the folder part, the '/' and the whole name.
+    const folderRoom = width - name.length - 1;
+    const firstSegment = graphemes(filePath.slice(0, filePath.indexOf('/')));
+    if (folderRoom >= Math.min(firstSegment.length, folder.length) + 1) {
+      return folder.slice(0, folderRoom - 1).join('') + ELLIPSIS + '/' + name.join('');
+    }
+    // The name needs more room: the folder part is its first segment (itself cut short
+    // when it is long) and an ellipsis.
+    const kept = firstSegment.slice(0, Math.max(1, Math.min(firstSegment.length, Math.floor(width / 4))));
+    const prefix = kept.join('') + ELLIPSIS + '/';
+    return prefix + shortenName(name, width - kept.length - 2);
+  }
+  return shortenName(name, width);
+}
+
+/** A file name cut in the middle to [width] characters, its extension kept. */
+function shortenName(name: string[], width: number): string {
+  if (name.length <= width) return name.join('');
+  const dot = name.lastIndexOf('.');
+  const extension = dot > 0 ? name.length - dot : 0;
+  const room = Math.max(2, width - 1);
+  const tail = Math.min(name.length - 1, Math.max(extension, Math.floor(room / 2)));
+  const head = Math.max(1, room - tail);
+  return name.slice(0, head).join('') + ELLIPSIS + name.slice(name.length - tail).join('');
+}
