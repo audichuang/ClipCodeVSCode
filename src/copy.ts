@@ -96,6 +96,8 @@ export interface CopyResult {
   fileLimitReached: boolean;
   /** Candidates (after dedup and filters) the file-count limit cut off; none of them was read. */
   limitLeftOut: number;
+  /** More than limitLeftOut were left out: the walk stopped counting at LEFT_OUT_CAP. */
+  limitLeftOutCapped: boolean;
   /** Include only: the non-text entries carried as Base64, in payload order. */
   nonTextFiles: { path: string; size: number }[];
   nonTextTotalBytes: number;
@@ -114,7 +116,17 @@ export interface CopyOptions {
    * over the text limit becomes a size placeholder without being read.
    */
   includeNonText: boolean;
+  /** Tests only: a smaller LEFT_OUT_CAP. */
+  leftOutCap?: number;
 }
+
+/**
+ * How many candidates past the file-count limit the walk counts before it stops. Counting
+ * every one walked the whole tree after the limit tripped — copying a repository root went
+ * from 48 ms to 6.2 s, paid twice on Exclude — for a number that only has to say "a lot".
+ * Past the cap the notice and dialog say `1000+`.
+ */
+export const LEFT_OUT_CAP = 1000;
 
 interface CopyState {
   copiedFileCount: number;
@@ -124,6 +136,7 @@ interface CopyState {
   excludedNonTextCount: number;
   fileLimitReached: boolean;
   limitLeftOut: number;
+  limitLeftOutCapped: boolean;
   nonTextFiles: { path: string; size: number }[];
   nonTextTotalBytes: number;
   nonTextOverLimitCount: number;
@@ -149,6 +162,7 @@ export async function collectCopyFiles(
     excludedNonTextCount: 0,
     fileLimitReached: false,
     limitLeftOut: 0,
+    limitLeftOutCapped: false,
     nonTextFiles: [],
     nonTextTotalBytes: 0,
     nonTextOverLimitCount: 0,
@@ -162,6 +176,12 @@ export async function collectCopyFiles(
   // size placeholder there, exactly as before.
   const readLimit = options.includeNonText ? Math.max(textLimit, nonTextLimit) : textLimit;
   const limitOn = settings.setMaxFileCount;
+  const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
+  // One more candidate past the limit: counted up to the cap, after which the walk stops.
+  const leaveOut = (): void => {
+    if (state.limitLeftOut >= leftOutCap) state.limitLeftOutCapped = true;
+    else state.limitLeftOut++;
+  };
   const pruneExcludedDirectory = (dirPath: string): boolean => {
     if (!settings.useFilters || !settings.useExcludeFilters) return true;
     const absolute = path.resolve(dirPath);
@@ -201,7 +221,7 @@ export async function collectCopyFiles(
       const { candidate, size, content } = result;
       if (state.fileLimitReached || (limitOn && state.copiedFileCount >= settings.fileCountLimit)) {
         state.fileLimitReached = true;
-        state.limitLeftOut++;
+        leaveOut();
         continue;
       }
       if ('failed' in result) { noteUnreadable(candidate.absolutePath); continue; }
@@ -238,7 +258,7 @@ export async function collectCopyFiles(
     }
   };
 
-  for (const inputPath of inputPaths) {
+  walk: for (const inputPath of inputPaths) {
     const onUnreadable = (dirPath: string) => {
       // Past the limit nothing is read; an unreadable folder there is not reported.
       if (!state.fileLimitReached) noteUnreadable(dirPath);
@@ -271,9 +291,11 @@ export async function collectCopyFiles(
       }
       // Once the limit has tripped the walk goes on (no reads) only to count what it left
       // out: every remaining candidate, size placeholders and unreadable files included,
-      // because before the limit tripped they would all have been processed.
+      // because before the limit tripped they would all have been processed. It stops once
+      // the count passes LEFT_OUT_CAP.
       if (state.fileLimitReached) {
-        state.limitLeftOut++;
+        leaveOut();
+        if (state.limitLeftOutCapped) break walk;
         continue;
       }
 

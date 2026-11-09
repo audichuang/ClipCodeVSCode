@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { parseClipboard } from '../src/clipboardFormat.js';
-import { collectCopyFiles, type CopyResult } from '../src/copy.js';
+import { collectCopyFiles, LEFT_OUT_CAP, type CopyResult } from '../src/copy.js';
 import { copyNoticeDetails, nonTextDialog, shortenPath } from '../src/nonTextDialog.js';
 import { parseBody, placeholderLine, sha256Hex } from '../src/nonText.js';
 import { formatSize } from '../src/restoreSummary.js';
@@ -191,6 +191,37 @@ test('case 15: text files that fill the limit first leave Include with no non-te
     assert.equal(include.limitLeftOut, 5);
     assert.equal(include.payload, exclude.payload);
     assert.ok(copyNoticeDetails(include).includes('Left out by the file-count limit: 5.'));
+  });
+});
+
+test('file-count limit: the left-out count is capped, the walk stops there and says N+', async () => {
+  await withTempDir(async root => {
+    for (let i = 0; i < 3; i++) await put(path.join(root, `a-${i}.png`), png(i));
+    for (let i = 0; i < 20; i++) await put(path.join(root, `b-${String(i).padStart(2, '0')}.ts`), `export const v${i} = ${i};`);
+    const settings = { ...defaultSettings, fileCountLimit: 3 };
+
+    for (const options of [INCLUDE, EXCLUDE]) {
+      const full = await collectCopyFiles(root, [root], settings, options);
+      // Include: the 3 images fill the limit; Exclude leaves them out, so 3 .ts files do.
+      assert.equal(full.limitLeftOut, options.includeNonText ? 20 : 17);
+      assert.equal(full.limitLeftOutCapped, false);
+
+      // Cap 5: the walk stops at the 6th left-out candidate instead of walking the whole tree.
+      const capped = await collectCopyFiles(root, [root], settings, { ...options, leftOutCap: 5 });
+      assert.equal(capped.limitLeftOut, 5);
+      assert.equal(capped.limitLeftOutCapped, true);
+      assert.equal(capped.payload, full.payload, 'what was copied does not depend on the cap');
+      assert.ok(copyNoticeDetails(capped).includes('Left out by the file-count limit: 5+.'));
+      if (options.includeNonText) {
+        assert.ok(nonTextDialog(capped, settings).detail.split('\n').includes('Left out by the file-count limit: 5+'));
+      }
+
+      // Exactly at the cap is not "more than": no plus sign.
+      const exact = await collectCopyFiles(root, [root], settings, { ...options, leftOutCap: full.limitLeftOut });
+      assert.equal(exact.limitLeftOut, full.limitLeftOut);
+      assert.equal(exact.limitLeftOutCapped, false);
+    }
+    assert.equal(LEFT_OUT_CAP, 1000);
   });
 });
 

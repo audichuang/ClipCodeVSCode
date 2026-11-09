@@ -29,6 +29,8 @@ export interface NonTextSummary {
   unreadOverLimitCount: number;
   /** Candidates the file-count limit cut off. */
   limitLeftOut: number;
+  /** More than limitLeftOut were cut off (the files copy stops counting at LEFT_OUT_CAP). */
+  limitLeftOutCapped?: boolean;
   /** UTF-8 byte length of the payload. */
   estimatedBytes: number;
 }
@@ -39,6 +41,7 @@ export interface NonTextNoticeCounts {
   /** Exclude only: non-text files left out. */
   excludedNonTextCount: number;
   limitLeftOut: number;
+  limitLeftOutCapped?: boolean;
   /** Unreadable items, non-text files left out NOT included. */
   skippedUnreadableCount: number;
   unreadablePaths: string[];
@@ -70,7 +73,7 @@ export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSe
     lines.push(`Over both size limits (not read, copied as size placeholders): ${include.unreadOverLimitCount}`);
   }
   if (include.limitLeftOut > 0) {
-    lines.push(`Left out by the file-count limit: ${include.limitLeftOut}`);
+    lines.push(`Left out by the file-count limit: ${leftOutText(include)}`);
   }
   if (!includeAllowed) {
     lines.push(
@@ -95,7 +98,7 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   const parts: string[] = [];
   if (result.nonTextFiles.length > 0) parts.push(`Non-text files copied as Base64: ${result.nonTextFiles.length}.`);
   if (result.excludedNonTextCount > 0) parts.push(`Non-text files left out: ${result.excludedNonTextCount}.`);
-  if (result.limitLeftOut > 0) parts.push(`Left out by the file-count limit: ${result.limitLeftOut}.`);
+  if (result.limitLeftOut > 0) parts.push(`Left out by the file-count limit: ${leftOutText(result)}.`);
   if (result.skippedUnreadableCount > 0) {
     const named = result.unreadablePaths.slice(0, NOTICE_PATHS);
     const more = result.skippedUnreadableCount - named.length;
@@ -103,6 +106,11 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
     parts.push(list ? `Unreadable: ${result.skippedUnreadableCount} (${list}).` : `Unreadable: ${result.skippedUnreadableCount}.`);
   }
   return parts;
+}
+
+/** `1000+` once the count stopped at its cap. */
+function leftOutText(result: { limitLeftOut: number; limitLeftOutCapped?: boolean }): string {
+  return `${result.limitLeftOut}${result.limitLeftOutCapped ? '+' : ''}`;
 }
 
 /** `vscode.window.showWarningMessage` with the dialog's buttons; injected so this stays pure. */
