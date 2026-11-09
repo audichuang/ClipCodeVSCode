@@ -16,6 +16,8 @@ export interface ClipCodeSettings {
   setMaxFileCount: boolean;
   fileCountLimit: number;
   maxFileSizeKB: number;
+  /** Per-file limit (KB) for a non-text file (image, archive, non-UTF-8 text) copied as Base64. */
+  maxNonTextFileSizeKB: number;
   showCopyNotification: boolean;
   useFilters: boolean;
   useIncludeFilters: boolean;
@@ -31,6 +33,7 @@ export const defaultSettings: ClipCodeSettings = {
   setMaxFileCount: true,
   fileCountLimit: 30,
   maxFileSizeKB: 500,
+  maxNonTextFileSizeKB: 2048,
   showCopyNotification: true,
   useFilters: false,
   useIncludeFilters: true,
@@ -44,6 +47,7 @@ export function normalizeSettings(input: Partial<ClipCodeSettings> = {}): ClipCo
     ...input,
     fileCountLimit: positiveNumber(input.fileCountLimit, defaultSettings.fileCountLimit),
     maxFileSizeKB: positiveNumber(input.maxFileSizeKB, defaultSettings.maxFileSizeKB),
+    maxNonTextFileSizeKB: positiveNumber(input.maxNonTextFileSizeKB, defaultSettings.maxNonTextFileSizeKB),
     filterRules: (input.filterRules ?? []).filter(isFilterRule)
   };
 }

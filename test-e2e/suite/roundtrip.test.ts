@@ -223,12 +223,13 @@ describe('Snipcode copy → restore round-trip (real workspace)', () => {
       await fs.rm(gone);
 
       await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
-      assert.match(shown.join('\n'), /1 open editor file\(s\) copied\. 1 skipped: not UTF-8 text or unreadable\./);
+      assert.match(shown.join('\n'), /1 open editor file\(s\) copied\. Unreadable: 1 \([^)]*tab-gone\.ts\)\./);
 
       await fs.rm(kept);
       shown.length = 0;
       await vscode.commands.executeCommand('clipcode.copyAllOpenEditors');
-      assert.deepStrictEqual(shown, ['No open editor file copied: 2 skipped: not UTF-8 text or unreadable.']);
+      assert.strictEqual(shown.length, 1, shown.join('\n'));
+      assert.match(shown[0], /^No open editor file copied\. Unreadable: 2 \([^)]*tab-gone\.ts, [^)]*tab-kept\.ts\)\.$/);
     } finally {
       w.showInformationMessage = original.info;
       w.showWarningMessage = original.warn;

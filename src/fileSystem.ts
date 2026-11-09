@@ -27,6 +27,15 @@ export async function readTextFile(filePath: string): Promise<string | undefined
   return decodeUtf8OrSkip(bytes);
 }
 
+export type FileContent = { text: string } | { nonText: Uint8Array };
+
+/** Reads a file and classifies it: strict UTF-8 without NUL is text, anything else non-text. */
+export async function readClassifiedFile(filePath: string): Promise<FileContent> {
+  const bytes = new Uint8Array(await readFile(filePath));
+  const text = decodeUtf8OrSkip(bytes);
+  return text === undefined ? { nonText: bytes } : { text };
+}
+
 /**
  * A non-UTF-8 text file (Big5, Shift_JIS, latin-1) used to decode with fatal:false, so every
  * undecodable byte became U+FFFD and Paste & Restore wrote that mojibake back over the real

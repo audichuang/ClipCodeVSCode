@@ -84,6 +84,7 @@
   "configuration.clipcode.setMaxFileCount.description": "Cap the number of files a single copy can include (see fileCountLimit).",
   "configuration.clipcode.fileCountLimit.description": "Maximum number of files a single copy may include, when setMaxFileCount is enabled.",
   "configuration.clipcode.maxFileSizeKB.description": "Files larger than this size (in KB) are skipped when copying.",
+  "configuration.clipcode.maxNonTextFileSizeKB.description": "Maximum size (KB) of a non-text file (image, archive, non-UTF-8 text) copied as Base64.",
   "configuration.clipcode.showCopyNotification.description": "Show a notification with character/line/word/token counts after each copy.",
   "configuration.clipcode.useFilters.description": "Apply the include/exclude filter rules below when copying.",
   "configuration.clipcode.useIncludeFilters.description": "When filters are enabled, apply INCLUDE rules from filterRules.",

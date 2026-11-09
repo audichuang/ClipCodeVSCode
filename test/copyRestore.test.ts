@@ -480,16 +480,25 @@ test('a non-UTF-8 file on disk is never overwritten with UTF-8 bytes', async () 
   });
 });
 
-test('a non-UTF-8 file is skipped on copy and counted, not silently dropped', async () => {
+test('a non-UTF-8 file is left out under Exclude and counted, carried as non-text under Include', async () => {
   await withTempDir(async root => {
     await mkdir(path.join(root, 'src'), { recursive: true });
     await writeFile(path.join(root, 'src', 'ok.ts'), 'ok');
-    await writeFile(path.join(root, 'src', 'legacy.txt'), Buffer.from([0xa4, 0xe9, 0xa5, 0xbb]));
+    const big5 = Buffer.from([0xa4, 0xe9, 0xa5, 0xbb]);
+    await writeFile(path.join(root, 'src', 'legacy.txt'), big5);
 
-    const result = await collectCopyFiles(root, [path.join(root, 'src')], defaultSettings);
+    const excluded = await collectCopyFiles(root, [path.join(root, 'src')], defaultSettings, { includeNonText: false });
+    assert.deepEqual(excluded.files.map(f => f.path), ['src/ok.ts']);
+    // Still counted (the notification must be able to say so), but as a left-out non-text
+    // file, not as "unreadable": the file was read fine.
+    assert.equal(excluded.excludedNonTextCount, 1);
+    assert.equal(excluded.skippedUnreadableCount, 0);
 
-    assert.deepEqual(result.files.map(f => f.path), ['src/ok.ts']);
-    assert.equal(result.skippedUnreadableCount, 1, 'the notification must be able to say so');
+    // This test used to pin "dropped" as the only behaviour; under Include the bytes travel.
+    const included = await collectCopyFiles(root, [path.join(root, 'src')], defaultSettings, { includeNonText: true });
+    assert.deepEqual(included.files.map(f => [f.path, f.nonText && Buffer.from(f.nonText)]),
+      [['src/legacy.txt', big5], ['src/ok.ts', undefined]]);
+    assert.equal(included.copiedFileCount, 2);
   });
 });
 
