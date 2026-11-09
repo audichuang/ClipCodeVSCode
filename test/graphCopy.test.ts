@@ -650,3 +650,17 @@ test('X7 on Graph uncommitted: a working-tree link out of every root is not read
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('a commit that only deletes an image is copied (Exclude and Include) — the Git gate lets it through', async () => {
+  const { copyNoticeDetails, gitCopyNothingToCopy } = await import('../src/nonTextDialog.js');
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+  const repo: ContentRepo = { rootUri: { fsPath: '/repo' }, buffer: async () => Buffer.from(png) };
+  for (const includeNonText of [false, true]) {
+    const r = await buildGraphCopyPayload(deps(repo), {
+      hash: 'abc',
+      files: [{ repoRootFsPath: '/repo', relativePath: 'logo.png', status: 'D' }]
+    }, { includeNonText });
+    assert.match(r.text, /\[DELETED\] logo\.png/);
+    assert.equal(gitCopyNothingToCopy(r, copyNoticeDetails(r), 'No source copied.'), undefined, `includeNonText=${includeNonText}`);
+  }
+});

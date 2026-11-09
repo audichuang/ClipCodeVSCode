@@ -193,17 +193,25 @@ export function gitNothingToCopyNotice(details: readonly string[], noChanges: st
 }
 
 /**
- * The one "carries no file" rule of every Git surface (SCM, Graph, History): no copied file
- * and no size placeholder. "Unable to read" markers do not count — a payload of nothing but
- * markers overwrote the clipboard with "0 Git file(s) copied". Returns the warning to show
- * instead of writing the clipboard, or undefined when there is something to write.
+ * The one "carries no file" rule of every Git surface (SCM, Graph, History): no copied file,
+ * no size placeholder and no [DELETED] entry. "Unable to read" markers do not count — a
+ * payload of nothing but markers overwrote the clipboard with "0 Git file(s) copied". A
+ * [DELETED] entry always counts, whatever its body: paste deletes the file and never reads
+ * the body, so a deletion whose old text happened to be the marker was refused although
+ * restore would replay it. Returns the warning to show instead of writing the clipboard, or
+ * undefined when there is something to write.
  */
 export function gitCopyNothingToCopy(
-  result: { copiedFileCount: number; skippedFileSizeCount: number },
+  result: {
+    copiedFileCount: number;
+    skippedFileSizeCount: number;
+    files?: readonly { changeType?: string }[];
+  },
   details: readonly string[],
   noChanges: string
 ): string | undefined {
   if (result.copiedFileCount > 0 || result.skippedFileSizeCount > 0) return undefined;
+  if (result.files?.some(file => file.changeType === 'DELETED')) return undefined;
   return gitNothingToCopyNotice(details, noChanges);
 }
 

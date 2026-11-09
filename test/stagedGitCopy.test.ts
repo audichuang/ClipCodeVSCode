@@ -526,3 +526,47 @@ test('X3 on SCM: Exclude on staged-only images or unreadable staged blobs carrie
     gitCopyNothingToCopy(result, copyNoticeDetails(gitNoticeCounts(result)), 'No Git changes found to copy.'),
     'Nothing to copy. Non-text files left out: 2. Unreadable: 1 (broken.ts).');
 });
+
+test('SCM gate: a deletion-only copy is written whatever its [DELETED] body — paste never reads it', async () => {
+  const { collectGitPayloadFiles, gitNoticeCounts } = await extensionModule;
+  const { copyNoticeDetails, gitCopyNothingToCopy } = await import('../src/nonTextDialog.js');
+  const settings = { ...defaultSettings, setMaxFileCount: false };
+  const cases: { name: string; change: { uri: Uri; status: string }; head: Uint8Array }[] = [
+    { name: 'staged PNG deletion', change: { uri: new Uri('/repo/logo.png'), status: 'INDEX_DELETED' }, head: PNG },
+    { name: 'working-tree PNG deletion', change: { uri: new Uri('/repo/logo.png'), status: 'DELETED' }, head: PNG },
+    // The old content happens to be exactly the "Unable to read" marker text.
+    { name: 'deletion whose old text is the marker', change: { uri: new Uri('/repo/note.ts'), status: 'DELETED' },
+      head: new TextEncoder().encode('// Unable to read file content') },
+  ];
+  for (const { name, change, head } of cases) {
+    const staged = change.status.startsWith('INDEX_');
+    const repository = {
+      rootUri: new Uri('/repo'),
+      state: staged ? { indexChanges: [change] } : { workingTreeChanges: [change] },
+      buffer: async () => head
+    };
+    for (const includeNonText of [false, true]) {
+      const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [], settings, { includeNonText });
+      assert.deepEqual(result.files.map(f => [f.path, f.changeType]), [[change.uri.fsPath.slice('/repo/'.length), 'DELETED']], name);
+      assert.equal(
+        gitCopyNothingToCopy(result, copyNoticeDetails(gitNoticeCounts(result)), 'No Git changes found to copy.'),
+        undefined, `${name} (includeNonText=${includeNonText}) must write the clipboard`);
+    }
+  }
+});
+
+test('SCM gate: an unreadable MODIFIED entry alone still leaves the clipboard untouched', async () => {
+  const { collectGitPayloadFiles, gitNoticeCounts } = await extensionModule;
+  const { copyNoticeDetails, gitCopyNothingToCopy } = await import('../src/nonTextDialog.js');
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: { indexChanges: [{ uri: new Uri('/repo/broken.ts'), status: 'INDEX_MODIFIED' }] },
+    buffer: async () => { throw new Error('index read failed'); }
+  };
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [{ uriKey: '/repo/broken.ts', staged: true }],
+    { ...defaultSettings, setMaxFileCount: false }, { includeNonText: true });
+  assert.deepEqual(result.files.map(f => [f.path, f.content]), [['broken.ts', '// Unable to read file content']]);
+  assert.equal(
+    gitCopyNothingToCopy(result, copyNoticeDetails(gitNoticeCounts(result)), 'No Git changes found to copy.'),
+    'Nothing to copy. Unreadable: 1 (broken.ts).');
+});
