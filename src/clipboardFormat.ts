@@ -1,9 +1,15 @@
+import { BASE64_LINE_LEN, base64Lines, parsePlaceholderLine, placeholderLine, sha256Hex } from './nonText.js';
+
 export type ChangeTypeLabel = 'NEW' | 'MODIFIED' | 'DELETED' | 'MOVED';
 
 export interface ParsedEntry {
   path: string;
   content: string;
   changeTypes: Set<ChangeTypeLabel>;
+  // Set (only ever to true) when the body's first non-blank line carried the placeholder
+  // escape: a TEXT file that merely looks like a non-text placeholder. The reader has
+  // already removed that one extra prefix, and the body must never be decoded as Base64.
+  escapedPlaceholder?: true;
 }
 
 export interface PayloadFile {
@@ -11,6 +17,9 @@ export interface PayloadFile {
   content?: string;
   changeType?: ChangeTypeLabel;
   skippedReason?: string;
+  // Raw bytes of a non-text file, written as the non-text placeholder line + wrapped Base64.
+  // A skippedReason wins over it.
+  nonText?: Uint8Array;
 }
 
 interface BuildPayloadOptions {
@@ -122,8 +131,15 @@ function buildPayloadInternal(options: BuildPayloadOptions, includeEmptyWrappers
 
   for (const file of options.files) {
     lines.push(formatHeader(options.headerFormat, file.path, file.changeType));
-    const body = file.skippedReason ? `// File skipped: ${file.skippedReason}` : file.content ?? '';
-    lines.push(escapeContent(body, customRegex));
+    if (file.skippedReason) {
+      lines.push(escapeContent(`// File skipped: ${file.skippedReason}`, customRegex));
+    } else if (file.nonText) {
+      lines.push(escapeContent(placeholderLine(file.nonText.length, sha256Hex(file.nonText)), customRegex));
+      // Every Base64 line goes through the same escaping as any body line.
+      for (const line of base64Lines(file.nonText)) lines.push(escapeContent(line, customRegex));
+    } else {
+      lines.push(escapeTextContent(file.content ?? '', customRegex));
+    }
     if (options.addExtraLineBetweenFiles) lines.push('');
   }
 
@@ -151,6 +167,59 @@ function escapeContent(text: string, customRegex?: RegExp): string {
     .split('\n')
     .map(line => (needsEscape(line, customRegex) ? ESCAPE_MARKER + line : line))
     .join('\n');
+}
+
+// escapeContent for a TEXT body: a placeholder-shaped first line gets the placeholder
+// escape on top of the normal escaping (two prefixes), so a reader never decodes it as
+// Base64. "First line" is the first line that is not blank (ASCII whitespace only),
+// because the reader drops leading blank lines. Mirror of OpenIDEA write_escaped_text.
+function escapeTextContent(text: string, customRegex?: RegExp): string {
+  if (!text) return text;
+  const lines = text.split('\n');
+  const first = lines.findIndex(line => asciiTrim(line) !== '');
+  const force = first !== -1 && isPlaceholderShaped(lines[first]) ? first : -1;
+  return lines
+    .map((line, i) =>
+      i === force ? ESCAPE_MARKER + ESCAPE_MARKER + line : needsEscape(line, customRegex) ? ESCAPE_MARKER + line : line
+    )
+    .join('\n');
+}
+
+// Whether `line`, after removing any number of leading escape prefixes, is the non-text placeholder line.
+function isPlaceholderShaped(line: string): boolean {
+  let rest = line;
+  while (rest.startsWith(ESCAPE_MARKER)) rest = rest.slice(ESCAPE_MARKER.length);
+  return parsePlaceholderLine(rest) !== undefined;
+}
+
+/**
+ * A headerFormat for which escaping cannot keep the lines of a non-text entry (the
+ * placeholder and the Base64 lines) from being read as file headers: some such line
+ * matches the header pattern both as written and after the escape marker is put in front
+ * (e.g. `$FILE_PATH`, `//$FILE_PATH`, `$FILE_PATH==`). Include must be refused then.
+ * Port of OpenIDEA format.rs header_format_unescapable.
+ */
+export function headerFormatUnescapable(headerFormat: string): boolean {
+  const segments = headerFormat.split('$FILE_PATH');
+  if (segments.length < 2) return false;
+  const custom = toHeaderPattern(headerFormat);
+  const unescapable = (line: string) => findHeaderPath(line, custom) !== undefined && !needsEscape(line, custom);
+  const sha = '0'.repeat(64);
+  if ([1, 123456789].some(size => unescapable(placeholderLine(size, sha)))) return true;
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  const inner = segments.slice(1, -1);
+  const isBase64Line = (line: string) => {
+    const body = line.replace(/=+$/, '');
+    return line.length - body.length <= 2 && line.length <= BASE64_LINE_LEN && /^[A-Za-z0-9+/]*$/.test(body);
+  };
+  return [1, 2, 3, 4, 38, 76].some(n => {
+    const pathText = 'A'.repeat(n);
+    let line = first + pathText;
+    for (const segment of inner) line += segment + pathText;
+    line += last;
+    return isBase64Line(line) && unescapable(line);
+  });
 }
 
 // Escape a line if it would parse as a header (must be hidden) or already starts
@@ -192,11 +261,7 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
 
   const flush = () => {
     if (currentPath === undefined) return;
-    entries.push({
-      path: currentPath,
-      content: unescapeContent(joinContent(currentContent)),
-      changeTypes: currentLabels
-    });
+    entries.push(makeEntry(currentPath, currentContent, currentLabels));
     currentPath = undefined;
     currentLabels = new Set();
     currentContent.length = 0;
@@ -226,14 +291,32 @@ export function parseClipboard(content: string, headerFormat: string): ParsedEnt
   }
 
   if (currentPath !== undefined) {
-    entries.push({
-      path: currentPath,
-      content: unescapeContent(joinContent(currentContent)),
-      changeTypes: currentLabels
-    });
+    entries.push(makeEntry(currentPath, currentContent, currentLabels));
   }
 
   return entries;
+}
+
+function makeEntry(path: string, bodyLines: string[], changeTypes: Set<ChangeTypeLabel>): ParsedEntry {
+  let content = unescapeContent(joinContent(bodyLines));
+  // After one level of un-escaping, a first NON-BLANK line that still starts with the
+  // marker and is placeholder-shaped is a text file's placeholder escape: strip exactly
+  // that one prefix. Non-blank, as the writer counts it: an escaped whitespace-only line
+  // survives joinContent.
+  let offset = 0;
+  let first = '';
+  for (const line of content.split('\n')) {
+    if (asciiTrim(line) !== '') {
+      first = line;
+      break;
+    }
+    offset += line.length + 1;
+  }
+  if (first.startsWith(ESCAPE_MARKER) && isPlaceholderShaped(first)) {
+    content = content.slice(0, offset) + content.slice(offset + ESCAPE_MARKER.length);
+    return { path, content, changeTypes, escapedPlaceholder: true };
+  }
+  return { path, content, changeTypes };
 }
 
 // Join accumulated content lines, dropping only the structural blank lines the
