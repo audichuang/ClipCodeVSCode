@@ -277,8 +277,9 @@ test('file-count limit: entries skipped past the limit spend the left-out budget
           assert.ok(copyNoticeDetails(result).includes('Left out by the file-count limit: 2+.'));
           assert.equal(result.payload, full.payload, 'what was copied does not depend on the cap');
           // Walking to the end costs over N of each; stopping costs a handful.
-          assert.ok(lstat <= 12, `lstat ${lstat}`);
-          assert.ok(readdir <= 4, `readdir ${readdir}`);
+          // The floor proves the counter saw the walk at all.
+          assert.ok(lstat >= 5 && lstat <= 12, `lstat ${lstat}`);
+          assert.ok(readdir >= 1 && readdir <= 4, `readdir ${readdir}`);
         } finally {
           if (kind.name === 'unreadable folder') for (const dir of dirs) await chmod(dir, 0o755);
         }
