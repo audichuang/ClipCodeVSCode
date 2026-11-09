@@ -167,15 +167,31 @@ describe('Snipcode copy with every item skipped (real workspace)', () => {
     assert.ok(notice!.includes('Symlinked folder: 1') && notice!.includes('linked'), notice);
   });
 
-  it('a folder holding only an oversized text file still copies its size placeholder', async () => {
+  // Inverted with the spec update (OpenIDEA PR #208): a payload of size placeholders only is
+  // nothing to copy. It used to assert the placeholder was written.
+  it('a folder holding only an oversized text file keeps the clipboard and names it', async () => {
     const root = path.join(repoDir, dir, 'only-big');
     await fs.mkdir(root, { recursive: true });
-    // Over the default maxFileSizeKB (500): copied as a size placeholder, as before non-text support.
+    // Over the default maxFileSizeKB (500) and maxNonTextFileSizeKB (2048 is larger, so it is
+    // read): text over its own limit, a size placeholder.
     await fs.writeFile(path.join(root, 'big.txt'), 'a'.repeat(600 * 1024));
 
     const { clip, messages } = await copyWithSentinel(root);
+    assert.equal(clip, SENTINEL, 'clipboard untouched');
+    const notice = messages.find(m => m.startsWith('Nothing to copy.'));
+    assert.ok(notice, `"Nothing to copy." shown; got ${JSON.stringify(messages)}`);
+    assert.ok(notice!.includes('Over the size limit: 1') && notice!.includes('big.txt'), notice);
+  });
+
+  it('an oversized file next to a copied one still writes both', async () => {
+    const root = path.join(repoDir, dir, 'big-and-small');
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'big.txt'), 'a'.repeat(600 * 1024));
+    await fs.writeFile(path.join(root, 'small.txt'), 'small\n');
+
+    const { clip, messages } = await copyWithSentinel(root);
     assert.notEqual(clip, SENTINEL, 'clipboard written');
-    assert.ok(clip.includes('big.txt'), clip.slice(0, 300));
+    assert.ok(clip.includes('big.txt') && clip.includes('small.txt'), clip.slice(0, 300));
     assert.ok(!messages.some(m => m.startsWith('Nothing to copy.')), JSON.stringify(messages));
   });
 });

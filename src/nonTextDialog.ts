@@ -165,15 +165,22 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
 }
 
 /**
- * Decision X3: a copy whose payload would carry no file entry at all (everything selected was
- * skipped, filtered or left out) must not write the clipboard. Returns the warning to show in
- * that case — "Nothing to copy." followed by the skipped categories, the same sentences as the
- * completion notice — or undefined when there is something to write. A size placeholder is a
- * file entry, so a selection of only oversized files still copies, as before non-text support.
+ * Decision X3: a files copy whose payload would carry no file (everything selected was
+ * skipped, filtered or left out, or all that is left is size placeholders) must not write
+ * the clipboard. Returns the warning to show in that case — "Nothing to copy." followed by
+ * the skipped categories, the same sentences as the completion notice, plus the files over
+ * the size limit — or undefined when there is something to write. One carried file (text or
+ * Base64) is something to write, placeholders and all.
  */
-export function nothingToCopyNotice(result: NonTextNoticeCounts & { files: readonly unknown[] }): string | undefined {
-  if (result.files.length > 0) return undefined;
-  return ['Nothing to copy.', ...copyNoticeDetails(result)].join(' ');
+export function nothingToCopyNotice(
+  result: NonTextNoticeCounts & { files: readonly { path: string; skippedReason?: string }[] }
+): string | undefined {
+  if (result.files.some(file => !file.skippedReason)) return undefined;
+  const parts = ['Nothing to copy.', ...copyNoticeDetails(result)];
+  if (result.files.length > 0) {
+    parts.push(`${namedCount('Over the size limit', result.files.length, result.files.map(file => file.path))}.`);
+  }
+  return parts.join(' ');
 }
 
 /** `Label: n (a, b, c and N more)` — the first NOTICE_PATHS paths, or just `Label: n` with none. */
