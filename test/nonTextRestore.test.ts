@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { buildPayload, parseClipboard, type PayloadFile } from '../src/clipboardFormat.js';
+import { writeBytesFile, writeTextFile } from '../src/fileSystem.js';
 import { placeholderLine, sha256Hex } from '../src/nonText.js';
 import {
   executeRestorePlan,
@@ -319,5 +320,60 @@ test('target identity folds NFC/NFD only on a case-insensitive volume', async ()
     const insensitive = await markTargetCollisions(plan, async () => true);
     assert.deepEqual(insensitive.createOperations, []);
     assert.deepEqual(insensitive.skippedOperations.map(s => s.reason), ['TARGET_COLLISION', 'TARGET_COLLISION']);
+  });
+});
+
+test('an overwrite of a hard link alias outside the roots writes a new file', async () => {
+  await withRoot(async base => {
+    // Mirror of OpenIDEA restore tests an_overwrite_of_a_hard_link_alias_outside_the_roots_writes_a_new_file.
+    const root = path.join(base, 'ws');
+    const outside = path.join(base, 'outside');
+    await mkdir(root);
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'secret.bin'), Buffer.from([0, 1, 2]));
+    await link(path.join(outside, 'secret.bin'), path.join(root, 'asset.bin'));
+    await writeFile(path.join(outside, 'secret.txt'), 'outside original\n');
+    await link(path.join(outside, 'secret.txt'), path.join(root, 'note.txt'));
+
+    const pasted = Buffer.from([0, 9, 9]);
+    const { result } = await paste(root, payload([
+      { path: 'asset.bin', nonText: pasted },
+      { path: 'note.txt', content: 'pasted text' }
+    ]));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.overwrittenCount, 2);
+    // The outside names keep their bytes; the workspace names are new, unlinked files.
+    assert.deepEqual(await readFile(path.join(outside, 'secret.bin')), Buffer.from([0, 1, 2]));
+    assert.equal(await readFile(path.join(outside, 'secret.txt'), 'utf8'), 'outside original\n');
+    assert.deepEqual(await readFile(path.join(root, 'asset.bin')), pasted);
+    assert.equal(await readFile(path.join(root, 'note.txt'), 'utf8'), 'pasted text');
+    assert.equal((await stat(path.join(root, 'asset.bin'))).nlink, 1);
+    assert.equal((await stat(path.join(root, 'note.txt'))).nlink, 1);
+  });
+});
+
+test('an overwrite keeps the target permission mode and leaves no temporary file', { skip: process.platform === 'win32' }, async () => {
+  await withRoot(async root => {
+    for (const [name, write] of [
+      ['run.sh', (p: string) => writeTextFile(p, '#!/bin/sh\necho new\n')],
+      ['tool.bin', (p: string) => writeBytesFile(p, new Uint8Array([0, 7]))]
+    ] as const) {
+      const target = path.join(root, name);
+      await writeFile(target, 'old');
+      await chmod(target, 0o755);
+      await write(target);
+      assert.equal((await stat(target)).mode & 0o7777, 0o755, name);
+    }
+    assert.deepEqual((await readdir(root)).sort(), ['run.sh', 'tool.bin']);
+  });
+});
+
+test('a failed write removes its temporary file', async () => {
+  await withRoot(async root => {
+    // The target is a non-empty folder, so the final rename fails.
+    await mkdir(path.join(root, 'taken', 'inner'), { recursive: true });
+    await assert.rejects(writeBytesFile(path.join(root, 'taken'), new Uint8Array([1])));
+    await assert.rejects(writeTextFile(path.join(root, 'taken'), 'x'));
+    assert.deepEqual(await readdir(root), ['taken']);
   });
 });
