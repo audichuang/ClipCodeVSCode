@@ -483,8 +483,17 @@ export function isExportableRelativePath(value: string): boolean {
  * `a/b.png` there. A path under no root is judged on every component after its filesystem
  * root (the drive or `/`), the directories the paste side keeps. The returned name keeps
  * a `\` as typed, prefixed like the clipboard path (a root label, or nothing).
+ *
+ * The edge-whitespace rule is on the whole FILE path, so a [directory] is judged as a path
+ * that continues below it: a leading space still refuses it (every file under it starts
+ * with that space), a trailing space does not (`mid /ok.ts` is portable).
  */
-export function nonPortableName(workspaceRoots: string[], absolutePath: string): string | undefined {
+export function nonPortableName(
+  workspaceRoots: string[],
+  absolutePath: string,
+  options: { directory?: boolean } = {}
+): string | undefined {
+  const portable = (value: string): boolean => isExportableRelativePath(options.directory ? `${value}/_` : value);
   const absolute = path.resolve(absolutePath);
   const below = (root: string): string | undefined => {
     const relative = path.relative(path.resolve(root), absolute);
@@ -508,10 +517,10 @@ export function nonPortableName(workspaceRoots: string[], absolutePath: string):
     if (workspaceRoots.some(r => path.resolve(r) === absolute)) return undefined;
     const rest = absolute.slice(path.parse(absolute).root.length);
     const value = rest.split(path.sep).join('/');
-    return value === '' || isExportableRelativePath(value) ? undefined : absolute;
+    return value === '' || portable(value) ? undefined : absolute;
   }
   const value = relative.split(path.sep).join('/');
-  if (isExportableRelativePath(value)) return undefined;
+  if (portable(value)) return undefined;
   const prefix = toClipboardPathFromRoots(workspaceRoots, root);
   return prefix ? `${prefix}/${value}` : value;
 }
