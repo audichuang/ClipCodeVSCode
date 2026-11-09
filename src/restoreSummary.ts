@@ -12,7 +12,7 @@ const SKIP_REASON_TEXT: Record<SkipReason, string> = {
   CORRUPT_NON_TEXT: 'Corrupt non-text file',
   TARGET_NOT_FILE: 'The target is a folder',
   PARENT_NOT_FOLDER: 'A file is in the way of its parent folder',
-  TARGET_COLLISION: 'Another entry writes the same file (letter case)'
+  TARGET_COLLISION: 'Another entry writes the same file'
 };
 
 /** Paths listed per reason or category before "and N more". */
@@ -22,11 +22,12 @@ export function skipReasonText(reason: SkipReason): string {
   return SKIP_REASON_TEXT[reason];
 }
 
-/** "4.0 KB"-style raw size. */
+/** The one size format: "83 B"; otherwise one decimal below 10 ("4.0 KB", "1.5 MB"), none from 10 up ("12 KB"). */
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const [value, unit] = bytes < 1024 * 1024 ? [bytes / 1024, 'KB'] : [bytes / (1024 * 1024), 'MB'];
+  const oneDecimal = value.toFixed(1);
+  return Number(oneDecimal) < 10 ? `${oneDecimal} ${unit}` : `${Math.round(value)} ${unit}`;
 }
 
 function pathList(paths: string[]): string {

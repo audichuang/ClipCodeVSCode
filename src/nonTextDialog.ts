@@ -68,6 +68,12 @@ export interface NonTextNoticeCounts {
   /** Files and folders (Git copies: changed paths) skipped because a payload header cannot carry their real name. */
   nonPortableCount?: number;
   nonPortablePaths?: string[];
+  /**
+   * With fileCountLimit: the copy reached the file-count limit. When no left-out number was
+   * counted the notice says "File limit N reached." instead of a "0+" clause (X9).
+   */
+  fileLimitReached?: boolean;
+  fileCountLimit?: number;
 }
 
 export interface NonTextDialog {
@@ -143,6 +149,9 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   if (result.nonTextFiles.length > 0) parts.push(`Non-text files copied as Base64: ${result.nonTextFiles.length}.`);
   if (result.excludedNonTextCount > 0) parts.push(`Non-text files left out: ${result.excludedNonTextCount}.`);
   if (result.limitLeftOut > 0) parts.push(`Left out by the file-count limit: ${leftOutText(result)}.`);
+  else if (result.fileCountLimit !== undefined && (result.fileLimitReached || result.limitLeftOutCapped)) {
+    parts.push(`File limit ${result.fileCountLimit} reached.`);
+  }
   if (result.skippedUnreadableCount > 0) {
     parts.push(`${namedCount('Unreadable', result.skippedUnreadableCount, result.unreadablePaths)}.`);
   }
