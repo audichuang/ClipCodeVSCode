@@ -438,22 +438,41 @@ test('one unreadable file does not abort the whole folder copy', async () => {
   });
 });
 
-test('a directory symlink is walked, and a cycle back up its own branch stops', async () => {
+test('a directory symlink is never walked, selected or found while expanding; it is counted and named', async () => {
   await withTempDir(async root => {
     await mkdir(path.join(root, 'packages', 'ui'), { recursive: true });
     await mkdir(path.join(root, 'node_modules'), { recursive: true });
     await writeFile(path.join(root, 'packages', 'ui', 'index.ts'), 'ui');
-    // pnpm and Bazel layouts are built out of these. Refusing to descend meant selecting
-    // the linked folder copied NOTHING at all; IntelliJ walks it.
+    // pnpm and Bazel layouts are built out of these. Spec non-text-files.md "What is
+    // carried" + user decision D2 (2026-11-09): a symlinked folder is skipped and named,
+    // whether it is the selection itself or met during expansion. This test used to pin
+    // the opposite (a selected linked folder was walked, an expanded one silently dropped).
     await symlink(path.join(root, 'packages', 'ui'), path.join(root, 'node_modules', 'ui'), 'dir');
-    // A link pointing back at an ancestor must not loop forever.
+    // A link pointing back at an ancestor: named, never looped.
     await symlink(root, path.join(root, 'packages', 'loop'), 'dir');
 
+    // Selected alone.
     const direct = await collectCopyFiles(root, [path.join(root, 'node_modules', 'ui')], defaultSettings);
-    assert.deepEqual(direct.files.map(f => f.path), ['node_modules/ui/index.ts']);
+    assert.deepEqual(direct.files, []);
+    assert.equal(direct.symlinkedFolderCount, 1);
+    assert.deepEqual(direct.symlinkedFolderPaths, ['node_modules/ui']);
+    assert.equal(direct.skippedUnreadableCount, 0, 'a symlinked folder is not "unreadable"');
 
+    // In a multi-selection, next to a real file (and a parent that also reaches it).
+    const multi = await collectCopyFiles(
+      root,
+      [path.join(root, 'node_modules', 'ui'), path.join(root, 'packages', 'ui', 'index.ts'), path.join(root, 'node_modules')],
+      defaultSettings
+    );
+    assert.deepEqual(multi.files.map(f => f.path), ['packages/ui/index.ts']);
+    assert.equal(multi.symlinkedFolderCount, 1, 'the same link reached twice is named once');
+    assert.deepEqual(multi.symlinkedFolderPaths, ['node_modules/ui']);
+
+    // Found while a selected folder is expanded.
     const whole = await collectCopyFiles(root, [path.join(root, 'packages')], defaultSettings);
-    assert.ok(whole.files.some(f => f.path === 'packages/ui/index.ts'));
+    assert.deepEqual(whole.files.map(f => f.path), ['packages/ui/index.ts']);
+    assert.equal(whole.symlinkedFolderCount, 1);
+    assert.deepEqual(whole.symlinkedFolderPaths, ['packages/loop']);
   });
 });
 

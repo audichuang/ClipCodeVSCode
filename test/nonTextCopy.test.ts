@@ -267,6 +267,55 @@ test('case 19: a selected unreadable folder is named, the selected file is copie
   });
 });
 
+test('case 22: a symlinked folder is not followed and is named in the dialog and the notice', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'real', 'inner.png'), png(7));
+    await put(path.join(root, 'assets', 'logo.png'), png(8));
+    await symlink(path.join(root, 'real'), path.join(root, 'assets', 'linked'), 'dir');
+    await symlink(path.join(root, 'real'), path.join(root, 'direct'), 'dir');
+
+    const result = await collectCopyFiles(root, [path.join(root, 'direct'), path.join(root, 'assets')], defaultSettings, INCLUDE);
+    assert.deepEqual(result.files.map(f => f.path), ['assets/logo.png']);
+    assert.equal(result.symlinkedFolderCount, 2);
+    assert.deepEqual(result.symlinkedFolderPaths, ['direct', 'assets/linked']);
+
+    const dialog = nonTextDialog(result, defaultSettings);
+    assert.ok(dialog.detail.split('\n').includes('Symlinked folder: 2 (direct, assets/linked)'), dialog.detail);
+    assert.ok(copyNoticeDetails(result).includes('Symlinked folder: 2 (direct, assets/linked).'));
+    assert.equal(result.skippedUnreadableCount, 0);
+  });
+});
+
+test('symlinked folder notice names three and says how many more', () => {
+  const notice = copyNoticeDetails({
+    nonTextFiles: [], excludedNonTextCount: 0, limitLeftOut: 0, skippedUnreadableCount: 0, unreadablePaths: [],
+    symlinkedFolderCount: 5, symlinkedFolderPaths: ['a', 'b', 'c', 'd', 'e']
+  });
+  assert.deepEqual(notice, ['Symlinked folder: 5 (a, b, c and 2 more).']);
+});
+
+test('a symlink to a file is followed and carries the target bytes under the link path', async () => {
+  await withTempDir(async root => {
+    const bytes = png(9);
+    await put(path.join(root, 'store', 'pic.png'), bytes);
+    await put(path.join(root, 'store', 'note.ts'), 'note');
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await symlink(path.join(root, 'store', 'pic.png'), path.join(root, 'src', 'pic.png'), 'file');
+    await symlink(path.join(root, 'store', 'note.ts'), path.join(root, 'src', 'note.ts'), 'file');
+
+    // Expanded from a selected folder, and selected directly.
+    for (const input of [path.join(root, 'src'), path.join(root, 'src', 'pic.png')]) {
+      const result = await collectCopyFiles(root, [input], defaultSettings, INCLUDE);
+      const pic = result.files.find(f => f.path === 'src/pic.png');
+      assert.ok(pic?.nonText, `src/pic.png carried from ${input}`);
+      assert.deepEqual(Buffer.from(pic.nonText), bytes);
+      assert.equal(result.symlinkedFolderCount, 0);
+    }
+    const expanded = await collectCopyFiles(root, [path.join(root, 'src')], defaultSettings, INCLUDE);
+    assert.equal(expanded.files.find(f => f.path === 'src/note.ts')?.content, 'note');
+  });
+});
+
 test('case 25: an unescapable headerFormat offers only Exclude and says why', async () => {
   await withTempDir(async root => {
     await put(path.join(root, 'logo.png'), png(1));

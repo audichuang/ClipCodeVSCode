@@ -91,6 +91,10 @@ export interface CopyResult {
   skippedUnreadableCount: number;
   /** First UNREADABLE_PATHS_KEPT of those, as clipboard paths, for the notice. */
   unreadablePaths: string[];
+  /** Symlinks to a folder, selected or met while expanding: never walked, skipped and named. */
+  symlinkedFolderCount: number;
+  /** First UNREADABLE_PATHS_KEPT of those, as clipboard paths (the link's own path). */
+  symlinkedFolderPaths: string[];
   /** Exclude only: non-text files within the text limit that were left out. */
   excludedNonTextCount: number;
   fileLimitReached: boolean;
@@ -133,6 +137,8 @@ interface CopyState {
   skippedFileSizeCount: number;
   skippedUnreadableCount: number;
   unreadablePaths: string[];
+  symlinkedFolderCount: number;
+  symlinkedFolderPaths: string[];
   excludedNonTextCount: number;
   fileLimitReached: boolean;
   limitLeftOut: number;
@@ -159,6 +165,8 @@ export async function collectCopyFiles(
     skippedFileSizeCount: 0,
     skippedUnreadableCount: 0,
     unreadablePaths: [],
+    symlinkedFolderCount: 0,
+    symlinkedFolderPaths: [],
     excludedNonTextCount: 0,
     fileLimitReached: false,
     limitLeftOut: 0,
@@ -193,6 +201,8 @@ export async function collectCopyFiles(
       state.unreadablePaths.push(toClipboardPathFromRoots(roots, path.resolve(absolutePath)));
     }
   };
+  // A link reached twice (selected and also inside a selected folder) is named once.
+  const symlinkedFoldersSeen = new Set<string>();
 
   // Candidates buffered out of the ordered walk below; dedup and filtering happen
   // there (no I/O), so the candidate order is fixed before anything is read.
@@ -263,7 +273,18 @@ export async function collectCopyFiles(
       // Past the limit nothing is read; an unreadable folder there is not reported.
       if (!state.fileLimitReached) noteUnreadable(dirPath);
     };
-    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory, true, onUnreadable)) {
+    const onSymlinkedFolder = (linkPath: string) => {
+      // Same as an unreadable folder: past the limit it is not reported.
+      if (state.fileLimitReached) return;
+      const absolute = path.resolve(linkPath);
+      if (symlinkedFoldersSeen.has(absolute)) return;
+      symlinkedFoldersSeen.add(absolute);
+      state.symlinkedFolderCount++;
+      if (state.symlinkedFolderPaths.length < UNREADABLE_PATHS_KEPT) {
+        state.symlinkedFolderPaths.push(toClipboardPathFromRoots(roots, absolute));
+      }
+    };
+    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory, true, onUnreadable, onSymlinkedFolder)) {
       const absolutePath = path.resolve(filePath);
       if (seen.has(absolutePath)) continue;
       seen.add(absolutePath);
