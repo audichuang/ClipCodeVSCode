@@ -10,6 +10,7 @@ import { askAboutNonText, copyNoticeDetails, type NonTextChoice, type NonTextSum
 import { classifyBytes, type FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import { normalizeFsPath, readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
+import { makeRawBlobReader, withRawBlobs, type RawBlobReader } from './gitRawBlob.js';
 import { mapInOrder } from './concurrency.js';
 import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
@@ -146,9 +147,11 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
   return {
     resolveRepo(repoRootFsPath: string): ContentRepo | undefined {
       const target = normalizeFsPath(repoRootFsPath);
-      return api.repositories.find(r => normalizeFsPath(r.rootUri.fsPath) === target) as unknown as
+      const repo = api.repositories.find(r => normalizeFsPath(r.rootUri.fsPath) === target) as unknown as
         | ContentRepo
         | undefined;
+      // Raw blob reads first: the fallback must not hand back textconv output either.
+      return repo && withRawBlobs(repo, makeRawBlobReader(gitPath, gitEnv));
     },
     // Working-tree read for the UNCOMMITTED view (no commit to `git show`).
     readWorking: (absolutePath: string) => readWorkspaceClassified(vscode.Uri.file(absolutePath)),
@@ -357,7 +360,8 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
   const selected = collectResourceSelections(resources);
   const settings = readSettings();
   const result = await askAboutNonText(settings, async includeNonText => {
-    const collected = await collectGitPayloadFiles(api.repositories, roots, selected, settings, { includeNonText });
+    const collected = await collectGitPayloadFiles(api.repositories, roots, selected, settings,
+      { includeNonText, rawReader: makeRawBlobReader(runtimeGitPath()) });
     const payload = gitChangesPayload(collected, settings, roots);
     return { ...collected, payload, estimatedBytes: Buffer.byteLength(payload, 'utf8') };
   }, showNonTextDialog);
@@ -591,7 +595,11 @@ export async function collectGitPayloadFiles(
    * includeNonText carries non-text files as Base64 entries. False is the payload from
    * before non-text support, byte for byte.
    */
-  options: { includeNonText: boolean } = { includeNonText: false }
+  options: {
+    includeNonText: boolean;
+    /** Raw blob reads for staged / deleted content (no textconv); unit tests leave it out. */
+    rawReader?: RawBlobReader;
+  } = { includeNonText: false }
 ): Promise<GitPayloadFiles> {
   const files: PayloadFile[] = [];
   const seen = new Set<string>();
@@ -654,7 +662,9 @@ export async function collectGitPayloadFiles(
   const readLimit = options.includeNonText ? Math.max(sizeLimit, nonTextLimit) : sizeLimit;
   const fetched = mapInOrder(candidates, GIT_READ_CONCURRENCY, async candidate => ({
     candidate,
-    read: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent, readLimit)
+    read: await readGitChangeContent(
+      options.rawReader ? withRawBlobs(candidate.repository, options.rawReader) : candidate.repository,
+      candidate.change, candidate.changeType, candidate.forceIndexContent, readLimit)
   }));
   // Working-tree files that are unreadable (or non-text under Exclude). IntelliJ counts them
   // and, only in the Git layout (known after the loop), keeps them as an "Unable to read" entry.
@@ -775,7 +785,7 @@ function repositoryChanges(repository: GitRepository, dedupeByPath: boolean): Gi
 }
 
 async function readGitChangeContent(
-  repository: GitRepository,
+  repository: ContentRepo,
   change: GitChange,
   changeType: ChangeTypeLabel,
   forceIndexContent: boolean,

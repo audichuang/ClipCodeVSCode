@@ -108,7 +108,7 @@ export async function readFileAtCommit(
 
 /** readFileAtCommit, but a non-text blob comes back as its raw bytes instead of undefined. */
 export async function readClassifiedAtCommit(
-  repo: HistoryRepo,
+  repo: ContentRepo,
   hash: string,
   change: HistoryChange,
   parents: readonly string[] = []
