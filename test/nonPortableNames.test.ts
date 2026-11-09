@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { collectCopyFiles } from '../src/copy.js';
 import { buildGraphCopyPayload, type GraphCopyDeps } from '../src/graphCopy.js';
-import { collectHistoryCopy, historyCopyNotice } from '../src/historyCopy.js';
+import { collectHistoryCopy } from '../src/historyCopy.js';
 import type { FileNode } from '../src/historyTree.js';
 import { copyNoticeDetails, nonTextDialog } from '../src/nonTextDialog.js';
 import { isExportableRelativePath, nonPortableName } from '../src/pathResolver.js';
@@ -120,7 +120,8 @@ const graphSettings = {
   maxFileSizeKB: 500, fileCountLimit: 1, setMaxFileCount: true
 };
 
-test('Graph copy: non-portable git paths are never read, named, and do not use the file-count limit', async () => {
+test('Graph copy does not apply the files copy\'s "Name not portable" rule', async () => {
+  // Spec "What is carried": OpenIDEA's commit copies do not report this category.
   const requested: string[] = [];
   const deps: GraphCopyDeps = {
     resolveRepo: () => undefined,
@@ -128,20 +129,14 @@ test('Graph copy: non-portable git paths are never read, named, and do not use t
       requested.push(...paths);
       return new Map(paths.map(p => [p, { text: `body:${p}` }]));
     },
-    settings: graphSettings
+    settings: { ...graphSettings, setMaxFileCount: false }
   };
-  // Git paths are `/`-separated: the `\` is part of a name on every platform.
-  const files = ['a\\b.png', 'q"x.ts', 'bad:dir/x.ts', 't\tab.ts', 'ok 檔 😀.ts', 'later.ts']
-    .map(relativePath => ({ repoRootFsPath: '/repo', relativePath, status: 'M' }));
+  const names = ['a\\b.ts', 'q"x.ts', 'bad:dir/x.ts', 't\tab.ts', 'ok 檔 😀.ts'];
+  const files = names.map(relativePath => ({ repoRootFsPath: '/repo', relativePath, status: 'M' }));
   const result = await buildGraphCopyPayload(deps, { hash: 'abc', files });
-  assert.deepEqual(requested, ['ok 檔 😀.ts']);
-  assert.equal(result.copiedFileCount, 1);
-  assert.match(result.text, /ok 檔 😀\.ts\nbody:ok 檔 😀\.ts\n$/);
-  assert.equal(result.fileLimitReached, true);
-  assert.equal(result.limitLeftOut, 1, 'only later.ts is left out by the limit');
-  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'bad:dir/x.ts', 't\tab.ts']);
-  assert.ok(copyNoticeDetails({ ...result, unreadablePaths: [] })
-    .includes('Name not portable: 4 (a\\b.png, q"x.ts, bad:dir/x.ts and 1 more).'));
+  assert.deepEqual(requested, names);
+  assert.equal(result.copiedFileCount, 5);
+  assert.ok(!('nonPortableCount' in result));
 });
 
 function historyFile(name: string): FileNode {
@@ -153,19 +148,13 @@ function historyFile(name: string): FileNode {
   };
 }
 
-test('History copy: non-portable names are never read, named, and do not use the file-count limit', { skip: posixOnly }, async () => {
+test('History copy does not apply the files copy\'s "Name not portable" rule', { skip: posixOnly }, async () => {
   const read: string[] = [];
-  const files = ['a\\b.png', 'q"x.ts', 'c:d.ts', 'ok 檔 😀.ts', 'later.ts'].map(historyFile);
-  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: true, fileCountLimit: 1 };
-  const result = await collectHistoryCopy(files, async f => { read.push(f.name); return { text: 'x' }; }, settings, ['/repo']);
-  assert.deepEqual(read, ['ok 檔 😀.ts']);
-  assert.deepEqual(result.files.map(f => f.path), ['ok 檔 😀.ts']);
-  assert.equal(result.limitLeftOut, 1);
-  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts']);
-  assert.match(historyCopyNotice(result, settings).message, /Name not portable: 3 \(a\\b\.png, q"x\.ts, c:d\.ts\)\./);
-
-  // Everything refused: the warning names them instead of "No Git changes found".
-  const none = await collectHistoryCopy(files.slice(0, 3), async () => ({ text: 'x' }), settings, ['/repo']);
-  assert.equal(historyCopyNotice(none, settings).emptyWarning,
-    'No Git changes copied. Name not portable: 3 (a\\b.png, q"x.ts, c:d.ts).');
+  const names = ['q"x.ts', 'c:d.ts', 'ok 檔 😀.ts'];
+  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: false };
+  const result = await collectHistoryCopy(names.map(historyFile), async f => { read.push(f.name); return { text: 'x' }; }, settings, ['/repo']);
+  assert.deepEqual(read, names);
+  // The clipboard path falls back to the absolute path, as before (toClipboardPathFromRoots).
+  assert.deepEqual(result.files.map(f => f.path), ['/repo/q"x.ts', '/repo/c:d.ts', 'ok 檔 😀.ts']);
+  assert.ok(!('nonPortableCount' in result));
 });
