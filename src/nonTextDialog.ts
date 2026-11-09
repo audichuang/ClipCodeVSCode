@@ -1,11 +1,12 @@
 import { headerFormatUnescapable } from './clipboardFormat.js';
-import type { CopyResult } from './copy.js';
 import { formatSize } from './restoreSummary.js';
 import type { ClipCodeSettings } from './settings.js';
 
 // User text for a files copy that found non-text files (spec non-text-files.md, "Asking the
 // user"). Pure, so the numbers can be checked against the Include result in unit tests.
-// Every number here is read off the Include CopyResult itself, never a parallel estimate.
+// Every number here is read off the Include result itself, never a parallel estimate.
+// Shared by every copy surface: files and open editors (CopyResult), SCM changes, and the
+// Graph / PR / History commit copies.
 
 export type NonTextChoice = 'Include' | 'Exclude';
 
@@ -17,6 +18,32 @@ const NOTICE_PATHS = 3;
 const PATH_WIDTH = 70;
 const ELLIPSIS = '…';
 
+/** What the dialog reads off an Include result; every copy surface's result provides it. */
+export interface NonTextSummary {
+  /** The non-text entries carried as Base64, in payload order. */
+  nonTextFiles: { path: string; size: number }[];
+  nonTextTotalBytes: number;
+  /** Non-text files read but over maxNonTextFileSizeKB, copied as size placeholders. */
+  nonTextOverLimitCount: number;
+  /** Over both per-file limits: never read (kind unknown), copied as size placeholders. */
+  unreadOverLimitCount: number;
+  /** Candidates the file-count limit cut off. */
+  limitLeftOut: number;
+  /** UTF-8 byte length of the payload. */
+  estimatedBytes: number;
+}
+
+/** What the completion notice reads off the result that was copied. */
+export interface NonTextNoticeCounts {
+  nonTextFiles: { path: string; size: number }[];
+  /** Exclude only: non-text files left out. */
+  excludedNonTextCount: number;
+  limitLeftOut: number;
+  /** Unreadable items, non-text files left out NOT included. */
+  skippedUnreadableCount: number;
+  unreadablePaths: string[];
+}
+
 export interface NonTextDialog {
   message: string;
   detail: string;
@@ -24,7 +51,7 @@ export interface NonTextDialog {
   buttons: NonTextChoice[];
 }
 
-export function nonTextDialog(include: CopyResult, settings: ClipCodeSettings): NonTextDialog {
+export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSettings, 'headerFormat'>): NonTextDialog {
   const includeAllowed = !headerFormatUnescapable(settings.headerFormat);
   const lines = [
     `Non-text files: ${include.nonTextFiles.length} (${formatSize(include.nonTextTotalBytes)})`,
@@ -64,7 +91,7 @@ export function nonTextDialog(include: CopyResult, settings: ClipCodeSettings): 
  * The parts of the completion notice that are about what did NOT go in as text, each a
  * sentence. Never says "binary" or "non-UTF-8" (spec: "non-text file").
  */
-export function copyNoticeDetails(result: CopyResult): string[] {
+export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   const parts: string[] = [];
   if (result.nonTextFiles.length > 0) parts.push(`Non-text files copied as Base64: ${result.nonTextFiles.length}.`);
   if (result.excludedNonTextCount > 0) parts.push(`Non-text files left out: ${result.excludedNonTextCount}.`);
@@ -73,9 +100,36 @@ export function copyNoticeDetails(result: CopyResult): string[] {
     const named = result.unreadablePaths.slice(0, NOTICE_PATHS);
     const more = result.skippedUnreadableCount - named.length;
     const list = named.join(', ') + (more > 0 ? ` and ${more} more` : '');
-    parts.push(`Unreadable: ${result.skippedUnreadableCount} (${list}).`);
+    parts.push(list ? `Unreadable: ${result.skippedUnreadableCount} (${list}).` : `Unreadable: ${result.skippedUnreadableCount}.`);
   }
   return parts;
+}
+
+/** `vscode.window.showWarningMessage` with the dialog's buttons; injected so this stays pure. */
+export type ShowNonTextDialog = (
+  message: string,
+  options: { modal: true; detail: string },
+  ...buttons: NonTextChoice[]
+) => PromiseLike<NonTextChoice | undefined>;
+
+/**
+ * Runs the Include copy and, when it carries at least one non-text file, asks whether to
+ * keep them (Include), leave them out (Exclude: `run(false)`, the payload as before
+ * non-text support) or copy nothing (Cancel / Esc → undefined). A copy without non-text
+ * files never asks. The one decision flow every copy surface goes through.
+ */
+export async function askAboutNonText<T extends NonTextSummary>(
+  settings: Pick<ClipCodeSettings, 'headerFormat'>,
+  run: (includeNonText: boolean) => Promise<T>,
+  show: ShowNonTextDialog
+): Promise<T | undefined> {
+  const include = await run(true);
+  if (include.nonTextFiles.length === 0) return include;
+  const dialog = nonTextDialog(include, settings);
+  const choice = await show(dialog.message, { modal: true, detail: dialog.detail }, ...dialog.buttons);
+  if (choice === 'Include' && dialog.buttons.includes('Include')) return include;
+  if (choice === 'Exclude') return run(false);
+  return undefined;
 }
 
 function graphemes(text: string): string[] {

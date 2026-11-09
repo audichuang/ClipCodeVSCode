@@ -201,3 +201,116 @@ test('working-tree size is checked before decoding, and an unreadable file is co
     workspaceBytes.clear();
   }
 });
+
+// ---- Non-text files on the SCM surface (spec non-text-files.md, cases 1, 2, 7, 11) ----
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48]);
+const BIG5 = new Uint8Array([0xa4, 0xe9, 0xa5, 0xbb]);
+
+test('SCM Include carries non-text working-tree and staged files as Base64; Exclude keeps the old payload', async () => {
+  workspaceBytes.set('/repo/logo.png', PNG);
+  // 2048 bytes: over a 1 KB text limit, inside the 2048 KB non-text limit.
+  workspaceBytes.set('/repo/big.png', new Uint8Array(2048).fill(0));
+  workspaceBytes.set('/repo/a.ts', new TextEncoder().encode('text'));
+  const index = new Map([['legacy.csv', BIG5]]);
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: {
+      workingTreeChanges: [
+        { uri: new Uri('/repo/logo.png'), status: 'MODIFIED' },
+        { uri: new Uri('/repo/big.png'), status: 'MODIFIED' },
+        { uri: new Uri('/repo/a.ts'), status: 'MODIFIED' },
+      ],
+      indexChanges: [{ uri: new Uri('/repo/legacy.csv'), status: 'INDEX_MODIFIED' }],
+    },
+    buffer: async (ref: string, file: string) => {
+      const bytes = ref === '' ? index.get(file) : undefined;
+      if (!bytes) throw new Error('missing');
+      return bytes;
+    },
+  };
+  const selected = [
+    { uriKey: '/repo/logo.png' }, { uriKey: '/repo/big.png' }, { uriKey: '/repo/a.ts' },
+    { uriKey: '/repo/legacy.csv', staged: true },
+  ];
+  const settings = { ...defaultSettings, maxFileSizeKB: 1 };
+  const { collectGitPayloadFiles } = await extensionModule;
+  try {
+    const include = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, settings, { includeNonText: true });
+    assert.deepEqual(include.files, [
+      { path: 'logo.png', nonText: PNG, changeType: 'MODIFIED' },
+      { path: 'big.png', nonText: new Uint8Array(2048), changeType: 'MODIFIED' },
+      { path: 'a.ts', content: 'text', changeType: 'MODIFIED' },
+      { path: 'legacy.csv', nonText: BIG5, changeType: 'MODIFIED' },
+    ]);
+    assert.deepEqual(include.nonTextFiles, [
+      { path: 'logo.png', size: PNG.length }, { path: 'big.png', size: 2048 }, { path: 'legacy.csv', size: BIG5.length },
+    ]);
+    assert.equal(include.nonTextTotalBytes, PNG.length + 2048 + BIG5.length);
+    assert.equal(include.copiedFileCount, 4);
+    assert.equal(include.skippedUnreadableCount, 0);
+
+    // Exclude, and the default (no options) that every caller used before: the old result.
+    const exclude = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, settings, { includeNonText: false });
+    const legacy = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, settings);
+    assert.deepEqual(exclude, legacy);
+    assert.deepEqual(exclude.files, [
+      { path: 'logo.png', content: '// Unable to read file content', changeType: 'MODIFIED' },
+      { path: 'big.png', changeType: 'MODIFIED', skippedReason: 'size exceeds limit (2048 bytes)' },
+      { path: 'a.ts', content: 'text', changeType: 'MODIFIED' },
+      { path: 'legacy.csv', content: '// Unable to read file content', changeType: 'MODIFIED' },
+    ]);
+    assert.deepEqual(exclude.nonTextFiles, []);
+    assert.equal(exclude.excludedNonTextCount, 2);
+    assert.equal(exclude.skippedUnreadableCount, 2);
+  } finally {
+    workspaceBytes.clear();
+  }
+});
+
+test('SCM Include: a non-text file over its own limit is a size placeholder, a deleted one keeps its body', async () => {
+  workspaceBytes.set('/repo/huge.png', new Uint8Array(3 * 1024).fill(0));
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: {
+      workingTreeChanges: [
+        { uri: new Uri('/repo/huge.png'), status: 'MODIFIED' },
+        { uri: new Uri('/repo/gone.png'), status: 'DELETED' },
+      ],
+    },
+    // HEAD still has the deleted image's bytes; a [DELETED] body must not carry them.
+    buffer: async () => PNG,
+  };
+  const selected = [{ uriKey: '/repo/huge.png' }, { uriKey: '/repo/gone.png' }];
+  const { collectGitPayloadFiles } = await extensionModule;
+  try {
+    const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected,
+      { ...defaultSettings, maxFileSizeKB: 4, maxNonTextFileSizeKB: 2 }, { includeNonText: true });
+    assert.deepEqual(result.files, [
+      { path: 'huge.png', changeType: 'MODIFIED', skippedReason: 'size exceeds limit (3072 bytes)' },
+      { path: 'gone.png', content: '// This file has been deleted in this change', changeType: 'DELETED' },
+    ]);
+    assert.equal(result.nonTextOverLimitCount, 1);
+    assert.deepEqual(result.nonTextFiles, []);
+  } finally {
+    workspaceBytes.clear();
+  }
+});
+
+test('SCM Include: non-text files count toward the file-count limit and the left-out count is reported', async () => {
+  for (const name of ['a.png', 'b.png', 'c.png']) workspaceBytes.set(`/repo/${name}`, PNG);
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: { workingTreeChanges: ['a.png', 'b.png', 'c.png'].map(name => ({ uri: new Uri(`/repo/${name}`), status: 'MODIFIED' })) },
+  };
+  const { collectGitPayloadFiles } = await extensionModule;
+  try {
+    const result = await collectGitPayloadFiles([repository] as never, ['/repo'], [],
+      { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 2 }, { includeNonText: true });
+    assert.deepEqual(result.nonTextFiles.map(f => f.path), ['a.png', 'b.png']);
+    assert.equal(result.fileLimitReached, true);
+    assert.equal(result.limitLeftOut, 1);
+  } finally {
+    workspaceBytes.clear();
+  }
+});
