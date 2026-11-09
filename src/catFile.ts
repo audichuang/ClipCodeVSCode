@@ -1,4 +1,4 @@
-import { decodeUtf8OrSkip } from './fileSystem.js';
+import { classifyBytes, type FileContent } from './fileSystem.js';
 
 // Read many committed blobs in ONE `git cat-file --batch` process instead of one
 // `git show` per file. The vscode.git API serializes per-repo operations, so
@@ -16,11 +16,11 @@ export function formatBatchRequest(hash: string, relativePaths: string[]): strin
 
 /**
  * Parse `git cat-file --batch` stdout against the request order. Returns a map
- * from relativePath to its text content, or `undefined` for a missing object or
- * binary content (a NUL byte) — matching the per-file reader's skip behaviour.
+ * from relativePath to its classified content (text, or a non-text blob's raw bytes),
+ * or `undefined` for a malformed entry. A missing object has no key at all.
  */
-export function parseCatFileBatch(stdout: Buffer, relativePaths: string[]): Map<string, string | undefined> {
-  const result = new Map<string, string | undefined>();
+export function parseCatFileBatch(stdout: Buffer, relativePaths: string[]): Map<string, FileContent | undefined> {
+  const result = new Map<string, FileContent | undefined>();
   let offset = 0;
 
   for (const path of relativePaths) {
@@ -44,12 +44,14 @@ export function parseCatFileBatch(stdout: Buffer, relativePaths: string[]): Map<
 
     const body = stdout.subarray(offset, offset + size);
     offset += size + 1; // skip the content bytes and the trailing LF git appends
-    // decodeUtf8OrSkip, never Buffer.toString('utf8'): toString decodes leniently, so a
+    // classifyBytes (strict decode), never Buffer.toString('utf8'): toString decodes leniently, so a
     // Big5/Shift_JIS blob came back as U+FFFD mojibake that Paste & Restore then wrote over
     // the real file. This batch reader is the NORMAL path for Graph/PR/commit copies —
     // readRefContent's strict decode is only the spawn-failure fallback — so the guard the
     // disk path enforces was being skipped by exactly the entry points that copy blobs.
-    result.set(path, decodeUtf8OrSkip(body));
+    // A copy, not a view: the body is a slice of the whole batch output, which a
+    // non-text entry would otherwise keep alive for as long as the payload lives.
+    result.set(path, classifyBytes(new Uint8Array(body)));
   }
 
   return result;

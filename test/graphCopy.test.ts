@@ -97,7 +97,7 @@ test('UNCOMMITTED hash reads working-tree content via readWorking, not git show'
   const repo = fakeRepo('/repo', { 'a.ts': 'COMMITTED' }); // git show must NOT be used
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readWorking: async (abs: string) => (abs === '/repo/a.ts' ? 'WORKING' : undefined),
+    readWorking: async (abs: string) => (abs === '/repo/a.ts' ? { text: 'WORKING' } : undefined),
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -163,7 +163,7 @@ test('committed view reads all content via one readBatch call, not per-file show
   };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { batchCalls++; return new Map(paths.map(p => [p, `batched ${p}`])); },
+    readBatch: async (_root, _hash, paths) => { batchCalls++; return new Map(paths.map(p => [p, { text: `batched ${p}` }])); },
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -180,9 +180,10 @@ test('committed view reads all content via one readBatch call, not per-file show
   assert.match(r.text, /batched b\.ts/);
 });
 
-test('a path containing a newline is kept out of the batch and read per-file', async () => {
-  // cat-file --batch is newline-delimited; a path with a line break would corrupt
-  // request/response alignment, so it must go to the per-file reader instead.
+test('a path containing a newline is never read: it is skipped and named as not portable (X1)', async () => {
+  // A line break in a name cannot travel in a header (decision X1, 2026-11-09): it used to
+  // go to the per-file reader and land in the payload under a header that splits in two.
+  // It now never reaches cat-file --batch or the per-file reader.
   const requestedBatches: string[][] = [];
   let showCalls = 0;
   const repo: ContentRepo = {
@@ -191,7 +192,7 @@ test('a path containing a newline is kept out of the batch and read per-file', a
   };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, `batched ${p}`])); },
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, { text: `batched ${p}` }])); },
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -202,9 +203,10 @@ test('a path containing a newline is kept out of the batch and read per-file', a
     ]
   });
   assert.deepEqual(requestedBatches, [['ok.ts']]);     // newline path excluded from the batch
-  assert.equal(showCalls, 1);                          // it fell back to a per-file read
+  assert.equal(showCalls, 0);                          // and not read per-file either
   assert.match(r.text, /batched ok\.ts/);
-  assert.match(r.text, /shown weird<NL>name\.ts/);
+  assert.doesNotMatch(r.text, /weird/);
+  assert.deepEqual(r.nonPortablePaths, ['weird\nname.ts']);
 });
 
 test('batch request is capped at the file-count limit (no reading past it)', async () => {
@@ -213,7 +215,7 @@ test('batch request is capped at the file-count limit (no reading past it)', asy
   const limited: GraphCopySettings = { ...settings, setMaxFileCount: true, fileCountLimit: 2 };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, p])); },
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, { text: p }])); },
     settings: limited
   };
   await buildGraphCopyPayload(d, {
@@ -248,7 +250,7 @@ test('committed copy works via readBatch even when resolveRepo cannot match (SSH
   // `git -C <root>` directly, so a vscode.git path mismatch must NOT block the copy.
   const d: GraphCopyDeps = {
     resolveRepo: () => undefined, // vscode.git knows the repo under a different path → no match
-    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, `batched ${p}`])),
+    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, { text: `batched ${p}` }])),
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -263,7 +265,7 @@ test('committed copy works via readBatch even when resolveRepo cannot match (SSH
 test('uncommitted copy works via readWorking even when resolveRepo cannot match', async () => {
   const d: GraphCopyDeps = {
     resolveRepo: () => undefined,
-    readWorking: async (abs: string) => (abs === '/realpath/repo/a.ts' ? 'WORKING' : undefined),
+    readWorking: async (abs: string) => (abs === '/realpath/repo/a.ts' ? { text: 'WORKING' } : undefined),
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -614,4 +616,51 @@ test('a multi-commit union reads each deleted file from its own deleting commit\
     files: [{ repoRootFsPath: '/repo', relativePath: 'gone.ts', status: 'D', beforeRefs: ['c2^1', 'c2^2', 'c2^3'] }]
   });
   assert.match(r.text, /\/\/ file: \[DELETED\] gone\.ts\npre-deletion body/);
+});
+
+test('X7 on Graph uncommitted: a working-tree link out of every root is not read and is named Unreadable', {
+  skip: process.platform === 'win32' ? 'file symlinks need privileges on Windows' : undefined
+}, async () => {
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'clipcode-graph-x7-')));
+  try {
+    const root = path.join(base, 'repo');
+    mkdirSync(root);
+    writeFileSync(path.join(base, 'secret.txt'), 'token=hunter2');
+    writeFileSync(path.join(root, 'keep.ts'), 'keep');
+    symlinkSync(path.join(base, 'secret.txt'), path.join(root, 'CLAUDE.md'), 'file');
+    const reads: string[] = [];
+    const files = ['CLAUDE.md', 'keep.ts'].map(relativePath => ({ repoRootFsPath: root, relativePath, status: 'M' }));
+    // With a workspace open on the repo, and with none (the repo root is the copy root).
+    for (const workspaceRoots of [[root], undefined]) {
+      reads.length = 0;
+      const r = await buildGraphCopyPayload({
+        resolveRepo: () => undefined,
+        readWorking: async (abs: string) => { reads.push(abs); return { text: abs.endsWith('keep.ts') ? 'keep' : 'LEAKED' }; },
+        workspaceRoots,
+        settings
+      }, { hash: UNCOMMITTED_HASH, files });
+      assert.ok(!reads.some(p => p.endsWith('CLAUDE.md')), `the link is never read (read: ${reads.join(', ')})`);
+      assert.doesNotMatch(r.text, /LEAKED/);
+      assert.equal(r.copiedFileCount, 1);
+      assert.equal(r.skippedUnreadableCount, 1);
+      assert.deepEqual(r.unreadablePaths, ['CLAUDE.md']);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a commit that only deletes an image is copied (Exclude and Include) — the Git gate lets it through', async () => {
+  const { copyNoticeDetails, gitCopyNothingToCopy } = await import('../src/nonTextDialog.js');
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+  const repo: ContentRepo = { rootUri: { fsPath: '/repo' }, buffer: async () => Buffer.from(png) };
+  for (const includeNonText of [false, true]) {
+    const r = await buildGraphCopyPayload(deps(repo), {
+      hash: 'abc',
+      files: [{ repoRootFsPath: '/repo', relativePath: 'logo.png', status: 'D' }]
+    }, { includeNonText });
+    assert.match(r.text, /\[DELETED\] logo\.png/);
+    assert.equal(gitCopyNothingToCopy(r, copyNoticeDetails(r), 'No source copied.'), undefined, `includeNonText=${includeNonText}`);
+  }
 });

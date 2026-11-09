@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
-import { buildGitPayload, type PayloadFile } from './clipboardFormat.js';
-import { fileMatchesFilters } from './filterMatcher.js';
-import { type HistoryRepo, readFileAtCommit } from './gitHistory.js';
+import { type HistoryRepo, readClassifiedAtCommit } from './gitHistory.js';
+import { collectHistoryCopy, historyCopyNotice, historyGitPaths } from './historyCopy.js';
+import { makeChangedPathLister, makeRawBlobReader, withRawBlobs } from './gitRawBlob.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
+import { askAboutNonText } from './nonTextDialog.js';
 import { notifyCopied } from './notify.js';
-import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 
 interface GitExtension { readonly enabled: boolean; readonly onDidChangeEnablement: vscode.Event<boolean>; getAPI(version: 1): GitAPI; }
-interface GitAPI { readonly repositories: HistoryRepo[]; readonly onDidOpenRepository: vscode.Event<HistoryRepo>; readonly onDidCloseRepository: vscode.Event<HistoryRepo>; }
+interface GitAPI { readonly git?: { readonly path?: string }; readonly repositories: HistoryRepo[]; readonly onDidOpenRepository: vscode.Event<HistoryRepo>; readonly onDidCloseRepository: vscode.Event<HistoryRepo>; }
 
 const LAST_REPO_KEY = 'clipcode.history.lastRepoRoot';
 
@@ -77,12 +77,14 @@ export function registerHistoryView(context: vscode.ExtensionContext): void {
       if (pick) useRepo(pick.repo);
     }),
     vscode.commands.registerCommand('clipcode.history.copyFullSource', async (clicked?: HistoryNode, selected?: HistoryNode[]) => {
-      await copyFullSource(provider, treeView, resolveSourceNodes(clicked, selected, treeView.selection));
+      await copyFullSource(provider, treeView, resolveSourceNodes(clicked, selected, treeView.selection), api?.git?.path ?? 'git');
     }),
   );
 }
 
-async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.TreeView<HistoryNode>, sources: HistoryNode[]): Promise<void> {
+async function copyFullSource(
+  provider: HistoryTreeProvider, treeView: vscode.TreeView<HistoryNode>, sources: HistoryNode[], gitPath: string
+): Promise<void> {
   if (sources.length === 0) { vscode.window.showWarningMessage('No files selected.'); return; }
   const settings = readSettings();
   const roots = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
@@ -96,46 +98,25 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
     return;
   }
   const files = dedupeFilesKeepNewest(collected);
+  // Raw blob reads (`git cat-file`): the Git extension's buffer() applies textconv.
+  const repo = withRawBlobs(provider.repo!, makeRawBlobReader(gitPath));
+  // The git spelling of each path, for the "Name not portable" check (decision X1).
+  const gitPaths = await historyGitPaths(files, makeChangedPathLister(gitPath));
 
-  const payloadFiles: PayloadFile[] = [];
-  let copied = 0, skippedSize = 0, limitReached = false;
-  const unresolved: string[] = [];
-  for (const f of files) {
-    if (settings.setMaxFileCount && copied >= settings.fileCountLimit) { limitReached = true; break; }
-    const absPath = (f.change.renameUri ?? f.change.uri).fsPath;
-    const clipboardPath = toClipboardPathFromRoots(roots.length ? roots : [f.repoRoot], absPath);
-    if (settings.useFilters && !fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath)) continue;
+  const result = await askAboutNonText(
+    settings,
+    includeNonText => collectHistoryCopy(
+      files, f => readClassifiedAtCommit(repo, f.commit.hash, f.change, f.commit.parents), settings, roots, { includeNonText, gitPaths }),
+    (message, options, ...buttons) => vscode.window.showWarningMessage(message, options, ...buttons)
+  );
+  if (!result) return;
 
-    const content = await readFileAtCommit(provider.repo!, f.commit.hash, f.change, f.commit.parents);
-    // Binary / non-UTF-8 at that commit: left out of the payload, as in IntelliJ, which then
-    // warns "N files could not be resolved" (CopyGitFilesContentAction) instead of dropping
-    // them in silence.
-    if (content === undefined) { unresolved.push(basename(absPath)); continue; }
-
-    const size = Buffer.byteLength(content, 'utf8');
-    if (size > settings.maxFileSizeKB * 1024) {
-      skippedSize++; payloadFiles.push({ path: clipboardPath, changeType: f.changeType, skippedReason: `size exceeds limit (${size} bytes)` }); continue;
-    }
-    payloadFiles.push({ path: clipboardPath, content, changeType: f.changeType }); copied++;
-  }
-
-  if (unresolved.length > 0) {
-    vscode.window.showWarningMessage(`${unresolved.length} files could not be resolved: ${unresolved.join(', ')}`);
-  }
-  if (payloadFiles.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
-  // Same single-root rule as every other copy path — without it this entry's payload
-  // carries no `// clipcode-root:` line and Paste & Restore cannot align folder levels.
-  const opts = { headerFormat: settings.headerFormat, preText: settings.preText, postText: settings.postText, addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles, files: payloadFiles, sourceRoot: sourceRootName(roots) };
-  // Always the Git layout: IntelliJ copies every log/history selection through
-  // GitClipboardPayloadBuilder.buildGitPayload, and so does the Graph copy here.
-  // buildPayload added blank lines, so the same commit gave different bytes per tool.
-  const payload = buildGitPayload(opts);
-  await vscode.env.clipboard.writeText(payload);
-  if (settings.showCopyNotification) {
-    const s = skippedSize > 0 ? ` (${skippedSize} skipped: size exceeded)` : '';
-    const l = limitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    notifyCopied(`${copied} Git file(s) copied${s}.${l}`, payload);
-  }
+  const notice = historyCopyNotice(result, settings);
+  // Nothing to copy: one warning, naming the unreadable files too (case 30); clipboard untouched.
+  if (notice.emptyWarning !== undefined) { vscode.window.showWarningMessage(notice.emptyWarning); return; }
+  if (notice.unresolvedWarning) vscode.window.showWarningMessage(notice.unresolvedWarning);
+  await vscode.env.clipboard.writeText(result.payload);
+  if (settings.showCopyNotification) notifyCopied(notice.message, result.payload);
 }
 
 function basename(p: string): string { return p.replaceAll('\\', '/').split('/').filter(Boolean).pop() ?? p; }
@@ -145,7 +126,8 @@ function readSettings(): ClipCodeSettings {
   return normalizeSettings({
     headerFormat: c.get('headerFormat'), preText: c.get('preText'), postText: c.get('postText'),
     addExtraLineBetweenFiles: c.get('addExtraLineBetweenFiles'), setMaxFileCount: c.get('setMaxFileCount'),
-    fileCountLimit: c.get('fileCountLimit'), maxFileSizeKB: c.get('maxFileSizeKB'), showCopyNotification: c.get('showCopyNotification'),
+    fileCountLimit: c.get('fileCountLimit'), maxFileSizeKB: c.get('maxFileSizeKB'),
+    maxNonTextFileSizeKB: c.get('maxNonTextFileSizeKB'), showCopyNotification: c.get('showCopyNotification'),
     useFilters: c.get('useFilters'), useIncludeFilters: c.get('useIncludeFilters'), useExcludeFilters: c.get('useExcludeFilters'),
     filterRules: c.get<FilterRule[]>('filterRules'),
   });

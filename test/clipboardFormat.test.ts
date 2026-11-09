@@ -6,9 +6,12 @@ import {
   extractLeadingLabels,
   extractSourceRoot,
   formatHeader,
+  headerFormatUnescapable,
   parseClipboard,
-  stripLeadingLabels
+  stripLeadingLabels,
+  type PayloadFile
 } from '../src/clipboardFormat.js';
+import { parseBody } from '../src/nonText.js';
 import { DELETED_FILE_MARKER } from '../src/gitCopy.js';
 
 test('formats default and labeled headers like IntelliJ ClipCode', () => {
@@ -317,4 +320,78 @@ test('the Turkish dotless i is not a header on either side', () => {
   // ASCII case-insensitivity is preserved.
   assert.equal(parseClipboard('// FILE: a.ts\nbody', '// file: $FILE_PATH')[0]?.path, 'a.ts');
   assert.equal(parseClipboard('// File: b.ts\nbody', '// file: $FILE_PATH')[0]?.path, 'b.ts');
+});
+
+const PLACEHOLDER = `// File skipped: non-text file, 3 bytes, sha256 ${'0'.repeat(63)}1; base64 follows`;
+const roundTrip = (headerFormat: string, files: PayloadFile[]) =>
+  parseClipboard(
+    buildPayload({ headerFormat, preText: '', postText: '', addExtraLineBetweenFiles: true, files }),
+    headerFormat
+  );
+
+test('a non-text entry is a placeholder line plus 76-column Base64 and decodes back', () => {
+  const bytes = Uint8Array.from({ length: 100 }, (_, i) => (i * 13) & 0xff);
+  const payload = buildPayload({
+    headerFormat: '// file: $FILE_PATH',
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: false,
+    files: [{ path: 'a.bin', nonText: bytes }]
+  });
+  const lines = payload.split('\n');
+  assert.match(lines[2], /^\/\/ File skipped: non-text file, 100 bytes, sha256 [0-9a-f]{64}; base64 follows$/);
+  assert.equal(lines[3].length, 76);
+  const [entry] = parseClipboard(payload, '// file: $FILE_PATH');
+  assert.deepEqual(parseBody(entry.content), { bytes });
+  assert.equal(entry.escapedPlaceholder, undefined);
+});
+
+test('skippedReason wins over nonText', () => {
+  const payload = buildPayload({
+    headerFormat: '// file: $FILE_PATH',
+    preText: '',
+    postText: '',
+    addExtraLineBetweenFiles: false,
+    files: [{ path: 'a.bin', skippedReason: 'size exceeds limit (9 bytes)', nonText: Uint8Array.from([1]) }]
+  });
+  assert.ok(payload.includes('// File skipped: size exceeds limit (9 bytes)'));
+  assert.ok(!payload.includes('non-text file'));
+});
+
+test('a text file whose first line is a placeholder gets two escape layers and reads back as text', () => {
+  for (const header of ['// file: $FILE_PATH', '// $FILE_PATH', 'A$FILE_PATH', ' $FILE_PATH']) {
+    const text = `${PLACEHOLDER}\nYWJj`;
+    const real = Uint8Array.from([0, 255, 1]);
+    const entries = roundTrip(header, [
+      { path: 'a.bin', nonText: real },
+      { path: 't.txt', content: text },
+      { path: 'u.txt', content: `//clipcode-esc: ${PLACEHOLDER}\nline two` }
+    ]);
+    assert.equal(entries.length, 3, header);
+    assert.equal(entries[0].escapedPlaceholder, undefined, header);
+    assert.deepEqual(parseBody(entries[0].content), { bytes: real }, header);
+    assert.equal(entries[1].escapedPlaceholder, true, header);
+    assert.equal(entries[1].content, text, header);
+    assert.equal(entries[2].escapedPlaceholder, true, header);
+    assert.equal(entries[2].content, `//clipcode-esc: ${PLACEHOLDER}\nline two`, header);
+  }
+});
+
+test('the placeholder escape goes on the first NON-BLANK line, not on a leading blank one', () => {
+  const header = ' $FILE_PATH';
+  const text = `   \n${PLACEHOLDER}\nAQID`;
+  const payload = buildPayload({ headerFormat: header, preText: '', postText: '', addExtraLineBetweenFiles: true, files: [{ path: 't.txt', content: text }] });
+  assert.ok(payload.includes(`\n//clipcode-esc:    \n//clipcode-esc: //clipcode-esc: ${PLACEHOLDER}\n`));
+  const [entry] = parseClipboard(payload, header);
+  assert.equal(entry.content, text);
+  assert.equal(entry.escapedPlaceholder, true);
+});
+
+test('headerFormatUnescapable flags formats whose placeholder or Base64 lines stay headers', () => {
+  for (const header of ['$FILE_PATH', '//$FILE_PATH', '$FILE_PATH==']) {
+    assert.equal(headerFormatUnescapable(header), true, header);
+  }
+  for (const header of ['// file: $FILE_PATH', '// $FILE_PATH', 'A$FILE_PATH', ' $FILE_PATH', '# $FILE_PATH', 'no placeholder']) {
+    assert.equal(headerFormatUnescapable(header), false, header);
+  }
 });

@@ -464,6 +464,122 @@ function ambiguous(relativePath: string, candidates: TargetCandidate[]): Rejecte
   };
 }
 
+/**
+ * True when [value] is already the exact relative path a payload header carries, so the
+ * paste side's sanitizer (below) keeps it unchanged. The copy side's portability rule: a
+ * `\` in a real name, `..`, `<>:"|?*`, a control character or an edge space changes the
+ * value, so the file is skipped and named "Name not portable" instead of restoring under
+ * another name (or not at all). Mirror of OpenIDEA paths.rs `is_exportable_relative_path`.
+ */
+export function isExportableRelativePath(value: string): boolean {
+  return sanitizeRelativePath(value) === value;
+}
+
+/**
+ * The real name of [absolutePath] when the copy must refuse it as not portable, else
+ * undefined. Judged on the NATIVE path components below the root the clipboard path is
+ * relative to (the primary root first, else the deepest root holding it), never on the
+ * clipboard path itself: that one is slash-normalised, so `a\b.png` on Linux already reads
+ * `a/b.png` there. A path under no root is judged on every component after its filesystem
+ * root (the drive or `/`), the directories the paste side keeps. The returned name keeps
+ * a `\` as typed, prefixed like the clipboard path (a root label, or nothing).
+ *
+ * The edge-whitespace rule is on the whole FILE path, so a [directory] is judged as a path
+ * that continues below it: a leading space still refuses it (every file under it starts
+ * with that space), a trailing space does not (`mid /ok.ts` is portable).
+ */
+export function nonPortableName(
+  workspaceRoots: string[],
+  absolutePath: string,
+  options: { directory?: boolean } = {}
+): string | undefined {
+  const portable = (value: string): boolean => isExportableRelativePath(options.directory ? `${value}/_` : value);
+  const absolute = path.resolve(absolutePath);
+  const below = (root: string): string | undefined => {
+    const relative = path.relative(path.resolve(root), absolute);
+    if (relative === '' || path.isAbsolute(relative)) return undefined;
+    if (relative === '..' || relative.startsWith(`..${path.sep}`)) return undefined;
+    return relative;
+  };
+  // A workspace root itself is always portable: its own name is never in a header. Checked
+  // before the root search, or a root nested in another (`/repo/app:one` inside `/repo`)
+  // was judged by the parent as `app:one` and its whole tree pruned.
+  if (workspaceRoots.some(r => path.resolve(r) === absolute)) return undefined;
+  const [primary, ...others] = workspaceRoots;
+  let root: string | undefined;
+  let relative: string | undefined;
+  if (primary !== undefined && (relative = below(primary)) !== undefined) {
+    root = primary;
+  } else {
+    for (const candidate of [...others].sort((a, b) => path.resolve(b).length - path.resolve(a).length)) {
+      relative = below(candidate);
+      if (relative !== undefined) { root = candidate; break; }
+    }
+  }
+  if (root === undefined || relative === undefined) {
+    // Under no root the header is the absolute path (decision X15): a control character
+    // anywhere in it would split the header line, so it refuses the file; otherwise only
+    // the file's own name is judged. Its folders are not relative segments a reader
+    // restores, so `:` or `"` there is allowed (it may not resolve on paste, as before).
+    // Mirror of IntelliJ PortableName.checkedPath + headerStaysOneLine.
+    if (CONTROL_CHARACTER.test(absolute)) return absolute;
+    const name = path.basename(absolute);
+    return name === '' || portable(name) ? undefined : absolute;
+  }
+  const value = relative.split(path.sep).join('/');
+  if (portable(value)) return undefined;
+  const prefix = toClipboardPathFromRoots(workspaceRoots, root);
+  return prefix ? `${prefix}/${value}` : value;
+}
+
+const CONTROL_CHARACTER = /[\x00-\x1F]/;
+
+/**
+ * [header] when a Git copy must refuse the header path it would write, else undefined. Git
+ * copies judge each changed path "as the header spells it" (decision X1, spec as of OpenIDEA
+ * PR #208): a relative header is judged whole — a non-primary root's label or a repo folder
+ * in it included, which nonPortableName (below the root only) never sees — and an absolute
+ * one by X15 (a control character anywhere, or a non-portable file name).
+ *
+ * Never the only check: the header is slash-normalised, so on Linux `a\b.png` already reads
+ * `a/b.png` here; nonPortableName / nonPortableGitName catch that from the real name.
+ */
+export function nonPortableHeader(header: string): string | undefined {
+  if (isAbsolutePath(header)) {
+    if (CONTROL_CHARACTER.test(header)) return header;
+    const name = header.split('/').pop() ?? '';
+    return name === '' || isExportableRelativePath(name) ? undefined : header;
+  }
+  return isExportableRelativePath(header) ? undefined : header;
+}
+
+/**
+ * nonPortableName for a file a Git copy names by its git path ([gitPath], `/`-separated,
+ * as git stores it) at [absolutePath] (the same file in the filesystem's spelling), whose
+ * payload header is [header]. Every character the filesystem path keeps is judged there;
+ * the git path adds the one it may lose: on Windows a `\` committed elsewhere is a
+ * separator in [absolutePath], so `a\b.png` would copy as `a/b.png`. Last, the header as
+ * written (nonPortableHeader). Decision X1 (2026-11-09).
+ */
+export function nonPortableGitName(
+  workspaceRoots: string[],
+  repoRoot: string,
+  gitPath: string,
+  absolutePath: string,
+  header: string = toClipboardPathFromRoots(workspaceRoots, absolutePath)
+): string | undefined {
+  const named = nonPortableName(workspaceRoots, absolutePath);
+  if (named !== undefined) return named;
+  if (gitPath.includes('\\')) {
+    const prefix = toClipboardPathFromRoots(workspaceRoots, repoRoot);
+    const shown = prefix ? `${prefix}/${gitPath}` : gitPath;
+    // Under no root (an absolute header, X15) only the file's own name counts.
+    if (!isAbsolutePath(normalizeSystemPath(prefix))) return shown;
+    if (gitPath.split('/').pop()!.includes('\\')) return shown;
+  }
+  return nonPortableHeader(header);
+}
+
 function sanitizeRelativePath(value: string): string | undefined {
 // asciiTrim, not String.trim(): the two stdlibs disagree on U+001C-U+001F and U+FEFF, and
 // here that disagreement decided the FILENAME each tool wrote — `// file: a.txt\u001C`
@@ -560,6 +676,26 @@ export function escapesAllRoots(roots: string[], targetPath: string): boolean {
   // how a 42-level path stepped over the symlink above it and wrote outside the workspace.
   if (real === undefined) return true;
   return !roots.map(realOrSelf).some(root => isContained(real, root));
+}
+
+/**
+ * X7 for every working-tree reader (files copy, SCM, Graph uncommitted): true when this file
+ * must not be read because it really lands outside every copy root. Judged whenever the path
+ * is spelled inside a root — a link on the leaf OR on any ancestor (`secrets -> ~/.ssh`, then
+ * `secrets/id_rsa`; the Explorer shows such a link as a folder) — since realpath resolves the
+ * whole chain. A path spelled outside every root (Copy Open Editors of /etc/hosts) is the
+ * user's explicit pick and is read as before; only a link on its leaf is still refused.
+ */
+export function workingTreeReadEscapes(roots: string[], absolutePath: string): boolean {
+  const target = path.resolve(absolutePath);
+  if (!roots.some(root => isContained(target, path.resolve(root)))) {
+    try {
+      if (!lstatSync(target).isSymbolicLink()) return false;
+    } catch {
+      return false; // missing: the read fails on its own and is named Unreadable
+    }
+  }
+  return escapesAllRoots(roots, target);
 }
 
 /**

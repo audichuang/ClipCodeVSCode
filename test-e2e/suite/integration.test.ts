@@ -97,6 +97,31 @@ describe('Snipcode × git-graph-plus integration', () => {
     assert.match(clip, /\[NEW\] added\.ts/, 'new header');
   });
 
+  // Spec case 29 → case 30: when the only change has a non-portable name nothing is left to
+  // copy; the clipboard keeps its content and the warning says "Nothing to copy." with the
+  // category (it said "No source copied." before). The name is refused before any read, so
+  // the file need not exist (a `"` cannot on NTFS).
+  it('Graph copy whose only change has a non-portable name says "Nothing to copy." and keeps the clipboard', async () => {
+    const gitApi = (await vscode.extensions.getExtension('vscode.git')!.activate()).getAPI(1);
+    const repo = await waitForRepo(gitApi, repoDir);
+    const commitB = (await repo.log({ maxEntries: 5 })).find((commit: any) => commit.message.startsWith('commit B:'));
+    const sentinel = 'clipcode-e2e-sentinel: graph copy with nothing to carry';
+    await vscode.env.clipboard.writeText(sentinel);
+    const shown: string[] = [];
+    const original = vscode.window.showWarningMessage;
+    (vscode.window as any).showWarningMessage = async (message: string) => { shown.push(message); return undefined; };
+    try {
+      await api.copyFullSourceAtCommit({
+        hash: commitB!.hash,
+        files: [{ repoRootFsPath: repoDir, relativePath: 'q"uote.txt', status: 'D' }],
+      });
+    } finally {
+      (vscode.window as any).showWarningMessage = original;
+    }
+    assert.equal(await vscode.env.clipboard.readText(), sentinel, 'clipboard untouched');
+    assert.deepEqual(shown, ['Nothing to copy. Name not portable: 1 (q"uote.txt).']);
+  });
+
   it('END-TO-END copies committed files contributed by both merge parents', async () => {
     const gitExt = vscode.extensions.getExtension('vscode.git');
     const gitApi = (await gitExt!.activate()).getAPI(1);
