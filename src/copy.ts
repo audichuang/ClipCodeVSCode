@@ -140,6 +140,14 @@ export interface CopyOptions {
  */
 export const LEFT_OUT_CAP = 1000;
 
+/**
+ * A left-out total as the Git surfaces report it: counted up to the cap, and flagged when
+ * at least one more went past it (exactly the cap still reads "1000", the files copy's rule).
+ */
+export function capLeftOut(total: number, cap: number = LEFT_OUT_CAP): { limitLeftOut: number; limitLeftOutCapped: boolean } {
+  return total > cap ? { limitLeftOut: cap, limitLeftOutCapped: true } : { limitLeftOut: total, limitLeftOutCapped: false };
+}
+
 interface CopyState {
   copiedFileCount: number;
   skippedFileSizeCount: number;

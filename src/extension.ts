@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
-import { collectCopyFiles, UNREADABLE_PATHS_KEPT, type CopyResult } from './copy.js';
+import { capLeftOut, collectCopyFiles, UNREADABLE_PATHS_KEPT, type CopyResult } from './copy.js';
 import { askAboutNonText, copyNoticeDetails, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
 import { classifyBytes, type FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
@@ -285,11 +285,13 @@ function showNonTextDialog(message: string, options: { modal: true; detail: stri
  * The Git surfaces count a non-text file left out by Exclude inside skippedUnreadableCount
  * (their meaning before non-text support); the notice names the two apart.
  */
-function gitNoticeCounts(result: {
+export function gitNoticeCounts(result: {
   nonTextFiles: { path: string; size: number }[];
   excludedNonTextCount: number;
   skippedUnreadableCount: number;
   limitLeftOut: number;
+  limitLeftOutCapped?: boolean;
+  unreadablePaths?: string[];
   nonPortableCount?: number;
   nonPortablePaths?: string[];
 }) {
@@ -297,8 +299,9 @@ function gitNoticeCounts(result: {
     nonTextFiles: result.nonTextFiles,
     excludedNonTextCount: result.excludedNonTextCount,
     limitLeftOut: result.limitLeftOut,
+    limitLeftOutCapped: result.limitLeftOutCapped,
     skippedUnreadableCount: result.skippedUnreadableCount - result.excludedNonTextCount,
-    unreadablePaths: [],
+    unreadablePaths: result.unreadablePaths ?? [],
     nonPortableCount: result.nonPortableCount,
     nonPortablePaths: result.nonPortablePaths
   };
@@ -593,6 +596,8 @@ export interface GitPayloadFiles extends Omit<NonTextSummary, 'estimatedBytes'> 
   excludedNonTextCount: number;
   fileLimitReached: boolean;
   usesRegularSpacing: boolean;
+  /** First UNREADABLE_PATHS_KEPT unreadable paths (non-text left out by Exclude not among them). */
+  unreadablePaths: string[];
 }
 
 export async function collectGitPayloadFiles(
@@ -608,6 +613,8 @@ export async function collectGitPayloadFiles(
     includeNonText: boolean;
     /** Raw blob reads for staged / deleted content (no textconv); unit tests leave it out. */
     rawReader?: RawBlobReader;
+    /** Tests only: a smaller LEFT_OUT_CAP. */
+    leftOutCap?: number;
   } = { includeNonText: false }
 ): Promise<GitPayloadFiles> {
   const files: PayloadFile[] = [];
@@ -618,6 +625,8 @@ export async function collectGitPayloadFiles(
   let excludedNonTextCount = 0;
   let fileLimitReached = false;
   let limitLeftOut = 0;
+  let limitLeftOutCapped = false;
+  const unreadablePaths: string[] = [];
   let usesFallbackGitPayload = false;
   const nonTextFiles: { path: string; size: number }[] = [];
   let nonTextTotalBytes = 0;
@@ -688,6 +697,9 @@ export async function collectGitPayloadFiles(
   // Working-tree files that are unreadable (or non-text under Exclude). IntelliJ counts them
   // and, only in the Git layout (known after the loop), keeps them as an "Unable to read" entry.
   const unreadableWorkingTree = new Set<PayloadFile>();
+  const noteUnreadable = (path: string): void => {
+    if (unreadablePaths.length < UNREADABLE_PATHS_KEPT) unreadablePaths.push(path);
+  };
   let index = -1;
   for await (const { candidate, read: fetchedRead } of fetched) {
     index++;
@@ -698,7 +710,7 @@ export async function collectGitPayloadFiles(
     // dropping that false positive is intentional.
     if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
       fileLimitReached = true;
-      limitLeftOut = candidates.length - index;
+      ({ limitLeftOut, limitLeftOutCapped } = capLeftOut(candidates.length - index, options.leftOutCap));
       break;
     }
     if (candidate.changeType === 'DELETED' || candidate.forceIndexContent) {
@@ -706,7 +718,9 @@ export async function collectGitPayloadFiles(
     }
 
     let read = fetchedRead;
+    let leftOutByExclude = false;
     if (read.kind === 'nonText' && !options.includeNonText) {
+      leftOutByExclude = true;
       // Exclude: exactly what the reader returned before non-text support — the
       // unreadable marker for a staged blob, an unreadable working-tree file otherwise.
       excludedNonTextCount++;
@@ -721,6 +735,7 @@ export async function collectGitPayloadFiles(
     }
     if (read.kind === 'unreadable') {
       skippedUnreadableCount++;
+      if (!leftOutByExclude) noteUnreadable(candidate.clipboardPath);
       const entry: PayloadFile = { path: candidate.clipboardPath, content: UNREADABLE_FILE_MARKER, changeType: candidate.changeType };
       unreadableWorkingTree.add(entry);
       files.push(entry);
@@ -762,6 +777,7 @@ export async function collectGitPayloadFiles(
     // payload, where both restore planners refuse to write it over a real file.
     if (content === UNREADABLE_FILE_MARKER) {
       skippedUnreadableCount++;
+      if (!leftOutByExclude) noteUnreadable(candidate.clipboardPath);
       continue;
     }
     copiedFileCount++;
@@ -775,6 +791,8 @@ export async function collectGitPayloadFiles(
     excludedNonTextCount,
     fileLimitReached,
     limitLeftOut,
+    limitLeftOutCapped,
+    unreadablePaths,
     usesRegularSpacing: !usesFallbackGitPayload,
     nonTextFiles,
     nonTextTotalBytes,

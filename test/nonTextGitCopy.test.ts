@@ -208,3 +208,41 @@ test('askAboutNonText: no dialog without non-text files; Include, Exclude and Ca
   assert.equal(await askAboutNonText({ headerFormat: '$FILE_PATH' }, run(1), answer('Include')), undefined);
   assert.deepEqual(shown, [['Exclude']]);
 });
+
+test('Graph: the left-out count stops at the cap; exactly the cap reads plain; unreadable blobs are named', async () => {
+  const blobs: Record<string, string> = {};
+  const names = Array.from({ length: 7 }, (_, i) => `f${i}.ts`);
+  for (const n of names.slice(0, 6)) blobs[n] = 'x';
+  const files = names.map(relativePath => ({ repoRootFsPath: '/repo', relativePath, status: 'A' }));
+  const settings = { ...graphSettings, setMaxFileCount: true, fileCountLimit: 1 };
+  const run = (leftOutCap: number) => buildGraphCopyPayload(graphDeps(blobs, settings), { hash: 'abc', files }, { includeNonText: true, leftOutCap });
+
+  // 6 files past the limit.
+  const capped = await run(5);
+  assert.deepEqual([capped.limitLeftOut, capped.limitLeftOutCapped], [5, true]);
+  const exact = await run(6);
+  assert.deepEqual([exact.limitLeftOut, exact.limitLeftOutCapped], [6, false]);
+  assert.equal(capped.text, exact.text);
+
+  // The uncommitted view reads the working tree: one unreadable file is named.
+  const open = await buildGraphCopyPayload({
+    resolveRepo: () => undefined,
+    readWorking: async (absolutePath: string) => (absolutePath.endsWith('/f6.ts') ? undefined : { text: 'x' }),
+    settings: graphSettings
+  }, { hash: 'UNCOMMITTED', files }, { includeNonText: true });
+  assert.deepEqual(open.unreadablePaths, ['f6.ts']);
+});
+
+test('History: the left-out count is capped, exactly the cap reads plain, and the notice shows N+', async () => {
+  const files = Array.from({ length: 6 }, (_, i) => historyFile(`f${i}.ts`, 'MODIFIED'));
+  const read = async () => ({ text: 'x' });
+  const settings = { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 };
+  const run = (leftOutCap: number) => collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: true, leftOutCap });
+  // 5 files past the limit.
+  const capped = await run(4);
+  assert.deepEqual([capped.limitLeftOut, capped.limitLeftOutCapped], [4, true]);
+  assert.match(historyCopyNotice(capped, settings).message, /Left out by the file-count limit: 4\+\./);
+  const exact = await run(5);
+  assert.deepEqual([exact.limitLeftOut, exact.limitLeftOutCapped], [5, false]);
+  assert.match(historyCopyNotice(exact, settings).message, /Left out by the file-count limit: 5\./);
+});

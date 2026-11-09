@@ -365,3 +365,48 @@ test('SCM copy: non-portable names are never read, named, and do not use the fil
   assert.equal(result.nonPortableCount, 4);
   assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', 't\tab.ts']);
 });
+
+function textChanges(n: number) {
+  return Array.from({ length: n }, (_, i) => ({ uri: new Uri(`/repo/f${i}.ts`), status: 'MODIFIED' }));
+}
+
+test('SCM: the left-out count is capped, exactly the cap still reads plain, and the notice shows N+', async () => {
+  const repository = { rootUri: new Uri('/repo'), state: { workingTreeChanges: textChanges(6) }, show: async () => { throw new Error('no'); } };
+  const { collectGitPayloadFiles, gitNoticeCounts } = await extensionModule;
+  const { copyNoticeDetails } = await import('../src/nonTextDialog.js');
+  const settings = { ...defaultSettings, setMaxFileCount: true, fileCountLimit: 1 };
+  const run = (leftOutCap: number) => collectGitPayloadFiles([repository] as never, ['/repo'], [], settings, { includeNonText: true, leftOutCap });
+
+  // 5 files past the limit: cap 4 -> "4+", cap 5 -> exactly "5", cap 6 -> "5".
+  const capped = await run(4);
+  assert.equal(capped.limitLeftOut, 4);
+  assert.equal(capped.limitLeftOutCapped, true);
+  const exact = await run(5);
+  assert.equal(exact.limitLeftOut, 5);
+  assert.equal(exact.limitLeftOutCapped, false);
+  assert.equal((await run(6)).limitLeftOutCapped, false);
+  assert.deepEqual(copyNoticeDetails(gitNoticeCounts(capped)), ['Left out by the file-count limit: 4+.']);
+  assert.deepEqual(copyNoticeDetails(gitNoticeCounts(exact)), ['Left out by the file-count limit: 5.']);
+  // The payload never depends on the cap.
+  assert.deepEqual(capped.files, exact.files);
+});
+
+test('SCM: the notice names the first unreadable paths, not a non-text file Exclude left out', async () => {
+  const repository = {
+    rootUri: new Uri('/repo'),
+    state: { indexChanges: [
+      { uri: new Uri('/repo/broken.ts'), status: 'INDEX_MODIFIED' },
+      { uri: new Uri('/repo/ok.ts'), status: 'INDEX_MODIFIED' }
+    ] },
+    show: async (_ref: string, file: string) => {
+      if (file.endsWith('broken.ts')) throw new Error('index read failed');
+      return 'index:ok';
+    }
+  };
+  const selected = ['broken.ts', 'ok.ts'].map(file => ({ uriKey: `/repo/${file}`, staged: true }));
+  const { collectGitPayloadFiles, gitNoticeCounts } = await extensionModule;
+  const { copyNoticeDetails } = await import('../src/nonTextDialog.js');
+  const result = await collectGitPayloadFiles([repository] as never, ['/repo'], selected, defaultSettings);
+  assert.deepEqual(result.unreadablePaths, ['broken.ts']);
+  assert.deepEqual(copyNoticeDetails(gitNoticeCounts(result)), ['Unreadable: 1 (broken.ts).']);
+});
