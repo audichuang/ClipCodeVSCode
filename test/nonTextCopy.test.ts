@@ -288,18 +288,82 @@ test('file-count limit: entries skipped past the limit spend the left-out budget
   }
 });
 
+test('file-count limit: once the limit is filled, skips and plain folders spend the budget before any candidate is cut', async t => {
+  const N = 60;
+  const shapes: { name: string; texts: string[]; make: (root: string, i: number) => Promise<void>; settings?: Partial<ClipCodeSettings>; leftOut: number }[] = [
+    // The limit is filled exactly by the first two files; nothing after them is a candidate.
+    { name: 'filled exactly, then excluded files', texts: ['a1.txt', 'a2.txt'], leftOut: 0,
+      make: (root, i) => put(path.join(root, `f${String(i).padStart(3, '0')}.log`), 'x'),
+      settings: { useFilters: true, useExcludeFilters: true, filterRules: [{ type: 'PATTERN', action: 'EXCLUDE', value: '*.log', enabled: true }] } },
+    { name: 'filled exactly, then empty folders', texts: ['a1.txt', 'a2.txt'], leftOut: 0,
+      make: (root, i) => mkdir(path.join(root, `d${String(i).padStart(3, '0')}`)) },
+    { name: 'two left out, then empty folders', texts: ['a1.txt', 'a2.txt', 'a3.txt', 'a4.txt'], leftOut: 2,
+      make: (root, i) => mkdir(path.join(root, `d${String(i).padStart(3, '0')}`)) }
+  ];
+  for (const shape of shapes) {
+    await t.test(shape.name, async () => {
+      await withTempDir(async root => {
+        for (const n of shape.texts) await put(path.join(root, n), 'x');
+        for (let i = 0; i < N; i++) await shape.make(root, i);
+        const settings = normalizeSettings({ ...defaultSettings, fileCountLimit: 2, ...shape.settings });
+        const full = await collectCopyFiles(root, [root], settings, EXCLUDE);
+        assert.equal(full.limitLeftOut, shape.leftOut);
+        assert.equal(full.limitLeftOutCapped, false);
+        const { result, lstat, readdir } = await countingWalk(() => collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 }));
+        assert.equal(result.limitLeftOut, shape.leftOut, 'a skip or a folder never raises the count');
+        assert.equal(result.limitLeftOutCapped, true);
+        assert.equal(result.fileLimitReached, full.fileLimitReached);
+        assert.equal(result.payload, full.payload, 'what was copied does not depend on the cap');
+        // Walking to the end costs over N lstat (and N readdir for folders); stopping costs a handful.
+        assert.ok(lstat >= 4 && lstat <= 12, `lstat ${lstat}`);
+        assert.ok(readdir >= 1 && readdir <= 5, `readdir ${readdir}`);
+      });
+    });
+  }
+});
+
+test('file-count limit: a limit filled exactly with nothing after it claims nothing was left out', async () => {
+  await withTempDir(async root => {
+    for (const n of ['a1.txt', 'a2.txt']) await put(path.join(root, n), 'x');
+    const result = await collectCopyFiles(root, [root], { ...defaultSettings, fileCountLimit: 2 }, { ...EXCLUDE, leftOutCap: 3 });
+    assert.equal(result.copiedFileCount, 2);
+    assert.equal(result.fileLimitReached, false);
+    assert.equal(result.limitLeftOut, 0);
+    assert.equal(result.limitLeftOutCapped, false);
+    assert.ok(!copyNoticeDetails(result).includes('Left out by the file-count limit'));
+  });
+});
+
+test('file-count limit: a size placeholder in the batch that crosses the limit leaves the count unchanged', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'a1.txt'), 'x');
+    await put(path.join(root, 'a2.txt'), 'x'.repeat(2048));
+    await put(path.join(root, 'a3.txt'), 'x');
+    await put(path.join(root, 'a4.txt'), 'x');
+    await put(path.join(root, 'a5.txt'), 'x');
+    const result = await collectCopyFiles(root, [root], { ...defaultSettings, fileCountLimit: 2, maxFileSizeKB: 1 }, EXCLUDE);
+    assert.equal(result.copiedFileCount, 2);
+    assert.equal(result.skippedFileSizeCount, 1);
+    assert.equal(result.limitLeftOut, 2);
+    assert.equal(result.fileLimitReached, true);
+    assert.equal(result.limitLeftOutCapped, false);
+  });
+});
+
 test('file-count limit: a count the skipped entries did not cut short stays exact', async () => {
   await withTempDir(async root => {
     for (const n of ['a1.txt', 'a2.txt', 'a3.txt', 'a4.txt']) await put(path.join(root, n), 'x');
-    await mkdir(path.join(root, 'real'));
-    await symlink(path.join(root, 'real'), path.join(root, 'b-link1'), 'dir');
+    // The link target sorts before the limit fills, so it costs nothing (a folder reached
+    // after the limit is filled spends a unit too).
+    await mkdir(path.join(root, '0-real'));
+    await symlink(path.join(root, '0-real'), path.join(root, 'b-link1'), 'dir');
     const settings = { ...defaultSettings, fileCountLimit: 2 };
     // Two left out and one skip: the budget of 3 is spent exactly, the walk finished.
     const exact = await collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 });
     assert.equal(exact.limitLeftOut, 2);
     assert.equal(exact.limitLeftOutCapped, false);
     // One more skip than the budget holds: the count is unfinished.
-    await symlink(path.join(root, 'real'), path.join(root, 'b-link2'), 'dir');
+    await symlink(path.join(root, '0-real'), path.join(root, 'b-link2'), 'dir');
     const over = await collectCopyFiles(root, [root], settings, { ...EXCLUDE, leftOutCap: 3 });
     assert.equal(over.limitLeftOut, 2);
     assert.equal(over.limitLeftOutCapped, true);

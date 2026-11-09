@@ -109,9 +109,10 @@ export interface CopyResult {
   /** Candidates (after dedup and filters) the file-count limit cut off; none of them was read. */
   limitLeftOut: number;
   /**
-   * The walk stopped before it finished counting: past the limit every entry it meets,
-   * left-out candidates and skipped entries alike, spends one of LEFT_OUT_CAP, and the walk
-   * stops once that budget is gone. At least limitLeftOut were left out, maybe more.
+   * The walk stopped before it finished counting: once the limit is filled every entry it
+   * meets — left-out candidates, skipped entries and folders alike — spends one of
+   * LEFT_OUT_CAP, and the walk stops once that budget is gone. At least limitLeftOut were
+   * left out, maybe more.
    */
   limitLeftOutCapped: boolean;
   /** Include only: the non-text entries carried as Base64, in payload order. */
@@ -209,14 +210,20 @@ export async function collectCopyFiles(
   const readLimit = options.includeNonText ? Math.max(textLimit, nonTextLimit) : textLimit;
   const limitOn = settings.setMaxFileCount;
   const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
-  // Past the file-count limit nothing is read; the walk goes on only to count what the limit
-  // left out. Every entry it meets there spends one unit of a budget of leftOutCap — a
-  // left-out candidate, and equally an entry it skips (non-portable, filtered, a duplicate,
-  // a symlinked or unreadable folder, a pruned folder) — and once the budget is gone the
-  // walk stops and the count reads "N+". Counting only candidates walked a tree of skipped
-  // entries to its end for a number nobody sees (spec "Asking the user": implementations
-  // must not walk the rest of the tree only to count). A skip never raises limitLeftOut:
-  // it was never a candidate, the "+" just says the count is unfinished.
+  // Once the file-count limit is filled nothing more is read; the walk goes on only to count
+  // what the limit leaves out. Every entry it meets from then on spends one unit of a budget
+  // of leftOutCap — a left-out candidate, an entry it skips (non-portable, filtered, a
+  // duplicate) and every folder it reaches (entered, pruned, symlinked or unreadable alike:
+  // one unit, charged in enterDirectory) — and once the budget is gone the walk stops and
+  // the count reads "N+". The budget starts when the limit is FILLED, not when the first
+  // candidate is cut: a filled limit followed only by skips or folders otherwise walked the
+  // whole rest of the tree for a number nobody sees (spec "Asking the user":
+  // implementations must not walk the rest of the tree only to count). A skip or a folder
+  // never raises limitLeftOut: it was never a candidate, the "+" just says the count is
+  // unfinished. fileLimitReached still means a candidate was actually cut.
+  // copiedFileCount moves only in drainBatch, and the walk drains as soon as the batch
+  // could fill the limit, so this is exact whenever a callback asks.
+  const limitFilled = (): boolean => limitOn && state.copiedFileCount >= settings.fileCountLimit;
   let spentPastLimit = 0;
   const spend = (): boolean => {
     if (spentPastLimit >= leftOutCap) {
@@ -229,17 +236,18 @@ export async function collectCopyFiles(
   const leaveOut = (): void => {
     if (spend()) state.limitLeftOut++;
   };
-  /** True past the limit, where a skipped entry is not reported but spends the budget. */
+  /** True once the limit is filled, where a skipped entry is not reported but spends the budget. */
   const skippedPastLimit = (): boolean => {
-    if (!state.fileLimitReached) return false;
+    if (!limitFilled()) return false;
     spend();
     return true;
   };
   // A name the payload cannot carry: skipped and named. Past the file-count limit it is
   // as silent as an unreadable folder there (and, not being a candidate, not left out).
+  // A folder has already paid in enterDirectory, so it is only silenced here.
   const nonPortableSeen = new Set<string>();
-  const noteNonPortable = (absolutePath: string, name: string): void => {
-    if (skippedPastLimit()) return;
+  const noteNonPortable = (absolutePath: string, name: string, charged = false): void => {
+    if (charged ? limitFilled() : skippedPastLimit()) return;
     // A folder selected and also inside a selected folder is named once.
     if (!nonPortableSeen.has(absolutePath)) {
       nonPortableSeen.add(absolutePath);
@@ -250,7 +258,7 @@ export async function collectCopyFiles(
   const isNonPortable = (absolutePath: string, directory = false): boolean => {
     const name = nonPortableName(roots, absolutePath, { directory });
     if (name === undefined) return false;
-    noteNonPortable(absolutePath, name);
+    noteNonPortable(absolutePath, name, directory);
     return true;
   };
   // A name that is not valid UTF-8 (the walker sees it lossily decoded, U+FFFD in place of
@@ -259,13 +267,17 @@ export async function collectCopyFiles(
     const absolute = path.resolve(lossyPath);
     noteNonPortable(absolute, toClipboardPathFromRoots(roots, absolute));
   };
+  // The walker asks this for every folder it reaches, a symlinked one included, before
+  // anything else happens to it: the one place a folder spends its unit. onSymlinkedFolder,
+  // onUnreadable and a non-portable folder name are therefore silent past the limit, not
+  // charged a second time.
   const enterDirectory = (dirPath: string): boolean => {
+    if (skippedPastLimit() && state.limitLeftOutCapped) return false;
     const absolute = path.resolve(dirPath);
     if (
       settings.useFilters && settings.useExcludeFilters &&
       directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute)
     ) {
-      skippedPastLimit();
       return false;
     }
     // A folder (or a symlinked one) with such a name costs its whole subtree, named once.
@@ -351,12 +363,14 @@ export async function collectCopyFiles(
   walk: for (const inputPath of inputPaths) {
     if (shouldStop()) break;
     const onUnreadable = (dirPath: string) => {
-      // Past the limit nothing is read; an unreadable folder there is not reported.
-      if (!skippedPastLimit()) noteUnreadable(dirPath);
+      // Past the limit nothing is read; an unreadable folder there is not reported (it
+      // already paid in enterDirectory; a selected path that is gone is bounded by the
+      // selection).
+      if (!limitFilled()) noteUnreadable(dirPath);
     };
     const onSymlinkedFolder = (linkPath: string) => {
       // Same as an unreadable folder: past the limit it is not reported.
-      if (skippedPastLimit()) return;
+      if (limitFilled()) return;
       const absolute = path.resolve(linkPath);
       if (symlinkedFoldersSeen.has(absolute)) return;
       symlinkedFoldersSeen.add(absolute);
@@ -395,25 +409,24 @@ export async function collectCopyFiles(
       // Not read and not a candidate: it never consumes the file-count limit.
       if (isNonPortable(absolutePath)) continue;
 
-      // The limit check needs an exact copiedFileCount, so drain first whenever the
-      // buffered candidates could still push the count up to the limit. Below that
-      // watermark no batch can trip it, so the walk keeps buffering.
-      if (!state.fileLimitReached && limitOn && state.copiedFileCount + batch.length >= settings.fileCountLimit) {
-        await drainBatch();
-        if (state.copiedFileCount >= settings.fileCountLimit) state.fileLimitReached = true;
-      }
       // Once the limit has tripped the walk goes on (no reads) only to count what it left
       // out: every remaining candidate, size placeholders and unreadable files included,
       // because before the limit tripped they would all have been processed. It stops once
       // the past-limit budget (shared with skipped entries, see spend) is gone.
-      if (state.fileLimitReached) {
+      if (limitFilled()) {
+        state.fileLimitReached = true;
         leaveOut();
         if (state.limitLeftOutCapped) break walk;
         continue;
       }
 
       batch.push({ absolutePath, relativePath });
-      if (batch.length >= READ_CONCURRENCY) await drainBatch();
+      // Settle as soon as the buffered candidates could fill the limit, so limitFilled() is
+      // exact for every entry and callback that follows. Below that watermark no batch can
+      // fill it, so the walk keeps buffering.
+      if (batch.length >= READ_CONCURRENCY || (limitOn && state.copiedFileCount + batch.length >= settings.fileCountLimit)) {
+        await drainBatch();
+      }
     }
   }
   await drainBatch();
