@@ -286,6 +286,32 @@ test('case 22: a symlinked folder is not followed and is named in the dialog and
   });
 });
 
+test('a workspace root that is itself a symlink is walked; links inside it and selected non-root links are not', async () => {
+  await withTempDir(async base => {
+    await put(path.join(base, 'real', 'a.ts'), 'a');
+    await put(path.join(base, 'real', 'sub', 'b.ts'), 'b');
+    await put(path.join(base, 'other', 'c.ts'), 'c');
+    await symlink(path.join(base, 'other'), path.join(base, 'real', 'linked'), 'dir');
+    // VS Code keeps the link path for a workspace folder opened through a symlink.
+    const root = path.join(base, 'proj-link');
+    await symlink(path.join(base, 'real'), root, 'dir');
+
+    const result = await collectCopyFiles(root, [root], defaultSettings, INCLUDE);
+    assert.deepEqual(result.files.map(f => f.path), ['a.ts', 'sub/b.ts']);
+    assert.equal(result.symlinkedFolderCount, 1);
+    assert.deepEqual(result.symlinkedFolderPaths, ['linked']);
+
+    // A selected link that is not a root stays a skipped symlinked folder.
+    const direct = await collectCopyFiles(root, [path.join(root, 'linked')], defaultSettings, INCLUDE);
+    assert.deepEqual(direct.files, []);
+    assert.deepEqual(direct.symlinkedFolderPaths, ['linked']);
+    // The same link is a root in its own right when it is one of the workspace folders.
+    const asRoot = await collectCopyFiles([root, path.join(root, 'linked')], [path.join(root, 'linked')], defaultSettings, INCLUDE);
+    assert.deepEqual(asRoot.files.map(f => f.path), ['linked/c.ts']);
+    assert.equal(asRoot.symlinkedFolderCount, 0);
+  });
+});
+
 test('symlinked folder notice names three and says how many more', () => {
   const notice = copyNoticeDetails({
     nonTextFiles: [], excludedNonTextCount: 0, limitLeftOut: 0, skippedUnreadableCount: 0, unreadablePaths: [],

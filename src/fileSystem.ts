@@ -103,18 +103,14 @@ export async function mustNotOverwrite(filePath: string): Promise<boolean> {
   return encoding === 'other' || encoding === 'unverifiable';
 }
 
-export async function* listFilesRecursive(
-  inputPath: string,
+export interface WalkOptions {
   // 目錄級剪枝（回傳 false 就整棵子樹不走）。被 PATH exclude 規則命中的目錄，
   // 其下所有檔案必然也被同一規則排除，走完再逐檔過濾是純浪費 —
   // node_modules 這種大樹要在這裡就剪掉（對齊 IntelliJ 端 processDirectory 的行為）。
-  shouldEnterDirectory?: (dirPath: string) => boolean,
-  // True only for a path the user actually picked: a picked path that is gone is reported
-  // as unreadable, a mid-walk race stays silent.
-  isSelection = true,
+  shouldEnterDirectory?: (dirPath: string) => boolean;
   // A subtree we could not read is an omission the user must hear about; the per-file
   // counter never sees it because no file is ever yielded.
-  onUnreadable?: (dirPath: string) => void,
+  onUnreadable?: (dirPath: string) => void;
   // A symlink to a directory is NEVER walked — not when it is the selection, not when it
   // is met during recursion — and is reported here instead (spec non-text-files.md "What
   // is carried", user decision D2 of 2026-11-09). Walking links is a trap: a cross-linked
@@ -122,12 +118,25 @@ export async function* listFilesRecursive(
   // factorials — 7 linked dirs already yield 13,699 paths — and with the default 30-file
   // limit the copy becomes 30 aliases of the same few files. A symlink to a FILE is still
   // followed: it is yielded and its target's bytes are read under the link's path.
-  onSymlinkedFolder?: (linkPath: string) => void,
+  onSymlinkedFolder?: (linkPath: string) => void;
   // A directory entry whose name is not valid UTF-8. A string readdir would hand back a
   // lossy U+FFFD spelling that no longer opens, so the entry vanished silently mid-walk.
   // It is reported here with that lossy spelling and neither yielded nor walked.
-  onNonUtf8Name?: (lossyPath: string) => void
+  onNonUtf8Name?: (lossyPath: string) => void;
+  // The one exception to the symlinked-folder rule: the selected path is a workspace root
+  // that is itself a link (VS Code keeps the link path for a folder opened through one).
+  // It is walked like a real folder; links met inside it are still skipped.
+  walkSelectedLink?: boolean;
+}
+
+export async function* listFilesRecursive(
+  inputPath: string,
+  options: WalkOptions = {},
+  // True only for a path the user actually picked: a picked path that is gone is reported
+  // as unreadable, a mid-walk race stays silent.
+  isSelection = true
 ): AsyncGenerator<string> {
+  const { shouldEnterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name } = options;
   const info = await lstat(inputPath).catch(() => undefined);
   if (!info) {
     // A picked path that is gone (an open tab whose file was deleted, a selection removed
@@ -143,12 +152,13 @@ export async function* listFilesRecursive(
       yield inputPath;
       return;
     }
-    // A link the exclude rules prune is as silent as a pruned real folder.
-    if (shouldEnterDirectory && !shouldEnterDirectory(inputPath)) return;
-    onSymlinkedFolder?.(inputPath);
-    return;
-  }
-  if (!info.isDirectory()) {
+    if (!(isSelection && options.walkSelectedLink)) {
+      // A link the exclude rules prune is as silent as a pruned real folder.
+      if (shouldEnterDirectory && !shouldEnterDirectory(inputPath)) return;
+      onSymlinkedFolder?.(inputPath);
+      return;
+    }
+  } else if (!info.isDirectory()) {
     yield inputPath;
     return;
   }
@@ -163,13 +173,14 @@ export async function* listFilesRecursive(
     return;
   }
   const entries = raw.map(bytes => ({ name: bytes.toString('utf8'), bytes }));
+  const inner = { ...options, walkSelectedLink: false };
   for (const { name, bytes } of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const entryPath = path.join(inputPath, name);
     if (!Buffer.from(name, 'utf8').equals(bytes)) {
       onNonUtf8Name?.(entryPath);
       continue;
     }
-    yield* listFilesRecursive(entryPath, shouldEnterDirectory, false, onUnreadable, onSymlinkedFolder, onNonUtf8Name);
+    yield* listFilesRecursive(entryPath, inner, false);
   }
 }
 
