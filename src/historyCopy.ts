@@ -170,8 +170,13 @@ export type ChangedPathLister = (repoRoot: string, from: string, to: string) => 
  * per commit and parent (the empty tree for a root commit); a file is matched to the raw
  * paths that spell its `/`-separated path, in order, so a real `a/b.png` beside `a\b.png`
  * each get their own. A file whose lister failed is left out (judged on its file path).
+ * Only on Windows: elsewhere the file path already keeps a committed `\`, and the lister is
+ * one serial `git diff-tree` per commit and parent run before the dialog appears.
  */
-export async function historyGitPaths(files: FileNode[], list: ChangedPathLister): Promise<Map<FileNode, string>> {
+export async function historyGitPaths(
+  files: FileNode[], list: ChangedPathLister, platform: NodeJS.Platform = process.platform
+): Promise<Map<FileNode, string>> {
+  if (platform !== 'win32') return new Map();
   const byCommit = new Map<string, FileNode[]>();
   for (const f of files) {
     const key = `${f.repoRoot}\u0000${f.commit.hash}`;

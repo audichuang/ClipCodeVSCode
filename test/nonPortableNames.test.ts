@@ -348,12 +348,24 @@ test('historyGitPaths matches each file to its raw git path, one lister call per
   const gitPaths = await historyGitPaths([first, second, merged, root0], async (_repo, from, to) => {
     calls.push(`${from}..${to}`);
     return raw[`${from}..${to}`];
-  });
+  }, 'win32');
   assert.deepEqual(calls.sort(), Object.keys(raw).sort());
   assert.deepEqual([first, second, merged, root0].map(f => gitPaths.get(f)), ['a/b.png', 'a\\b.png', 'm.ts', 'r.ts']);
   // A lister that cannot run leaves the file path to judge.
-  const none = await historyGitPaths([first], async () => undefined);
+  const none = await historyGitPaths([first], async () => undefined, 'win32');
   assert.equal(none.get(first), undefined);
+
+  // Off Windows the file path already keeps a committed `\`, so git is never asked: the
+  // lister ran one `git diff-tree` per commit and parent before the dialog, serially.
+  calls.length = 0;
+  for (const platform of ['darwin', 'linux'] as const) {
+    const skipped = await historyGitPaths([first, merged, root0], async (_repo, from, to) => {
+      calls.push(`${from}..${to}`);
+      return raw[`${from}..${to}`];
+    }, platform);
+    assert.equal(skipped.size, 0);
+  }
+  assert.deepEqual(calls, []);
 });
 
 // Spec "What is carried", portability bullet: the rule is judged on each FILE's path
