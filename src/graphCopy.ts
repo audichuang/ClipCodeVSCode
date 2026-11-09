@@ -9,7 +9,7 @@ import { readRefClassified, readRefContent, type ContentRepo } from './gitConten
 import type { FileContent } from './fileSystem.js';
 import type { NonTextSummary } from './nonTextDialog.js';
 import { isExportableRelativePath, nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
-import { UNREADABLE_PATHS_KEPT } from './copy.js';
+import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { defaultSettings } from './settings.js';
 
 // Each file's content comes from one `git show` subprocess; fan them out so a
@@ -88,6 +88,8 @@ export interface GraphCopyOptions {
    * from before non-text support, byte for byte: they are dropped and counted.
    */
   includeNonText: boolean;
+  /** Tests only: a smaller LEFT_OUT_CAP. */
+  leftOutCap?: number;
 }
 
 export interface GraphCopyResult extends NonTextSummary {
@@ -103,6 +105,8 @@ export interface GraphCopyResult extends NonTextSummary {
   skippedFiles: Array<{ path: string; bytes: number }>;
   fileLimitReached: boolean;
   missingRepoCount: number;
+  /** First UNREADABLE_PATHS_KEPT unreadable paths (non-text left out by Exclude not among them). */
+  unreadablePaths: string[];
 }
 
 function joinFsPath(root: string, relativePath: string): string {
@@ -397,6 +401,9 @@ export async function buildGraphCopyPayload(
   let missingRepoCount = 0;
   let fileLimitReached = false;
   let limitLeftOut = 0;
+  let limitLeftOutCapped = false;
+  const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
+  const unreadablePaths: string[] = [];
   let nonPortableCount = 0;
   const nonPortablePaths: string[] = [];
 
@@ -454,6 +461,7 @@ export async function buildGraphCopyPayload(
       // Unreadable. Counting it is the difference between "this file could not be
       // copied" and the file simply not being there.
       skippedUnreadableCount++;
+      if (unreadablePaths.length < UNREADABLE_PATHS_KEPT) unreadablePaths.push(file.clipboardPath);
       continue;
     }
 
@@ -502,7 +510,11 @@ export async function buildGraphCopyPayload(
       seen.add(key);
       if (graphNonPortableName(deps.workspaceRoots, file.repoRootFsPath, file.relativePath, multiRepo) !== undefined) continue;
       const filterPath = workspaceRelativePath(deps.workspaceRoots, file.repoRootFsPath, file.relativePath);
-      if (passesFilters(deps, { filterPath, repoRootFsPath: file.repoRootFsPath, relativePath: file.relativePath })) limitLeftOut++;
+      if (passesFilters(deps, { filterPath, repoRootFsPath: file.repoRootFsPath, relativePath: file.relativePath })) {
+        // Stop at the first one past the cap: the number only has to say "a lot".
+        if (limitLeftOut >= leftOutCap) { limitLeftOutCapped = true; break; }
+        limitLeftOut++;
+      }
     }
   }
 
@@ -520,7 +532,7 @@ export async function buildGraphCopyPayload(
 
   return {
     text, copiedFileCount, skippedFileSizeCount, skippedUnreadableCount, excludedNonTextCount, skippedFiles,
-    fileLimitReached, missingRepoCount, limitLeftOut, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
+    fileLimitReached, missingRepoCount, limitLeftOut, limitLeftOutCapped, unreadablePaths, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
     // A blob is always read whole (cat-file), so nothing here is "over both limits, unread".
     unreadOverLimitCount: 0,
     nonPortableCount,

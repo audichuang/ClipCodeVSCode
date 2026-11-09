@@ -3,7 +3,7 @@ import type { FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FileNode } from './historyTree.js';
 import { copyNoticeDetails, type NonTextSummary } from './nonTextDialog.js';
-import { UNREADABLE_PATHS_KEPT } from './copy.js';
+import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
@@ -28,13 +28,14 @@ export async function collectHistoryCopy(
   read: (file: FileNode) => Promise<FileContent | undefined>,
   settings: ClipCodeSettings,
   workspaceRoots: string[],
-  options: { includeNonText: boolean } = { includeNonText: false }
+  options: { includeNonText: boolean; /** Tests only: a smaller LEFT_OUT_CAP. */ leftOutCap?: number } = { includeNonText: false }
 ): Promise<HistoryCopyResult> {
   const nonTextLimit = settings.maxNonTextFileSizeKB * 1024;
   const payloadFiles: PayloadFile[] = [];
   const nonTextFiles: { path: string; size: number }[] = [];
   let nonTextTotalBytes = 0, nonTextOverLimitCount = 0, excludedNonTextCount = 0;
-  let copied = 0, skippedSize = 0, limitReached = false, limitLeftOut = 0;
+  let copied = 0, skippedSize = 0, limitReached = false, limitLeftOut = 0, limitLeftOutCapped = false;
+  const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
   const unresolved: string[] = [];
   let nonPortableCount = 0;
   const nonPortablePaths: string[] = [];
@@ -49,7 +50,7 @@ export async function collectHistoryCopy(
     return { absPath, clipboardPath, kept, unportable: kept ? nonPortableName(roots, absPath) : undefined };
   };
 
-  for (const f of files) {
+  for (const [fileIndex, f] of files.entries()) {
     // Before the limit check: such a file is not a candidate, so it never trips the limit.
     const unportable = pathsOf(f).unportable;
     if (unportable !== undefined) {
@@ -60,10 +61,13 @@ export async function collectHistoryCopy(
     if (settings.setMaxFileCount && copied >= settings.fileCountLimit) {
       limitReached = true;
       // What the limit left out (filters applied, nothing read), for the dialog and notice.
-      limitLeftOut = files.slice(files.indexOf(f)).filter(rest => {
-        const p = pathsOf(rest);
-        return p.kept && p.unportable === undefined;
-      }).length;
+      // Counted up to the cap, then it stops: the number only has to say "a lot".
+      for (let i = fileIndex; i < files.length; i++) {
+        const p = pathsOf(files[i]);
+        if (!p.kept || p.unportable !== undefined) continue;
+        if (limitLeftOut >= leftOutCap) { limitLeftOutCapped = true; break; }
+        limitLeftOut++;
+      }
       break;
     }
     const { absPath, clipboardPath, kept } = pathsOf(f);
@@ -108,7 +112,7 @@ export async function collectHistoryCopy(
   });
   return {
     files: payloadFiles, payload, copiedFileCount: copied, skippedFileSizeCount: skippedSize, fileLimitReached: limitReached,
-    unresolved, excludedNonTextCount, limitLeftOut, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
+    unresolved, excludedNonTextCount, limitLeftOut, limitLeftOutCapped, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
     unreadOverLimitCount: 0, nonPortableCount, nonPortablePaths, estimatedBytes: Buffer.byteLength(payload, 'utf8')
   };
 }
