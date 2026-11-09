@@ -3,7 +3,7 @@ import test from 'node:test';
 import { parseClipboard } from '../src/clipboardFormat.js';
 import { readRefClassified, type ContentRepo } from '../src/gitContent.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopySettings } from '../src/graphCopy.js';
-import { collectHistoryCopy } from '../src/historyCopy.js';
+import { collectHistoryCopy, historyCopyNotice } from '../src/historyCopy.js';
 import type { FileNode } from '../src/historyTree.js';
 import { askAboutNonText, type NonTextChoice } from '../src/nonTextDialog.js';
 import { parseBody } from '../src/nonText.js';
@@ -123,7 +123,7 @@ function historyFile(name: string, status: string): FileNode {
   };
 }
 
-test('History Include carries non-text files; Exclude names them unresolved as before', async () => {
+test('History Include carries non-text files; Exclude counts them as left out, not unresolved', async () => {
   const files = [historyFile('logo.png', 'MODIFIED'), historyFile('a.ts', 'MODIFIED')];
   const read = async (f: FileNode) => (f.name === 'logo.png' ? { nonText: PNG } : { text: 'hello' });
   const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat };
@@ -138,8 +138,31 @@ test('History Include carries non-text files; Exclude names them unresolved as b
 
   const exclude = await collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: false });
   assert.deepEqual(exclude.files, [{ path: 'a.ts', content: 'hello', changeType: 'MODIFIED' }]);
-  assert.deepEqual(exclude.unresolved, ['logo.png']);
+  // A non-text file left out on purpose was read fine: it is not "could not be resolved".
+  assert.deepEqual(exclude.unresolved, []);
   assert.equal(exclude.excludedNonTextCount, 1);
+});
+
+test('History notice: says how many files the limit left out and reports excluded non-text files apart', async () => {
+  const files = [
+    historyFile('logo.png', 'MODIFIED'), historyFile('gone.ts', 'MODIFIED'),
+    historyFile('a.ts', 'MODIFIED'), historyFile('b.ts', 'MODIFIED'), historyFile('c.ts', 'MODIFIED')
+  ];
+  const read = async (f: FileNode) =>
+    f.name === 'logo.png' ? { nonText: PNG } : f.name === 'gone.ts' ? undefined : { text: 'hello' };
+  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: true, fileCountLimit: 1 };
+
+  const exclude = await collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: false });
+  assert.deepEqual(historyCopyNotice(exclude, settings), {
+    unresolvedWarning: '1 files could not be resolved: gone.ts',
+    message: '1 Git file(s) copied. File limit 1 reached. Non-text files left out: 1. Left out by the file-count limit: 2.'
+  });
+
+  const include = await collectHistoryCopy(files, read, settings, ['/repo'], { includeNonText: true });
+  assert.deepEqual(historyCopyNotice(include, settings), {
+    unresolvedWarning: undefined,
+    message: '1 Git file(s) copied. File limit 1 reached. Non-text files copied as Base64: 1. Left out by the file-count limit: 4.'
+  });
 });
 
 test('History Include: a non-text file over its limit is a size placeholder; the limit reports what it left out', async () => {
