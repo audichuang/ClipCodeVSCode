@@ -220,6 +220,64 @@ test('Graph copy, repo outside every workspace root: the absolute header follows
   assert.equal(result.nonPortableCount, 2);
 });
 
+// Spec "as the header spells it" (OpenIDEA PR #208): the header, not only the git path, is
+// judged. With no workspace root a multi-repo Graph header is `<repo folder>/<git path>`, so
+// a repo folder named `my:repo` makes every header from it unrestorable.
+test('Graph copy, no workspace and several repos: the repo folder in the header is judged (X1)', async () => {
+  const requested: string[] = [];
+  const deps: GraphCopyDeps = {
+    resolveRepo: () => undefined,
+    readBatch: async (root, _hash, paths) => {
+      requested.push(...paths.map(p => `${root}|${p}`));
+      return new Map(paths.map(p => [p, { text: `body:${p}` }]));
+    },
+    settings: { ...graphSettings, setMaxFileCount: false },
+    workspaceRoots: []
+  };
+  const files = [
+    { repoRootFsPath: '/x/my:repo', relativePath: 'a.ts', status: 'M' },
+    { repoRootFsPath: '/x/my:repo', relativePath: 'gone.ts', status: 'D' },
+    { repoRootFsPath: '/x/ok', relativePath: 'b.ts', status: 'M' }
+  ];
+  const result = await buildGraphCopyPayload(deps, { hash: 'abc', files });
+  assert.deepEqual(requested, ['/x/ok|b.ts']);
+  assert.deepEqual(parseClipboard(result.text, graphSettings.headerFormat).map(e => e.path), ['ok/b.ts']);
+  assert.deepEqual(result.nonPortablePaths, ['my:repo/a.ts', 'my:repo/gone.ts']);
+});
+
+test('Graph and History copies judge a non-primary workspace root label in the header (X1)', { skip: posixOnly }, async () => {
+  const roots = ['/ws', '/x/my:repo'];
+  const requested: string[] = [];
+  const deps: GraphCopyDeps = {
+    resolveRepo: () => undefined,
+    readBatch: async (_root, _hash, paths) => {
+      requested.push(...paths);
+      return new Map(paths.map(p => [p, { text: `body:${p}` }]));
+    },
+    settings: { ...graphSettings, setMaxFileCount: false },
+    workspaceRoots: roots
+  };
+  const graph = await buildGraphCopyPayload(deps, { hash: 'abc', files: [
+    { repoRootFsPath: '/x/my:repo', relativePath: 'a.ts', status: 'M' },
+    { repoRootFsPath: '/ws', relativePath: 'b.ts', status: 'M' }
+  ] });
+  assert.deepEqual(requested, ['b.ts']);
+  assert.deepEqual(graph.nonPortablePaths, ['my:repo/a.ts']);
+
+  const node = (repoRoot: string, name: string): FileNode => ({
+    kind: 'file', repoRoot, relPath: name, name,
+    commit: { hash: 'h', message: 'm', parents: ['p'] },
+    change: { uri: { fsPath: `${repoRoot}/${name}` }, status: 'MODIFIED' },
+    changeType: 'MODIFIED'
+  });
+  const read: string[] = [];
+  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: false };
+  const history = await collectHistoryCopy([node('/x/my:repo', 'a.ts'), node('/ws', 'b.ts')],
+    async f => { read.push(f.name); return { text: 'x' }; }, settings, roots);
+  assert.deepEqual(read, ['b.ts']);
+  assert.deepEqual(history.nonPortablePaths, ['my:repo/a.ts']);
+});
+
 function historyFile(name: string, extra: Partial<FileNode['change']> = {}): FileNode {
   return {
     kind: 'file', repoRoot: '/repo', relPath: name, name,

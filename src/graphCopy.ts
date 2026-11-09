@@ -8,7 +8,7 @@ import type { FilterRule } from './settings.js';
 import { readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
 import type { FileContent } from './fileSystem.js';
 import type { NonTextSummary } from './nonTextDialog.js';
-import { isExportableRelativePath, nonPortableGitName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableGitName, nonPortableHeader, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { defaultSettings } from './settings.js';
 
@@ -213,10 +213,11 @@ function workspaceRelativePath(
 
 /**
  * The real name of a file the payload cannot carry, else undefined (decision X1: the files
- * copy's rule on each changed path). With workspace roots it is judged where the header
- * is built from (pathResolver nonPortableGitName: the folders between root and repo count,
- * and a repo outside every root follows X15). Without one the header is the git path
- * itself (basename-prefixed for several repos), so that is what is judged.
+ * copy's rule on each changed path, "as the header spells it"). With workspace roots it is
+ * judged where the header is built from and on the header itself (pathResolver
+ * nonPortableGitName: the folders between root and repo count, a root label counts, and a
+ * repo outside every root follows X15). Without one the header is the git path itself,
+ * prefixed with the repo folder name for several repos, and that whole header is judged.
  */
 function graphNonPortableName(
   workspaceRoots: string[] | undefined,
@@ -226,10 +227,10 @@ function graphNonPortableName(
 ): string | undefined {
   if (workspaceRoots?.length) {
     return nonPortableGitName(workspaceRoots, repoRootFsPath, relativePath,
-      workspaceSpelling(workspaceRoots, repoRootFsPath, relativePath));
+      workspaceSpelling(workspaceRoots, repoRootFsPath, relativePath),
+      clipboardPathFor(workspaceRoots, repoRootFsPath, relativePath, multiRepo));
   }
-  if (isExportableRelativePath(relativePath)) return undefined;
-  return multiRepo ? `${baseNameOf(repoRootFsPath)}/${relativePath}` : relativePath;
+  return nonPortableHeader(clipboardPathFor(workspaceRoots, repoRootFsPath, relativePath, multiRepo));
 }
 
 // No-workspace fallback only: the repo folder name shared by every file, or undefined if
@@ -242,7 +243,11 @@ function singleRepoRoot(files: GraphCopyFile[]): string | undefined {
 // Prefetch committed blob contents up front with one `git cat-file --batch` per
 // repo (parallel across repos). For the uncommitted view or when no readBatch is
 // provided this returns an empty map and prepareFile falls back to per-file reads.
-async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Promise<Map<string, FileContent | undefined>> {
+async function prefetchBatch(
+  deps: GraphCopyDeps,
+  payload: GraphCopyPayload,
+  multiRepo: boolean
+): Promise<Map<string, FileContent | undefined>> {
   const lookup = new Map<string, FileContent | undefined>();
   if (payload.hash === UNCOMMITTED_HASH || !deps.readBatch) return lookup;
   const { settings } = deps;
@@ -263,7 +268,7 @@ async function prefetchBatch(deps: GraphCopyDeps, payload: GraphCopyPayload): Pr
     if (changeType === 'DELETED') continue;
     // Never read: skipped by name in the bookkeeping loop. This also keeps a path with a
     // line break (a control character) out of the newline-delimited `cat-file --batch`.
-    if (graphNonPortableName(deps.workspaceRoots, file.repoRootFsPath, file.relativePath, false) !== undefined) continue;
+    if (graphNonPortableName(deps.workspaceRoots, file.repoRootFsPath, file.relativePath, multiRepo) !== undefined) continue;
     (byRepo.get(file.repoRootFsPath) ?? byRepo.set(file.repoRootFsPath, []).get(file.repoRootFsPath)!).push(file.relativePath);
     requested++;
   }
@@ -416,7 +421,7 @@ export async function buildGraphCopyPayload(
   // every blob (cheap) — only fallback per-file reads are wasted, bounded to one
   // READ_CONCURRENCY window.
   const multiRepo = new Set(payload.files.map(f => f.repoRootFsPath)).size > 1;
-  const batch = await prefetchBatch(deps, payload);
+  const batch = await prefetchBatch(deps, payload, multiRepo);
   const prepared = mapInOrder(payload.files, READ_CONCURRENCY, file => prepareFile(deps, payload, file, batch, multiRepo));
   // The SCM path and IntelliJ both dedupe by path; this one did not, so a path selected in
   // both the staged and the unstaged tree landed in the payload twice. Keyed by REPO +

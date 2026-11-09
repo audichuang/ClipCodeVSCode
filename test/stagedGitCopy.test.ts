@@ -403,6 +403,24 @@ test('SCM copy: normal names are read and carried with nothing named (X1)', asyn
   assert.deepEqual(result.nonPortablePaths, []);
 });
 
+// Spec "as the header spells it" (OpenIDEA PR #208): a second workspace root is labelled
+// with its folder name in the header, so that name is judged too. `my:repo/a.ts` restores
+// nowhere (the paste side's sanitizer changes it), so it is named instead of written.
+test('SCM copy judges the header as written: a non-primary root labelled `my:repo` is not portable (X1)', { skip: process.platform === 'win32' ? 'POSIX paths' : undefined }, async () => {
+  const repository = {
+    rootUri: new Uri('/x/my:repo'),
+    state: { workingTreeChanges: [{ uri: new Uri('/x/my:repo/a.ts'), status: 'MODIFIED' }] },
+  };
+  const okRepo = { rootUri: new Uri('/ws'), state: { workingTreeChanges: [{ uri: new Uri('/ws/b.ts'), status: 'MODIFIED' }] } };
+  workspaceReads.length = 0;
+  const { collectGitPayloadFiles } = await extensionModule;
+  const result = await collectGitPayloadFiles([okRepo, repository] as never, ['/ws', '/x/my:repo'], [],
+    { ...defaultSettings, setMaxFileCount: false }, { includeNonText: false });
+  assert.deepEqual(result.files.map(f => f.path), ['b.ts']);
+  assert.deepEqual(workspaceReads, ['/ws/b.ts']);
+  assert.deepEqual(result.nonPortablePaths, ['my:repo/a.ts']);
+});
+
 function textChanges(n: number) {
   return Array.from({ length: n }, (_, i) => ({ uri: new Uri(`/repo/f${i}.ts`), status: 'MODIFIED' }));
 }

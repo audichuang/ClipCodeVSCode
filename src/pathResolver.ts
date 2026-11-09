@@ -535,25 +535,49 @@ export function nonPortableName(
 const CONTROL_CHARACTER = /[\x00-\x1F]/;
 
 /**
+ * [header] when a Git copy must refuse the header path it would write, else undefined. Git
+ * copies judge each changed path "as the header spells it" (decision X1, spec as of OpenIDEA
+ * PR #208): a relative header is judged whole — a non-primary root's label or a repo folder
+ * in it included, which nonPortableName (below the root only) never sees — and an absolute
+ * one by X15 (a control character anywhere, or a non-portable file name).
+ *
+ * Never the only check: the header is slash-normalised, so on Linux `a\b.png` already reads
+ * `a/b.png` here; nonPortableName / nonPortableGitName catch that from the real name.
+ */
+export function nonPortableHeader(header: string): string | undefined {
+  if (isAbsolutePath(header)) {
+    if (CONTROL_CHARACTER.test(header)) return header;
+    const name = header.split('/').pop() ?? '';
+    return name === '' || isExportableRelativePath(name) ? undefined : header;
+  }
+  return isExportableRelativePath(header) ? undefined : header;
+}
+
+/**
  * nonPortableName for a file a Git copy names by its git path ([gitPath], `/`-separated,
- * as git stores it) at [absolutePath] (the same file in the filesystem's spelling). Every
- * character the filesystem path keeps is judged there; the git path adds the one it may
- * lose: on Windows a `\` committed elsewhere is a separator in [absolutePath], so `a\b.png`
- * would copy as `a/b.png`. Decision X1 (2026-11-09).
+ * as git stores it) at [absolutePath] (the same file in the filesystem's spelling), whose
+ * payload header is [header]. Every character the filesystem path keeps is judged there;
+ * the git path adds the one it may lose: on Windows a `\` committed elsewhere is a
+ * separator in [absolutePath], so `a\b.png` would copy as `a/b.png`. Last, the header as
+ * written (nonPortableHeader). Decision X1 (2026-11-09).
  */
 export function nonPortableGitName(
   workspaceRoots: string[],
   repoRoot: string,
   gitPath: string,
-  absolutePath: string
+  absolutePath: string,
+  header: string = toClipboardPathFromRoots(workspaceRoots, absolutePath)
 ): string | undefined {
   const named = nonPortableName(workspaceRoots, absolutePath);
-  if (named !== undefined || !gitPath.includes('\\')) return named;
-  const prefix = toClipboardPathFromRoots(workspaceRoots, repoRoot);
-  const shown = prefix ? `${prefix}/${gitPath}` : gitPath;
-  // Under no root (an absolute header, X15) only the file's own name counts.
-  if (isAbsolutePath(normalizeSystemPath(prefix))) return gitPath.split('/').pop()!.includes('\\') ? shown : undefined;
-  return shown;
+  if (named !== undefined) return named;
+  if (gitPath.includes('\\')) {
+    const prefix = toClipboardPathFromRoots(workspaceRoots, repoRoot);
+    const shown = prefix ? `${prefix}/${gitPath}` : gitPath;
+    // Under no root (an absolute header, X15) only the file's own name counts.
+    if (!isAbsolutePath(normalizeSystemPath(prefix))) return shown;
+    if (gitPath.split('/').pop()!.includes('\\')) return shown;
+  }
+  return nonPortableHeader(header);
 }
 
 function sanitizeRelativePath(value: string): string | undefined {
