@@ -18,7 +18,7 @@ import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitS
 import { registerHistoryView } from './historyView.js';
 import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
-import { confirmationText, existingTargets, resultNotice, skipLines } from './restoreSummary.js';
+import { confirmationText, existingTargets, resultNotice, formatSize, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 import { registerBlame } from './blame/index.js';
 
@@ -196,7 +196,7 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
       label: 'Show skipped',
       run: () => {
         const list = result.skippedFiles
-          .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
+          .map(f => `${f.path} — ${formatSize(f.bytes)}`)
           .join('\n');
         void vscode.window.showInformationMessage(
           `Skipped ${result.skippedFiles.length} file(s): over the size limit`,
@@ -255,7 +255,7 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
   const settings = readSettings();
   const result = await collectFilesAskingAboutNonText(roots, selectedUris.map(item => item.fsPath), settings);
   if (!result) return;
-  const nothing = nothingToCopyNotice(result);
+  const nothing = nothingToCopyNotice({ ...result, fileCountLimit: settings.fileCountLimit });
   if (nothing) {
     vscode.window.showWarningMessage(nothing);
     return;
@@ -265,7 +265,7 @@ async function copySelectedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise
     const suffix = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     // Files left out (unreadable, non-text under Exclude, cut by the limit) are named in
     // the notice: going missing in silence is the complaint these counters answer.
-    notifyCopied([`${result.copiedFileCount} file(s) copied${suffix}.`, ...copyNoticeDetails(result)].join(' '), result.payload);
+    notifyCopied([`${result.copiedFileCount} file(s) copied${suffix}.`, ...copyNoticeDetails({ ...result, fileCountLimit: settings.fileCountLimit })].join(' '), result.payload);
   }
 }
 
@@ -342,7 +342,7 @@ async function copyAllOpenEditors(): Promise<void> {
   if (!result) return;
   // Tabs whose files were deleted, or non-text files left out, are not "no open editors":
   // what was skipped is named, and the clipboard is left alone (decision X3).
-  const nothing = nothingToCopyNotice(result);
+  const nothing = nothingToCopyNotice({ ...result, fileCountLimit: settings.fileCountLimit });
   if (nothing) {
     vscode.window.showWarningMessage(nothing);
     return;
@@ -354,7 +354,7 @@ async function copyAllOpenEditors(): Promise<void> {
     // The limit's left-out count is part of the details: files must not go missing with
     // nothing said (IntelliJ raises a dedicated "File Limit Reached" notification).
     notifyCopied(
-      [`${result.copiedFileCount} open editor file(s) copied${suffix}.`, ...copyNoticeDetails(result)].join(' '),
+      [`${result.copiedFileCount} open editor file(s) copied${suffix}.`, ...copyNoticeDetails({ ...result, fileCountLimit: settings.fileCountLimit })].join(' '),
       result.payload);
   }
 }
