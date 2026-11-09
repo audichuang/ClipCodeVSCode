@@ -16,7 +16,7 @@ import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
-import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableHeader, nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
 import { confirmationText, existingTargets, resultNotice, formatSize, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -671,8 +671,9 @@ export async function collectGitPayloadFiles(
       // consumes the file-count limit — the files copy's rule (decision X1). Deleted
       // entries too: their header would carry the same name. Before, such a path fell back
       // to the absolute one and went into the header as is, so a newline in a name forged
-      // a second header line.
-      const unportable = nonPortableName(workspaceRoots, absolutePath);
+      // a second header line. The header as written is judged too: a non-primary root's
+      // label is part of it (spec: "as the header spells it").
+      const unportable = nonPortableName(workspaceRoots, absolutePath) ?? nonPortableHeader(clipboardPath);
       if (unportable !== undefined) {
         nonPortableCount++;
         if (nonPortablePaths.length < UNREADABLE_PATHS_KEPT) nonPortablePaths.push(unportable);

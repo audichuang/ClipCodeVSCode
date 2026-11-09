@@ -54,10 +54,10 @@ export async function collectHistoryCopy(
     const kept = !settings.useFilters ||
       fileMatchesFilters(clipboardPath, settings.filterRules, settings.useIncludeFilters, settings.useExcludeFilters, absPath);
     // A name the payload cannot carry: skipped and named, never read (decision X1). Judged
-    // on the git path too: on Windows the file path has already turned a committed `\`
-    // into a separator.
+    // on the git path too (on Windows the file path has already turned a committed `\`
+    // into a separator) and on the header as written (a root label is part of it).
     const unportable = kept
-      ? nonPortableGitName(roots, f.repoRoot, options.gitPaths?.get(f) ?? '', absPath)
+      ? nonPortableGitName(roots, f.repoRoot, options.gitPaths?.get(f) ?? '', absPath, clipboardPath)
       : undefined;
     return { absPath, clipboardPath, kept, unportable };
   };
