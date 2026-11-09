@@ -382,14 +382,16 @@ export function ioErrorText(error: unknown): string {
 export async function markTargetCollisions(
   plan: RestorePlan,
   /** Injected by tests: this machine's tmp volume decides otherwise. */
-  probe: (existingPath: string) => Promise<boolean> = isCaseInsensitive
+  probe: (existingPath: string) => Promise<boolean> = isCaseInsensitive,
+  /** Injected by tests, so both macOS and non-macOS folding run on one machine. */
+  platform: NodeJS.Platform = process.platform
 ): Promise<RestorePlan> {
   const caseCache = new Map<string, boolean>();
   const groups = new Map<string, Set<string>>();
   const identities = new Map<string, string>();
   for (const absolutePath of [...plan.createOperations, ...plan.deleteOperations].map(op => op.absolutePath)) {
     if (identities.has(absolutePath)) continue;
-    const identity = await targetIdentity(absolutePath, caseCache, probe);
+    const identity = await targetIdentity(absolutePath, caseCache, probe, platform);
     identities.set(absolutePath, identity);
     const spellings = groups.get(identity) ?? new Set<string>();
     spellings.add(absolutePath);
@@ -411,13 +413,14 @@ export async function markTargetCollisions(
 }
 
 /**
- * realpath of the nearest existing ancestor plus the remaining segments, NFC-normalized and
- * lower-cased when that ancestor sits on a case-insensitive volume.
+ * realpath of the nearest existing ancestor plus the remaining segments, lower-cased when
+ * that ancestor sits on a case-insensitive volume, NFC-normalized then or on macOS.
  */
 async function targetIdentity(
   absolutePath: string,
   caseCache: Map<string, boolean>,
-  probe: (existingPath: string) => Promise<boolean>
+  probe: (existingPath: string) => Promise<boolean>,
+  platform: NodeJS.Platform
 ): Promise<string> {
   const trail: string[] = [];
   let current = absolutePath;
@@ -437,10 +440,13 @@ async function targetIdentity(
     insensitive = await probe(anchor);
     caseCache.set(anchor, insensitive);
   }
-  // Unicode folding only where letter case folds too (APFS, NTFS). On a case-sensitive
-  // volume (ext4) the NFC and NFD spellings are two distinct files, and grouping them
-  // skipped both as TARGET_COLLISION. OpenIDEA folds case only, under the same probe.
-  return insensitive ? identity.normalize('NFC').toLowerCase() : identity;
+  // Unicode folds where letter case does (APFS, NTFS) and on every macOS volume: APFS and
+  // HFS+ are normalization-insensitive even when case-sensitive, so NFC and NFD name one
+  // file there and the second write replaced the first. On a case-sensitive Linux volume
+  // (ext4) they are two distinct files, and grouping them skipped both as TARGET_COLLISION.
+  const foldNfc = insensitive || platform === 'darwin';
+  const normalized = foldNfc ? identity.normalize('NFC') : identity;
+  return insensitive ? normalized.toLowerCase() : normalized;
 }
 
 /**
