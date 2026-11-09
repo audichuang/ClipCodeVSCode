@@ -501,6 +501,10 @@ export function nonPortableName(
     if (relative === '..' || relative.startsWith(`..${path.sep}`)) return undefined;
     return relative;
   };
+  // A workspace root itself is always portable: its own name is never in a header. Checked
+  // before the root search, or a root nested in another (`/repo/app:one` inside `/repo`)
+  // was judged by the parent as `app:one` and its whole tree pruned.
+  if (workspaceRoots.some(r => path.resolve(r) === absolute)) return undefined;
   const [primary, ...others] = workspaceRoots;
   let root: string | undefined;
   let relative: string | undefined;
@@ -513,8 +517,7 @@ export function nonPortableName(
     }
   }
   if (root === undefined || relative === undefined) {
-    // Under no root, or the root itself: the clipboard path is absolute.
-    if (workspaceRoots.some(r => path.resolve(r) === absolute)) return undefined;
+    // Under no root: the clipboard path is absolute.
     const rest = absolute.slice(path.parse(absolute).root.length);
     const value = rest.split(path.sep).join('/');
     return value === '' || portable(value) ? undefined : absolute;

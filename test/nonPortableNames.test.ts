@@ -43,6 +43,25 @@ test('nonPortableName judges the real name below the root, never the slash-norma
   // Under no root: the clipboard path is absolute, every folder after `/` is judged.
   assert.equal(nonPortableName(['/ws'], '/elsewhere/dir/a.ts'), undefined);
   assert.equal(nonPortableName(['/ws'], '/else:where/a.ts'), '/else:where/a.ts');
+  // A workspace root is never judged by the parent root that also holds it.
+  assert.equal(nonPortableName(['/repo/app:one', '/repo'], '/repo/app:one', { directory: true }), undefined);
+  assert.equal(nonPortableName(['/repo', '/repo/app:one'], '/repo/app:one', { directory: true }), undefined);
+});
+
+test('files copy: a selected root nested in another root is walked even when its own name is not portable', { skip: posixOnly }, async () => {
+  await withTempDir(async base => {
+    const repo = path.join(base, 'repo');
+    const app = path.join(repo, 'app:one');
+    await put(path.join(app, 'ok.ts'), 'x');
+    await put(path.join(app, 'sub', 'b.ts'), 'y');
+    const result = await collectCopyFiles([app, repo], [app], defaultSettings, { includeNonText: false });
+    assert.deepEqual(result.nonPortablePaths, []);
+    assert.deepEqual(result.files.map(f => f.path), ['ok.ts', 'sub/b.ts']);
+    // With `/repo` primary the headers really are `app:one/...`: those files are refused,
+    // but the root folder itself is not what gets named.
+    const parentFirst = await collectCopyFiles([repo, app], [app], defaultSettings, { includeNonText: false });
+    assert.deepEqual(parentFirst.nonPortablePaths, ['app:one/ok.ts', 'app:one/sub']);
+  });
 });
 
 async function withTempDir(run: (root: string) => Promise<void>): Promise<void> {
