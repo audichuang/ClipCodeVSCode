@@ -180,9 +180,10 @@ test('committed view reads all content via one readBatch call, not per-file show
   assert.match(r.text, /batched b\.ts/);
 });
 
-test('a path containing a newline is kept out of the batch and read per-file', async () => {
-  // cat-file --batch is newline-delimited; a path with a line break would corrupt
-  // request/response alignment, so it must go to the per-file reader instead.
+test('a path containing a newline is never read: it is skipped and named as not portable (X1)', async () => {
+  // A line break in a name cannot travel in a header (decision X1, 2026-11-09): it used to
+  // go to the per-file reader and land in the payload under a header that splits in two.
+  // It now never reaches cat-file --batch or the per-file reader.
   const requestedBatches: string[][] = [];
   let showCalls = 0;
   const repo: ContentRepo = {
@@ -202,9 +203,10 @@ test('a path containing a newline is kept out of the batch and read per-file', a
     ]
   });
   assert.deepEqual(requestedBatches, [['ok.ts']]);     // newline path excluded from the batch
-  assert.equal(showCalls, 1);                          // it fell back to a per-file read
+  assert.equal(showCalls, 0);                          // and not read per-file either
   assert.match(r.text, /batched ok\.ts/);
-  assert.match(r.text, /shown weird<NL>name\.ts/);
+  assert.doesNotMatch(r.text, /weird/);
+  assert.deepEqual(r.nonPortablePaths, ['weird\nname.ts']);
 });
 
 test('batch request is capped at the file-count limit (no reading past it)', async () => {

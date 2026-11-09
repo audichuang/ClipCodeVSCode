@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { type HistoryRepo, readClassifiedAtCommit } from './gitHistory.js';
-import { collectHistoryCopy, historyCopyNotice } from './historyCopy.js';
-import { makeRawBlobReader, withRawBlobs } from './gitRawBlob.js';
+import { collectHistoryCopy, historyCopyNotice, historyGitPaths } from './historyCopy.js';
+import { makeChangedPathLister, makeRawBlobReader, withRawBlobs } from './gitRawBlob.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
 import { askAboutNonText } from './nonTextDialog.js';
@@ -100,11 +100,13 @@ async function copyFullSource(
   const files = dedupeFilesKeepNewest(collected);
   // Raw blob reads (`git cat-file`): the Git extension's buffer() applies textconv.
   const repo = withRawBlobs(provider.repo!, makeRawBlobReader(gitPath));
+  // The git spelling of each path, for the "Name not portable" check (decision X1).
+  const gitPaths = await historyGitPaths(files, makeChangedPathLister(gitPath));
 
   const result = await askAboutNonText(
     settings,
     includeNonText => collectHistoryCopy(
-      files, f => readClassifiedAtCommit(repo, f.commit.hash, f.change, f.commit.parents), settings, roots, { includeNonText }),
+      files, f => readClassifiedAtCommit(repo, f.commit.hash, f.change, f.commit.parents), settings, roots, { includeNonText, gitPaths }),
     (message, options, ...buttons) => vscode.window.showWarningMessage(message, options, ...buttons)
   );
   if (!result) return;

@@ -36,7 +36,7 @@ export interface NonTextSummary {
   /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
   symlinkedFolderCount?: number;
   symlinkedFolderPaths?: string[];
-  /** Files and folders skipped because a payload header cannot carry their real name. */
+  /** Files and folders (Git copies: changed paths) skipped because a payload header cannot carry their real name. */
   nonPortableCount?: number;
   nonPortablePaths?: string[];
 }
@@ -54,7 +54,7 @@ export interface NonTextNoticeCounts {
   /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
   symlinkedFolderCount?: number;
   symlinkedFolderPaths?: string[];
-  /** Files and folders skipped because a payload header cannot carry their real name. */
+  /** Files and folders (Git copies: changed paths) skipped because a payload header cannot carry their real name. */
   nonPortableCount?: number;
   nonPortablePaths?: string[];
 }

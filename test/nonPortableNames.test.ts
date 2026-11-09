@@ -5,7 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { collectCopyFiles } from '../src/copy.js';
 import { buildGraphCopyPayload, type GraphCopyDeps } from '../src/graphCopy.js';
-import { collectHistoryCopy } from '../src/historyCopy.js';
+import { parseClipboard } from '../src/clipboardFormat.js';
+import { EMPTY_TREE } from '../src/gitHistory.js';
+import { collectHistoryCopy, historyCopyNotice, historyGitPaths } from '../src/historyCopy.js';
 import type { FileNode } from '../src/historyTree.js';
 import { copyNoticeDetails, nonTextDialog } from '../src/nonTextDialog.js';
 import { isExportableRelativePath, nonPortableName } from '../src/pathResolver.js';
@@ -40,9 +42,19 @@ test('nonPortableName judges the real name below the root, never the slash-norma
   assert.equal(nonPortableName(['/ws', '/other/lib'], '/other/lib/src/a.ts'), undefined);
   // Under a labelled second root, the name keeps that label.
   assert.equal(nonPortableName(['/ws', '/other/lib'], '/other/lib/src/a:b.ts'), 'lib/src/a:b.ts');
-  // Under no root: the clipboard path is absolute, every folder after `/` is judged.
+  // Under no root the header is the absolute path (X15): a control character anywhere in
+  // it, or a non-portable file NAME, refuses it; other characters in its folders do not.
   assert.equal(nonPortableName(['/ws'], '/elsewhere/dir/a.ts'), undefined);
-  assert.equal(nonPortableName(['/ws'], '/else:where/a.ts'), '/else:where/a.ts');
+  assert.equal(nonPortableName(['/ws'], '/else:where/a"b?/a.ts'), undefined);
+  assert.equal(nonPortableName(['/ws'], '/elsewhere/q"x.ts'), '/elsewhere/q"x.ts');
+  assert.equal(nonPortableName(['/ws'], '/elsewhere/a.ts '), '/elsewhere/a.ts ');
+  assert.equal(nonPortableName(['/ws'], '/else\nwhere/a.ts'), '/else\nwhere/a.ts');
+  assert.equal(nonPortableName(['/ws'], '/tmp/x\nfile: [DELETED] victim.txt/notes.txt'),
+    '/tmp/x\nfile: [DELETED] victim.txt/notes.txt');
+  assert.equal(nonPortableName(['/ws'], '/else\twhere/a.ts'), '/else\twhere/a.ts');
+  // A folder outside every root: its own name, judged as a folder (a trailing space is fine).
+  assert.equal(nonPortableName(['/ws'], '/elsewhere/dir ', { directory: true }), undefined);
+  assert.equal(nonPortableName(['/ws'], '/elsewhere/d:ir', { directory: true }), '/elsewhere/d:ir');
   // A workspace root is never judged by the parent root that also holds it.
   assert.equal(nonPortableName(['/repo/app:one', '/repo'], '/repo/app:one', { directory: true }), undefined);
   assert.equal(nonPortableName(['/repo', '/repo/app:one'], '/repo/app:one', { directory: true }), undefined);
@@ -140,8 +152,56 @@ const graphSettings = {
   maxFileSizeKB: 500, fileCountLimit: 1, setMaxFileCount: true
 };
 
-test('Graph copy does not apply the files copy\'s "Name not portable" rule', async () => {
-  // Spec "What is carried": OpenIDEA's commit copies do not report this category.
+// A name with a line break whose second line is a header the default format reads (the
+// generic header's comment marker is optional): written into a header as is, it forged a
+// deletion of src/main.rs.
+const INJECTED = 'x\nfile: [DELETED] src/main.rs';
+
+test('Graph copy: non-portable git paths are never read, get no header, are named, and do not use the file-count limit (X1)', async () => {
+  // Decision X1 (2026-11-09): commit copies apply the files copy's rule to each changed path.
+  const requested: string[] = [];
+  const shown: string[] = [];
+  const deps: GraphCopyDeps = {
+    resolveRepo: () => ({ rootUri: { fsPath: '/repo' }, show: async (_ref, p) => { shown.push(p); return 'before'; } }),
+    readBatch: async (_root, _hash, paths) => {
+      requested.push(...paths);
+      return new Map(paths.map(p => [p, { text: `body:${p}` }]));
+    },
+    settings: graphSettings
+  };
+  // Git paths are `/`-separated: the `\` is part of a name on every platform.
+  // A deleted entry with such a name is skipped too.
+  const files = [['a\\b.png', 'M'], ['q"x.ts', 'M'], ['bad:dir/x.ts', 'M'], ['t\tab.ts', 'M'], [INJECTED, 'M'],
+    ['gone\nfile: y.ts', 'D'], ['ok 檔 😀.ts', 'M'], ['later.ts', 'M']]
+    .map(([relativePath, status]) => ({ repoRootFsPath: '/repo', relativePath, status }));
+  const result = await buildGraphCopyPayload(deps, { hash: 'abc', files });
+  assert.deepEqual(requested, ['ok 檔 😀.ts']);
+  // Reads run ahead of the bookkeeping (later.ts may be read past the limit), never a refused name.
+  assert.ok(shown.every(p => p.endsWith('later.ts')), shown.join('\n'));
+  assert.equal(result.copiedFileCount, 1);
+  assert.deepEqual(parseClipboard(result.text, graphSettings.headerFormat).map(e => e.path), ['ok 檔 😀.ts']);
+  assert.equal(result.fileLimitReached, true);
+  assert.equal(result.limitLeftOut, 1, 'only later.ts is left out by the limit');
+  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'bad:dir/x.ts', 't\tab.ts', INJECTED, 'gone\nfile: y.ts']);
+  assert.ok(copyNoticeDetails({ ...result, unreadablePaths: [] })
+    .includes('Name not portable: 6 (a\\b.png, q"x.ts, bad:dir/x.ts and 3 more).'));
+});
+
+test('Graph copy: normal names are read and carried with nothing named (X1)', async () => {
+  const names = ['src/a.ts', 'my docs/說明 文件.md', 'emoji 😀/🎉.ts'];
+  const deps: GraphCopyDeps = {
+    resolveRepo: () => undefined,
+    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, { text: `body:${p}` }])),
+    settings: { ...graphSettings, setMaxFileCount: false }
+  };
+  const result = await buildGraphCopyPayload(deps,
+    { hash: 'abc', files: names.map(relativePath => ({ repoRootFsPath: '/repo', relativePath, status: 'M' })) });
+  assert.equal(result.copiedFileCount, 3);
+  assert.equal(result.nonPortableCount, 0);
+  assert.deepEqual(result.nonPortablePaths, []);
+});
+
+test('Graph copy, repo outside every workspace root: the absolute header follows X15', async () => {
   const requested: string[] = [];
   const deps: GraphCopyDeps = {
     resolveRepo: () => undefined,
@@ -149,34 +209,90 @@ test('Graph copy does not apply the files copy\'s "Name not portable" rule', asy
       requested.push(...paths);
       return new Map(paths.map(p => [p, { text: `body:${p}` }]));
     },
-    settings: { ...graphSettings, setMaxFileCount: false }
+    settings: { ...graphSettings, setMaxFileCount: false },
+    workspaceRoots: [path.resolve('/ws')]
   };
-  const names = ['a\\b.ts', 'q"x.ts', 'bad:dir/x.ts', 't\tab.ts', 'ok 檔 😀.ts'];
-  const files = names.map(relativePath => ({ repoRootFsPath: '/repo', relativePath, status: 'M' }));
+  const files = ['bad:dir/x.ts', 'dir/q"x.ts', 'dir/x\nfile: y.ts']
+    .map(relativePath => ({ repoRootFsPath: '/outside/repo', relativePath, status: 'M' }));
   const result = await buildGraphCopyPayload(deps, { hash: 'abc', files });
-  assert.deepEqual(requested, names);
-  assert.equal(result.copiedFileCount, 5);
-  assert.ok(!('nonPortableCount' in result));
+  // Other characters in its folders are allowed; a bad file name or a control character is not.
+  assert.deepEqual(requested, ['bad:dir/x.ts']);
+  assert.equal(result.nonPortableCount, 2);
 });
 
-function historyFile(name: string): FileNode {
+function historyFile(name: string, extra: Partial<FileNode['change']> = {}): FileNode {
   return {
     kind: 'file', repoRoot: '/repo', relPath: name, name,
     commit: { hash: 'h', message: 'm', parents: ['p'] },
-    change: { uri: { fsPath: `/repo/${name}` }, status: 'MODIFIED' },
-    changeType: 'MODIFIED'
+    change: { uri: { fsPath: `/repo/${name}` }, status: 'MODIFIED', ...extra },
+    changeType: extra.status === 'DELETED' ? 'DELETED' : 'MODIFIED'
   };
 }
 
-test('History copy does not apply the files copy\'s "Name not portable" rule', { skip: posixOnly }, async () => {
+test('History copy: non-portable names are never read, get no header, are named, and do not use the file-count limit (X1)', { skip: posixOnly }, async () => {
   const read: string[] = [];
-  const names = ['q"x.ts', 'c:d.ts', 'ok 檔 😀.ts'];
+  const files = ['a\\b.png', 'q"x.ts', 'c:d.ts', INJECTED].map(n => historyFile(n));
+  // A deleted entry with such a name is skipped too.
+  files.push(historyFile('gone\nfile: y.ts', { status: 'DELETED' }), historyFile('ok 檔 😀.ts'), historyFile('later.ts'));
+  const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: true, fileCountLimit: 1 };
+  const result = await collectHistoryCopy(files, async f => { read.push(f.name); return { text: 'x' }; }, settings, ['/repo']);
+  assert.deepEqual(read, ['ok 檔 😀.ts']);
+  assert.deepEqual(parseClipboard(result.payload, settings.headerFormat).map(e => e.path), ['ok 檔 😀.ts']);
+  assert.equal(result.limitLeftOut, 1);
+  assert.deepEqual(result.nonPortablePaths, ['a\\b.png', 'q"x.ts', 'c:d.ts', INJECTED, 'gone\nfile: y.ts']);
+  assert.match(historyCopyNotice(result, settings).message, /Name not portable: 5 \(a\\b\.png, q"x\.ts, c:d\.ts and 2 more\)\./);
+
+  // Everything refused: the warning names them instead of "No Git changes found".
+  const none = await collectHistoryCopy(files.slice(0, 3), async () => ({ text: 'x' }), settings, ['/repo']);
+  assert.equal(historyCopyNotice(none, settings).emptyWarning,
+    'No Git changes copied. Name not portable: 3 (a\\b.png, q"x.ts, c:d.ts).');
+});
+
+test('History copy judges the git path: a `\\` committed elsewhere is refused even where the file path lost it (X1)', async () => {
+  // On Windows the Git extension hands back `a\\b.png` as the path `<repo>\\a\\b.png`: two
+  // segments, nothing left to refuse. The git path still has the `\\` inside one name.
+  const root = path.resolve('/repo');
+  const node = (relPath: string): FileNode => ({
+    kind: 'file', repoRoot: root, relPath, name: relPath.split('/').pop()!,
+    commit: { hash: 'h', message: 'm', parents: ['p'] },
+    change: { uri: { fsPath: path.join(root, ...relPath.split('/')) }, status: 'MODIFIED' },
+    changeType: 'MODIFIED'
+  });
+  const lost = node('a/b.png');
+  const fine = node('a/c.png');
+  const read: string[] = [];
   const settings = { ...defaultSettings, headerFormat: graphSettings.headerFormat, setMaxFileCount: false };
-  const result = await collectHistoryCopy(names.map(historyFile), async f => { read.push(f.name); return { text: 'x' }; }, settings, ['/repo']);
-  assert.deepEqual(read, names);
-  // The clipboard path falls back to the absolute path, as before (toClipboardPathFromRoots).
-  assert.deepEqual(result.files.map(f => f.path), ['/repo/q"x.ts', '/repo/c:d.ts', 'ok 檔 😀.ts']);
-  assert.ok(!('nonPortableCount' in result));
+  const gitPaths = new Map([[lost, 'a\\b.png'], [fine, 'a/c.png']]);
+  const result = await collectHistoryCopy([lost, fine], async f => { read.push(f.relPath); return { text: 'x' }; },
+    settings, [root], { includeNonText: false, gitPaths });
+  assert.deepEqual(read, ['a/c.png']);
+  assert.deepEqual(result.nonPortablePaths, ['a\\b.png']);
+});
+
+test('historyGitPaths matches each file to its raw git path, one lister call per commit side', async () => {
+  const root = path.resolve('/repo');
+  const node = (relPath: string, hash: string, parents: string[]): FileNode => ({
+    kind: 'file', repoRoot: root, relPath, name: relPath.split('/').pop()!,
+    commit: { hash, message: 'm', parents },
+    change: { uri: { fsPath: path.join(root, ...relPath.split('/')) }, status: 'MODIFIED' },
+    changeType: 'MODIFIED'
+  });
+  // Windows spelling: both `a\\b.png` and a real `a/b.png` arrive as relPath `a/b.png`.
+  const first = node('a/b.png', 'h1', ['p1']);
+  const second = node('a/b.png', 'h1', ['p1']);
+  const merged = node('m.ts', 'h2', ['x', 'y']);
+  const root0 = node('r.ts', 'h3', []);
+  const calls: string[] = [];
+  const raw: Record<string, string[]> = { 'p1..h1': ['a/b.png', 'a\\b.png'], 'x..h2': [], 'y..h2': ['m.ts'], [`${EMPTY_TREE}..h3`]: ['r.ts'] };
+  const gitPaths = await historyGitPaths([first, second, merged, root0], async (_repo, from, to) => {
+    calls.push(`${from}..${to}`);
+    return raw[`${from}..${to}`];
+  });
+  assert.deepEqual(calls.sort(), Object.keys(raw).sort());
+  assert.deepEqual([first, second, merged, root0].map(f => gitPaths.get(f)), ['a/b.png', 'a\\b.png', 'm.ts', 'r.ts']);
+  // A lister that cannot run leaves the file path to judge.
+  const none = await historyGitPaths([first], async () => undefined);
+  assert.equal(none.get(first), undefined);
 });
 
 // Spec "What is carried", portability bullet: the rule is judged on each FILE's path

@@ -16,7 +16,7 @@ import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
-import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
 import { confirmationText, existingTargets, resultNotice, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -292,6 +292,8 @@ export function gitNoticeCounts(result: {
   limitLeftOut: number;
   limitLeftOutCapped?: boolean;
   unreadablePaths?: string[];
+  nonPortableCount?: number;
+  nonPortablePaths?: string[];
 }) {
   return {
     nonTextFiles: result.nonTextFiles,
@@ -299,7 +301,9 @@ export function gitNoticeCounts(result: {
     limitLeftOut: result.limitLeftOut,
     limitLeftOutCapped: result.limitLeftOutCapped,
     skippedUnreadableCount: result.skippedUnreadableCount - result.excludedNonTextCount,
-    unreadablePaths: result.unreadablePaths ?? []
+    unreadablePaths: result.unreadablePaths ?? [],
+    nonPortableCount: result.nonPortableCount,
+    nonPortablePaths: result.nonPortablePaths
   };
 }
 
@@ -594,6 +598,10 @@ export interface GitPayloadFiles extends Omit<NonTextSummary, 'estimatedBytes'> 
   usesRegularSpacing: boolean;
   /** First UNREADABLE_PATHS_KEPT unreadable paths (non-text left out by Exclude not among them). */
   unreadablePaths: string[];
+  /** Changed paths the payload cannot carry (decision X1): skipped and named, never read. */
+  nonPortableCount: number;
+  /** Their first UNREADABLE_PATHS_KEPT names. */
+  nonPortablePaths: string[];
 }
 
 export async function collectGitPayloadFiles(
@@ -628,6 +636,8 @@ export async function collectGitPayloadFiles(
   let nonTextTotalBytes = 0;
   let nonTextOverLimitCount = 0;
   let unreadOverLimitCount = 0;
+  let nonPortableCount = 0;
+  const nonPortablePaths: string[] = [];
 
   // Phase 1 — selection / dedup / filter (no I/O, so order + dedup stay
   // deterministic). Produces the ordered candidate list.
@@ -652,6 +662,17 @@ export async function collectGitPayloadFiles(
           absolutePath
         )
       ) {
+        continue;
+      }
+      // A name the payload cannot carry is skipped and named, never read, and never
+      // consumes the file-count limit — the files copy's rule (decision X1). Deleted
+      // entries too: their header would carry the same name. Before, such a path fell back
+      // to the absolute one and went into the header as is, so a newline in a name forged
+      // a second header line.
+      const unportable = nonPortableName(workspaceRoots, absolutePath);
+      if (unportable !== undefined) {
+        nonPortableCount++;
+        if (nonPortablePaths.length < UNREADABLE_PATHS_KEPT) nonPortablePaths.push(unportable);
         continue;
       }
 
@@ -783,7 +804,9 @@ export async function collectGitPayloadFiles(
     nonTextFiles,
     nonTextTotalBytes,
     nonTextOverLimitCount,
-    unreadOverLimitCount
+    unreadOverLimitCount,
+    nonPortableCount,
+    nonPortablePaths
   };
 }
 
