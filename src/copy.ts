@@ -297,9 +297,9 @@ export async function collectCopyFiles(
   const batch: { absolutePath: string; relativePath: string }[] = [];
   // Resolve one buffered batch concurrently, then apply limit/size/order bookkeeping
   // over the in-order results so the payload is byte-identical to the old serial
-  // version. As with the git copy, tripping the limit mid-batch discards up to a
-  // batch of already-issued reads (bounded over-fetch); the discarded tail is counted
-  // in limitLeftOut.
+  // version. The walk drains as soon as the batch could fill the limit, so a batch never
+  // holds more candidates than the limit has room for and cannot trip it mid-batch; the
+  // limit check below is only a guard.
   const drainBatch = async (): Promise<void> => {
     const pending = batch.splice(0);
     const read = mapInOrder(pending, READ_CONCURRENCY, async candidate => {
