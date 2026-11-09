@@ -97,7 +97,7 @@ test('UNCOMMITTED hash reads working-tree content via readWorking, not git show'
   const repo = fakeRepo('/repo', { 'a.ts': 'COMMITTED' }); // git show must NOT be used
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readWorking: async (abs: string) => (abs === '/repo/a.ts' ? 'WORKING' : undefined),
+    readWorking: async (abs: string) => (abs === '/repo/a.ts' ? { text: 'WORKING' } : undefined),
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -163,7 +163,7 @@ test('committed view reads all content via one readBatch call, not per-file show
   };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { batchCalls++; return new Map(paths.map(p => [p, `batched ${p}`])); },
+    readBatch: async (_root, _hash, paths) => { batchCalls++; return new Map(paths.map(p => [p, { text: `batched ${p}` }])); },
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -191,7 +191,7 @@ test('a path containing a newline is kept out of the batch and read per-file', a
   };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, `batched ${p}`])); },
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, { text: `batched ${p}` }])); },
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -213,7 +213,7 @@ test('batch request is capped at the file-count limit (no reading past it)', asy
   const limited: GraphCopySettings = { ...settings, setMaxFileCount: true, fileCountLimit: 2 };
   const d: GraphCopyDeps = {
     resolveRepo: () => repo,
-    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, p])); },
+    readBatch: async (_root, _hash, paths) => { requestedBatches.push(paths); return new Map(paths.map(p => [p, { text: p }])); },
     settings: limited
   };
   await buildGraphCopyPayload(d, {
@@ -248,7 +248,7 @@ test('committed copy works via readBatch even when resolveRepo cannot match (SSH
   // `git -C <root>` directly, so a vscode.git path mismatch must NOT block the copy.
   const d: GraphCopyDeps = {
     resolveRepo: () => undefined, // vscode.git knows the repo under a different path → no match
-    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, `batched ${p}`])),
+    readBatch: async (_root, _hash, paths) => new Map(paths.map(p => [p, { text: `batched ${p}` }])),
     settings
   };
   const r = await buildGraphCopyPayload(d, {
@@ -263,7 +263,7 @@ test('committed copy works via readBatch even when resolveRepo cannot match (SSH
 test('uncommitted copy works via readWorking even when resolveRepo cannot match', async () => {
   const d: GraphCopyDeps = {
     resolveRepo: () => undefined,
-    readWorking: async (abs: string) => (abs === '/realpath/repo/a.ts' ? 'WORKING' : undefined),
+    readWorking: async (abs: string) => (abs === '/realpath/repo/a.ts' ? { text: 'WORKING' } : undefined),
     settings
   };
   const r = await buildGraphCopyPayload(d, {

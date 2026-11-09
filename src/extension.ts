@@ -6,9 +6,10 @@ import { formatBatchRequest, parseCatFileBatch } from './catFile.js';
 import { applyRestoreBase, suggestRestoreBase, type DirProbe, type RestoreBase } from './restoreBase.js';
 import { buildGitPayload, buildPayload, extractSourceRoot, parseClipboard, type ChangeTypeLabel, type PayloadFile } from './clipboardFormat.js';
 import { collectCopyFiles, type CopyResult } from './copy.js';
-import { copyNoticeDetails, nonTextDialog } from './nonTextDialog.js';
+import { askAboutNonText, copyNoticeDetails, type NonTextChoice, type NonTextSummary } from './nonTextDialog.js';
+import { classifyBytes, type FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
-import { decodeText, isTextContent, normalizeFsPath, readRefContent, type ContentRepo } from './gitContent.js';
+import { normalizeFsPath, readRefClassified, readRefContent, type ContentRepo } from './gitContent.js';
 import { mapInOrder } from './concurrency.js';
 import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
@@ -114,11 +115,11 @@ function readCommittedBatch(
   hash: string,
   relativePaths: string[],
   gitEnv?: Record<string, string>
-): Promise<Map<string, string | undefined>> {
+): Promise<Map<string, FileContent | undefined>> {
   return new Promise(resolve => {
     if (relativePaths.length === 0) { resolve(new Map()); return; }
     let settled = false;
-    const done = (v: Map<string, string | undefined>) => { if (!settled) { settled = true; resolve(v); } };
+    const done = (v: Map<string, FileContent | undefined>) => { if (!settled) { settled = true; resolve(v); } };
     try {
       // Mirror the graph's git env so the binary spawns identically (LC_ALL=C
       // keeps output byte-stable; gitEnv carries any host-specific git config).
@@ -150,7 +151,7 @@ export function makeGraphCopyDeps(api: GitAPI, settings: ClipCodeSettings, runti
         | undefined;
     },
     // Working-tree read for the UNCOMMITTED view (no commit to `git show`).
-    readWorking: (absolutePath: string) => readWorkspaceText(vscode.Uri.file(absolutePath)),
+    readWorking: (absolutePath: string) => readWorkspaceClassified(vscode.Uri.file(absolutePath)),
     readBatch: (repoRootFsPath, hash, relativePaths) =>
       readCommittedBatch(gitPath, repoRootFsPath, hash, relativePaths, gitEnv),
     // The same list Paste & Restore resolves against: it decides every graph payload's
@@ -172,7 +173,9 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
     return;
   }
   const settings = readSettings();
-  const result = await buildGraphCopyPayload(makeGraphCopyDeps(api, settings, runtime), payload);
+  const deps = makeGraphCopyDeps(api, settings, runtime);
+  const result = await askAboutNonText(settings, includeNonText => buildGraphCopyPayload(deps, payload, { includeNonText }), showNonTextDialog);
+  if (!result) return;
   if (result.copiedFileCount === 0 && result.skippedFileSizeCount === 0) {
     vscode.window.showWarningMessage('No source copied.');
     return;
@@ -181,9 +184,8 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
   if (settings.showCopyNotification) {
     const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
     const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const unreadable = result.skippedUnreadableCount > 0
-      ? ` ${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable.` : '';
-    const message = `${result.copiedFileCount} file(s) copied${skipped}.${limit}${unreadable}`;
+    const details = copyNoticeDetails(gitNoticeCounts(result));
+    const message = [`${result.copiedFileCount} file(s) copied${skipped}.${limit}`, ...details].join(' ');
     // Offer the actual skipped paths/sizes behind a button so the toast stays short.
     // Goes through notifyCopied so an oversized copy still gets its warning/error colour.
     notifyCopied(message, result.text, result.skippedFiles.length > 0 ? {
@@ -193,7 +195,7 @@ async function copyFullSourceAtCommit(payload: GraphCopyPayload, runtime?: CopyR
           .map(f => `${f.path} — ${(f.bytes / 1024).toFixed(1)} KB`)
           .join('\n');
         void vscode.window.showInformationMessage(
-          `Skipped ${result.skippedFiles.length} file(s): size over ${settings.maxFileSizeKB} KB`,
+          `Skipped ${result.skippedFiles.length} file(s): over the size limit`,
           { modal: true, detail: list }
         );
       }
@@ -268,13 +270,30 @@ async function collectFilesAskingAboutNonText(
   inputPaths: string[],
   settings: ClipCodeSettings
 ): Promise<CopyResult | undefined> {
-  const include = await collectCopyFiles(roots, inputPaths, settings, { includeNonText: true });
-  if (include.nonTextFiles.length === 0) return include;
-  const dialog = nonTextDialog(include, settings);
-  const choice = await vscode.window.showWarningMessage(dialog.message, { modal: true, detail: dialog.detail }, ...dialog.buttons);
-  if (choice === 'Include' && dialog.buttons.includes('Include')) return include;
-  if (choice === 'Exclude') return collectCopyFiles(roots, inputPaths, settings, { includeNonText: false });
-  return undefined;
+  return askAboutNonText(settings, includeNonText => collectCopyFiles(roots, inputPaths, settings, { includeNonText }), showNonTextDialog);
+}
+
+function showNonTextDialog(message: string, options: { modal: true; detail: string }, ...buttons: NonTextChoice[]) {
+  return vscode.window.showWarningMessage(message, options, ...buttons);
+}
+
+/**
+ * The Git surfaces count a non-text file left out by Exclude inside skippedUnreadableCount
+ * (their meaning before non-text support); the notice names the two apart.
+ */
+function gitNoticeCounts(result: {
+  nonTextFiles: { path: string; size: number }[];
+  excludedNonTextCount: number;
+  skippedUnreadableCount: number;
+  limitLeftOut: number;
+}) {
+  return {
+    nonTextFiles: result.nonTextFiles,
+    excludedNonTextCount: result.excludedNonTextCount,
+    limitLeftOut: result.limitLeftOut,
+    skippedUnreadableCount: result.skippedUnreadableCount - result.excludedNonTextCount,
+    unreadablePaths: []
+  };
 }
 
 async function copyAllOpenEditors(): Promise<void> {
@@ -337,13 +356,36 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
 
   const selected = collectResourceSelections(resources);
   const settings = readSettings();
-  const result = await collectGitPayloadFiles(api.repositories, roots, selected, settings);
+  const result = await askAboutNonText(settings, async includeNonText => {
+    const collected = await collectGitPayloadFiles(api.repositories, roots, selected, settings, { includeNonText });
+    const payload = gitChangesPayload(collected, settings, roots);
+    return { ...collected, payload, estimatedBytes: Buffer.byteLength(payload, 'utf8') };
+  }, showNonTextDialog);
+  if (!result) return;
 
   if (result.files.length === 0) {
     vscode.window.showWarningMessage('No Git changes found to copy.');
     return;
   }
 
+  const payload = result.payload;
+  await vscode.env.clipboard.writeText(payload);
+
+  if (settings.showCopyNotification) {
+    const skipped = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
+    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
+    notifyCopied(
+      [`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`, ...copyNoticeDetails(gitNoticeCounts(result))].join(' '),
+      payload);
+  }
+}
+
+/** The SCM payload: the regular layout unless a deleted or staged entry asks for the Git one. */
+export function gitChangesPayload(
+  result: { files: PayloadFile[]; usesRegularSpacing: boolean },
+  settings: ClipCodeSettings,
+  roots: string[]
+): string {
   const payloadOptions = {
     headerFormat: settings.headerFormat,
     preText: settings.preText,
@@ -354,20 +396,9 @@ async function copyGitChanges(resources: unknown[]): Promise<void> {
     // source-root basename would be wrong for files from other roots.
     sourceRoot: sourceRootName(roots)
   };
-  const payload = result.usesRegularSpacing
+  return result.usesRegularSpacing
     ? buildPayload(payloadOptions)
     : buildGitPayload(payloadOptions);
-  await vscode.env.clipboard.writeText(payload);
-
-  if (settings.showCopyNotification) {
-    const reasons = [
-      ...(result.skippedFileSizeCount > 0 ? [`${result.skippedFileSizeCount} skipped: size exceeded`] : []),
-      ...(result.skippedUnreadableCount > 0 ? [`${result.skippedUnreadableCount} skipped: not UTF-8 text or unreadable`] : [])
-    ];
-    const skipped = reasons.length > 0 ? ` (${reasons.join(', ')})` : '';
-    const limit = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    notifyCopied(`${result.copiedFileCount} Git file(s) copied${skipped}.${limit}`, payload);
-  }
 }
 
 function isRelativeEntryPath(p: string): boolean {
@@ -539,26 +570,42 @@ interface GitChangeCandidate {
   forceIndexContent: boolean;
 }
 
+export interface GitPayloadFiles extends Omit<NonTextSummary, 'estimatedBytes'> {
+  files: PayloadFile[];
+  copiedFileCount: number;
+  skippedFileSizeCount: number;
+  /** Unreadable, plus (Exclude only) non-text files — their meaning before non-text support. */
+  skippedUnreadableCount: number;
+  /** Exclude only: the non-text part of skippedUnreadableCount. */
+  excludedNonTextCount: number;
+  fileLimitReached: boolean;
+  usesRegularSpacing: boolean;
+}
+
 export async function collectGitPayloadFiles(
   repositories: GitRepository[],
   workspaceRoots: string[],
   selected: GitSelection[],
-  settings: ClipCodeSettings
-): Promise<{
-  files: PayloadFile[];
-  copiedFileCount: number;
-  skippedFileSizeCount: number;
-  skippedUnreadableCount: number;
-  fileLimitReached: boolean;
-  usesRegularSpacing: boolean;
-}> {
+  settings: ClipCodeSettings,
+  /**
+   * includeNonText carries non-text files as Base64 entries. False is the payload from
+   * before non-text support, byte for byte.
+   */
+  options: { includeNonText: boolean } = { includeNonText: false }
+): Promise<GitPayloadFiles> {
   const files: PayloadFile[] = [];
   const seen = new Set<string>();
   let copiedFileCount = 0;
   let skippedFileSizeCount = 0;
   let skippedUnreadableCount = 0;
+  let excludedNonTextCount = 0;
   let fileLimitReached = false;
+  let limitLeftOut = 0;
   let usesFallbackGitPayload = false;
+  const nonTextFiles: { path: string; size: number }[] = [];
+  let nonTextTotalBytes = 0;
+  let nonTextOverLimitCount = 0;
+  let unreadOverLimitCount = 0;
 
   // Phase 1 — selection / dedup / filter (no I/O, so order + dedup stay
   // deterministic). Produces the ordered candidate list.
@@ -601,14 +648,20 @@ export async function collectGitPayloadFiles(
   // the graph copy, tripping the limit mid-batch discards up to a batch of
   // already-issued reads (bounded over-fetch).
   const sizeLimit = settings.maxFileSizeKB * 1024;
+  const nonTextLimit = settings.maxNonTextFileSizeKB * 1024;
+  // A working-tree file over every limit that could apply to it is not read. Exclude keeps
+  // the old rule (only the text limit applies), so a large image stays a size placeholder.
+  const readLimit = options.includeNonText ? Math.max(sizeLimit, nonTextLimit) : sizeLimit;
   const fetched = mapInOrder(candidates, GIT_READ_CONCURRENCY, async candidate => ({
     candidate,
-    read: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent, sizeLimit)
+    read: await readGitChangeContent(candidate.repository, candidate.change, candidate.changeType, candidate.forceIndexContent, readLimit)
   }));
-  // Working-tree files that are binary / not UTF-8. IntelliJ counts them and, only in the
-  // Git layout (known after the loop), keeps them as an "Unable to read" entry.
+  // Working-tree files that are unreadable (or non-text under Exclude). IntelliJ counts them
+  // and, only in the Git layout (known after the loop), keeps them as an "Unable to read" entry.
   const unreadableWorkingTree = new Set<PayloadFile>();
-  for await (const { candidate, read } of fetched) {
+  let index = -1;
+  for await (const { candidate, read: fetchedRead } of fetched) {
+    index++;
     // The limit now trips only when a real candidate (post dedup/filter) is left
     // unread — so `fileLimitReached` reflects whether the limit actually dropped
     // a copyable file. The old serial loop checked before dedup/filter and could
@@ -616,14 +669,24 @@ export async function collectGitPayloadFiles(
     // dropping that false positive is intentional.
     if (settings.setMaxFileCount && copiedFileCount >= settings.fileCountLimit) {
       fileLimitReached = true;
+      limitLeftOut = candidates.length - index;
       break;
     }
     if (candidate.changeType === 'DELETED' || candidate.forceIndexContent) {
       usesFallbackGitPayload = true;
     }
 
+    let read = fetchedRead;
+    if (read.kind === 'nonText' && !options.includeNonText) {
+      // Exclude: exactly what the reader returned before non-text support — the
+      // unreadable marker for a staged blob, an unreadable working-tree file otherwise.
+      excludedNonTextCount++;
+      read = read.fromIndex ? text(UNREADABLE_FILE_MARKER) : { kind: 'unreadable' };
+    }
+
     if (read.kind === 'tooLarge') {
       skippedFileSizeCount++;
+      if (read.size > Math.max(sizeLimit, nonTextLimit)) unreadOverLimitCount++;
       files.push({ path: candidate.clipboardPath, changeType: candidate.changeType, skippedReason: `size exceeds limit (${read.size} bytes)` });
       continue;
     }
@@ -632,6 +695,20 @@ export async function collectGitPayloadFiles(
       const entry: PayloadFile = { path: candidate.clipboardPath, content: UNREADABLE_FILE_MARKER, changeType: candidate.changeType };
       unreadableWorkingTree.add(entry);
       files.push(entry);
+      continue;
+    }
+    if (read.kind === 'nonText') {
+      const size = read.bytes.length;
+      if (size > nonTextLimit) {
+        skippedFileSizeCount++;
+        nonTextOverLimitCount++;
+        files.push({ path: candidate.clipboardPath, changeType: candidate.changeType, skippedReason: `size exceeds limit (${size} bytes)` });
+        continue;
+      }
+      files.push({ path: candidate.clipboardPath, nonText: read.bytes, changeType: candidate.changeType });
+      nonTextFiles.push({ path: candidate.clipboardPath, size });
+      nonTextTotalBytes += size;
+      copiedFileCount++;
       continue;
     }
     const content = read.content;
@@ -666,8 +743,14 @@ export async function collectGitPayloadFiles(
     copiedFileCount,
     skippedFileSizeCount,
     skippedUnreadableCount,
+    excludedNonTextCount,
     fileLimitReached,
-    usesRegularSpacing: !usesFallbackGitPayload
+    limitLeftOut,
+    usesRegularSpacing: !usesFallbackGitPayload,
+    nonTextFiles,
+    nonTextTotalBytes,
+    nonTextOverLimitCount,
+    unreadOverLimitCount
   };
 }
 
@@ -696,9 +779,10 @@ async function readGitChangeContent(
   change: GitChange,
   changeType: ChangeTypeLabel,
   forceIndexContent: boolean,
-  sizeLimit: number
+  readLimit: number
 ): Promise<GitChangeRead> {
   if (changeType === 'DELETED') {
+    // Text only: a [DELETED] body is never read on paste, so a non-text one keeps the marker.
     return text(await readRefContent(repository, 'HEAD', (change.originalUri ?? change.uri).fsPath) ??
       DELETED_FILE_MARKER);
   }
@@ -713,8 +797,9 @@ async function readGitChangeContent(
     // working-tree text first and only then emits this same marker. Which of the two is
     // right is an open product question — what is settled is that neither silence nor a
     // silent substitution is acceptable.
-    return text(await readRefContent(repository, '', (change.renameUri ?? change.uri).fsPath) ??
-      UNREADABLE_FILE_MARKER);
+    const staged = await readRefClassified(repository, '', (change.renameUri ?? change.uri).fsPath);
+    if (staged === undefined) return text(UNREADABLE_FILE_MARKER);
+    return 'text' in staged ? text(staged.text) : { kind: 'nonText', bytes: staged.nonText, fromIndex: true };
   }
 
   // Working tree: size first, then decode, the order CopyFileContentAction uses. Decoding
@@ -722,9 +807,9 @@ async function readGitChangeContent(
   const uri = change.renameUri ?? change.uri;
   try {
     const { size } = await vscode.workspace.fs.stat(uri);
-    if (size > sizeLimit) return { kind: 'tooLarge', size };
-    const content = decodeText(await vscode.workspace.fs.readFile(uri));
-    return content === undefined ? { kind: 'unreadable' } : text(content);
+    if (size > readLimit) return { kind: 'tooLarge', size };
+    const content = classifyBytes(new Uint8Array(await vscode.workspace.fs.readFile(uri)));
+    return 'text' in content ? text(content.text) : { kind: 'nonText', bytes: content.nonText, fromIndex: false };
   } catch {
     return { kind: 'unreadable' };
   }
@@ -733,15 +818,17 @@ async function readGitChangeContent(
 type GitChangeRead =
   | { kind: 'text'; content: string }
   | { kind: 'tooLarge'; size: number }
-  | { kind: 'unreadable' };
+  | { kind: 'unreadable' }
+  /** Non-text bytes; Exclude turns them back into what the reader returned before. */
+  | { kind: 'nonText'; bytes: Uint8Array; fromIndex: boolean };
 
 function text(content: string): GitChangeRead {
   return { kind: 'text', content };
 }
 
-async function readWorkspaceText(uri: vscode.Uri): Promise<string | undefined> {
+async function readWorkspaceClassified(uri: vscode.Uri): Promise<FileContent | undefined> {
   try {
-    return decodeText(await vscode.workspace.fs.readFile(uri));
+    return classifyBytes(new Uint8Array(await vscode.workspace.fs.readFile(uri)));
   } catch {
     return undefined;
   }

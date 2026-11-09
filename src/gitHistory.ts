@@ -1,7 +1,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ContentRepo } from './gitContent.js';
-import { readRefContent } from './gitContent.js';
+import { readRefClassified, readRefContent } from './gitContent.js';
+import type { FileContent } from './fileSystem.js';
 import { DELETED_FILE_MARKER, mapGitStatusToChangeType } from './gitCopy.js';
 
 export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -101,17 +102,29 @@ export async function readFileAtCommit(
   /** The commit's parents — a deleted file's content is read from the one that still had it. */
   parents: readonly string[] = []
 ): Promise<string | undefined> {
+  const read = await readClassifiedAtCommit(repo, hash, change, parents);
+  return read && 'text' in read ? read.text : undefined;
+}
+
+/** readFileAtCommit, but a non-text blob comes back as its raw bytes instead of undefined. */
+export async function readClassifiedAtCommit(
+  repo: HistoryRepo,
+  hash: string,
+  change: HistoryChange,
+  parents: readonly string[] = []
+): Promise<FileContent | undefined> {
   const target = (change.renameUri ?? change.uri).fsPath;
   if (mapGitStatusToChangeType(change.status) === 'DELETED') {
     // The PRE-DELETION content, not a bare marker: that is what IntelliJ puts on the
     // clipboard on every path, and what this tool's own SCM path does — only Graph, PR and
     // History emitted the marker, so the same deletion looked different depending on which
     // surface copied it. The marker stays as the fallback when no parent still has it.
+    // Text only: a [DELETED] body is never read on paste, so a non-text one keeps the marker.
     for (const parent of parents.length > 0 ? parents : [`${hash}^`]) {
       const before = await readRefContent(repo, parent, (change.originalUri ?? change.uri).fsPath);
-      if (before !== undefined) return before;
+      if (before !== undefined) return { text: before };
     }
-    return DELETED_FILE_MARKER;
+    return { text: DELETED_FILE_MARKER };
   }
-  return readRefContent(repo, hash, target);
+  return readRefClassified(repo, hash, target);
 }

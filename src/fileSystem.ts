@@ -31,7 +31,14 @@ export type FileContent = { text: string } | { nonText: Uint8Array };
 
 /** Reads a file and classifies it: strict UTF-8 without NUL is text, anything else non-text. */
 export async function readClassifiedFile(filePath: string): Promise<FileContent> {
-  const bytes = new Uint8Array(await readFile(filePath));
+  return classifyBytes(new Uint8Array(await readFile(filePath)));
+}
+
+/**
+ * The one text / non-text verdict every copy surface uses (files, SCM, Graph, History):
+ * strict UTF-8 without NUL is text, anything else is carried as its raw bytes.
+ */
+export function classifyBytes(bytes: Uint8Array): FileContent {
   const text = decodeUtf8OrSkip(bytes);
   return text === undefined ? { nonText: bytes } : { text };
 }
