@@ -112,8 +112,9 @@ async function copyFullSource(
   if (!result) return;
 
   const notice = historyCopyNotice(result, settings);
+  // Nothing to copy: one warning, naming the unreadable files too (case 30); clipboard untouched.
+  if (notice.emptyWarning !== undefined) { vscode.window.showWarningMessage(notice.emptyWarning); return; }
   if (notice.unresolvedWarning) vscode.window.showWarningMessage(notice.unresolvedWarning);
-  if (result.files.length === 0) { vscode.window.showWarningMessage(notice.emptyWarning); return; }
   await vscode.env.clipboard.writeText(result.payload);
   if (settings.showCopyNotification) notifyCopied(notice.message, result.payload);
 }

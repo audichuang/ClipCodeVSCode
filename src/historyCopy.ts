@@ -2,7 +2,7 @@ import { buildGitPayload, type PayloadFile } from './clipboardFormat.js';
 import type { FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FileNode } from './historyTree.js';
-import { copyNoticeDetails, gitNothingToCopyNotice, type NonTextSummary } from './nonTextDialog.js';
+import { copyNoticeDetails, gitCopyNothingToCopy, type NonTextSummary } from './nonTextDialog.js';
 import { LEFT_OUT_CAP, UNREADABLE_PATHS_KEPT } from './copy.js';
 import { EMPTY_TREE } from './gitHistory.js';
 import { nonPortableGitName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
@@ -20,6 +20,8 @@ export interface HistoryCopyResult extends NonTextSummary {
   fileLimitReached: boolean;
   /** Names of files that could not be read at their commit. Excluded non-text files are not among them. */
   unresolved: string[];
+  /** The first UNREADABLE_PATHS_KEPT of them as clipboard paths, for "Nothing to copy. Unreadable: …". */
+  unreadablePaths: string[];
   /** Exclude only: non-text files left out (read fine, so not in `unresolved`). */
   excludedNonTextCount: number;
 }
@@ -44,6 +46,7 @@ export async function collectHistoryCopy(
   let copied = 0, skippedSize = 0, limitReached = false, limitLeftOut = 0, limitLeftOutCapped = false;
   const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
   const unresolved: string[] = [];
+  const unreadablePaths: string[] = [];
   let nonPortableCount = 0;
   const nonPortablePaths: string[] = [];
 
@@ -89,7 +92,11 @@ export async function collectHistoryCopy(
     // Unreadable at that commit: left out of the payload, as
     // in IntelliJ, which then warns "N files could not be resolved"
     // (CopyGitFilesContentAction) instead of dropping them in silence.
-    if (content === undefined) { unresolved.push(basename(absPath)); continue; }
+    if (content === undefined) {
+      unresolved.push(basename(absPath));
+      if (unreadablePaths.length < UNREADABLE_PATHS_KEPT) unreadablePaths.push(clipboardPath);
+      continue;
+    }
 
     if ('nonText' in content) {
       if (!options.includeNonText) { excludedNonTextCount++; continue; }
@@ -124,7 +131,7 @@ export async function collectHistoryCopy(
   });
   return {
     files: payloadFiles, payload, copiedFileCount: copied, skippedFileSizeCount: skippedSize, fileLimitReached: limitReached,
-    unresolved, excludedNonTextCount, limitLeftOut, limitLeftOutCapped, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
+    unresolved, unreadablePaths, excludedNonTextCount, limitLeftOut, limitLeftOutCapped, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
     unreadOverLimitCount: 0, nonPortableCount, nonPortablePaths, estimatedBytes: Buffer.byteLength(payload, 'utf8')
   };
 }
@@ -132,21 +139,24 @@ export async function collectHistoryCopy(
 /**
  * What the History copy tells the user: a warning naming the files that could not be read
  * at their commit, and the completion notice — the same details (non-text carried or left
- * out, what the file-count limit left out) as every other Git copy surface.
+ * out, what the file-count limit left out) as every other Git copy surface. emptyWarning is
+ * set when the copy carries no file (the Git surfaces' shared rule); it then names the
+ * unreadable files itself and unresolvedWarning is left out, so one toast says it all
+ * (case 30), not "could not be resolved" followed by "No Git changes found to copy.".
  */
 export function historyCopyNotice(
   result: HistoryCopyResult,
   settings: Pick<ClipCodeSettings, 'fileCountLimit'>
-): { unresolvedWarning: string | undefined; message: string; emptyWarning: string } {
-  const unresolvedWarning = result.unresolved.length > 0
+): { unresolvedWarning: string | undefined; message: string; emptyWarning: string | undefined } {
+  const emptyWarning = gitCopyNothingToCopy(
+    result, copyNoticeDetails({ ...result, skippedUnreadableCount: result.unresolved.length }), 'No Git changes found to copy.');
+  const unresolvedWarning = emptyWarning === undefined && result.unresolved.length > 0
     ? `${result.unresolved.length} files could not be resolved: ${result.unresolved.join(', ')}`
     : undefined;
   const s = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
   const l = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
   // Unreadable files have their own warning above, so they are not repeated here.
   const details = copyNoticeDetails({ ...result, skippedUnreadableCount: 0, unreadablePaths: [] });
-  // Nothing to copy: what was skipped by name (or left out) is said, not "no changes".
-  const emptyWarning = gitNothingToCopyNotice(details, 'No Git changes found to copy.');
   return { unresolvedWarning, message: [`${result.copiedFileCount} Git file(s) copied${s}.${l}`, ...details].join(' '), emptyWarning };
 }
 
