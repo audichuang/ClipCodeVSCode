@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { type HistoryRepo, readClassifiedAtCommit } from './gitHistory.js';
-import { collectHistoryCopy } from './historyCopy.js';
+import { collectHistoryCopy, historyCopyNotice } from './historyCopy.js';
 import { dedupeFilesKeepNewest, type FileNode, resolveSourceNodes } from './historyTree.js';
 import { type HistoryNode, HistoryTreeProvider } from './historyTreeProvider.js';
 import { askAboutNonText } from './nonTextDialog.js';
@@ -104,17 +104,11 @@ async function copyFullSource(provider: HistoryTreeProvider, treeView: vscode.Tr
   );
   if (!result) return;
 
-  if (result.unresolved.length > 0) {
-    vscode.window.showWarningMessage(`${result.unresolved.length} files could not be resolved: ${result.unresolved.join(', ')}`);
-  }
+  const notice = historyCopyNotice(result, settings);
+  if (notice.unresolvedWarning) vscode.window.showWarningMessage(notice.unresolvedWarning);
   if (result.files.length === 0) { vscode.window.showWarningMessage('No Git changes found to copy.'); return; }
   await vscode.env.clipboard.writeText(result.payload);
-  if (settings.showCopyNotification) {
-    const s = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
-    const l = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
-    const nonText = result.nonTextFiles.length > 0 ? ` Non-text files copied as Base64: ${result.nonTextFiles.length}.` : '';
-    notifyCopied(`${result.copiedFileCount} Git file(s) copied${s}.${l}${nonText}`, result.payload);
-  }
+  if (settings.showCopyNotification) notifyCopied(notice.message, result.payload);
 }
 
 function basename(p: string): string { return p.replaceAll('\\', '/').split('/').filter(Boolean).pop() ?? p; }

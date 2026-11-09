@@ -2,7 +2,7 @@ import { buildGitPayload, type PayloadFile } from './clipboardFormat.js';
 import type { FileContent } from './fileSystem.js';
 import { fileMatchesFilters } from './filterMatcher.js';
 import type { FileNode } from './historyTree.js';
-import type { NonTextSummary } from './nonTextDialog.js';
+import { copyNoticeDetails, type NonTextSummary } from './nonTextDialog.js';
 import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
@@ -16,9 +16,9 @@ export interface HistoryCopyResult extends NonTextSummary {
   copiedFileCount: number;
   skippedFileSizeCount: number;
   fileLimitReached: boolean;
-  /** Names of files that could not be read at their commit (and, under Exclude, non-text ones). */
+  /** Names of files that could not be read at their commit. Excluded non-text files are not among them. */
   unresolved: string[];
-  /** Exclude only: non-text files left out (also named in `unresolved`, as before). */
+  /** Exclude only: non-text files left out (read fine, so not in `unresolved`). */
   excludedNonTextCount: number;
 }
 
@@ -55,13 +55,13 @@ export async function collectHistoryCopy(
     if (!kept) continue;
 
     const content = await read(f);
-    // Unreadable at that commit (or, under Exclude, non-text): left out of the payload, as
+    // Unreadable at that commit: left out of the payload, as
     // in IntelliJ, which then warns "N files could not be resolved"
     // (CopyGitFilesContentAction) instead of dropping them in silence.
     if (content === undefined) { unresolved.push(basename(absPath)); continue; }
 
     if ('nonText' in content) {
-      if (!options.includeNonText) { excludedNonTextCount++; unresolved.push(basename(absPath)); continue; }
+      if (!options.includeNonText) { excludedNonTextCount++; continue; }
       const size = content.nonText.length;
       if (size > nonTextLimit) {
         skippedSize++; nonTextOverLimitCount++;
@@ -96,6 +96,25 @@ export async function collectHistoryCopy(
     unresolved, excludedNonTextCount, limitLeftOut, nonTextFiles, nonTextTotalBytes, nonTextOverLimitCount,
     unreadOverLimitCount: 0, estimatedBytes: Buffer.byteLength(payload, 'utf8')
   };
+}
+
+/**
+ * What the History copy tells the user: a warning naming the files that could not be read
+ * at their commit, and the completion notice — the same details (non-text carried or left
+ * out, what the file-count limit left out) as every other Git copy surface.
+ */
+export function historyCopyNotice(
+  result: HistoryCopyResult,
+  settings: Pick<ClipCodeSettings, 'fileCountLimit'>
+): { unresolvedWarning: string | undefined; message: string } {
+  const unresolvedWarning = result.unresolved.length > 0
+    ? `${result.unresolved.length} files could not be resolved: ${result.unresolved.join(', ')}`
+    : undefined;
+  const s = result.skippedFileSizeCount > 0 ? ` (${result.skippedFileSizeCount} skipped: size exceeded)` : '';
+  const l = result.fileLimitReached ? ` File limit ${settings.fileCountLimit} reached.` : '';
+  // Unreadable files have their own warning above, so they are not repeated here.
+  const details = copyNoticeDetails({ ...result, skippedUnreadableCount: 0, unreadablePaths: [] });
+  return { unresolvedWarning, message: [`${result.copiedFileCount} Git file(s) copied${s}.${l}`, ...details].join(' ') };
 }
 
 function basename(p: string): string { return p.replaceAll('\\', '/').split('/').filter(Boolean).pop() ?? p; }
