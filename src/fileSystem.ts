@@ -146,6 +146,26 @@ export async function writeTextFile(filePath: string, content: string): Promise<
   await writeFile(filePath, content);
 }
 
+/** Writes raw bytes (a non-text entry), creating missing parent folders. */
+export async function writeBytesFile(filePath: string, bytes: Uint8Array): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, bytes);
+}
+
+/**
+ * Whether the regular file at [filePath] holds exactly [bytes] (size first, so a
+ * different-sized file is not read). Mirror of OpenIDEA restore.rs holds_bytes.
+ */
+export async function holdsBytes(filePath: string, bytes: Uint8Array): Promise<boolean> {
+  try {
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size !== bytes.length) return false;
+    return Buffer.from(bytes).equals(await readFile(filePath));
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteFile(filePath: string): Promise<void> {
   await unlink(filePath);
 }

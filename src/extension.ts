@@ -14,7 +14,8 @@ import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from
 import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
 import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
-import { executeRestorePlan, planRestore } from './restore.js';
+import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
+import { confirmationText, existingTargets, resultNotice, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
 import { registerBlame } from './blame/index.js';
 
@@ -427,25 +428,32 @@ async function pasteAndRestoreFiles(): Promise<void> {
     }
   }
 
-  const plan = await planRestore(roots, entries);
+  // Two entries naming one file through different spellings (IMG.png / img.png on a
+  // case-insensitive volume) are both skipped here, before anything is written.
+  const plan = await markTargetCollisions(await planRestore(roots, entries));
   if (plan.createOperations.length === 0 && plan.deleteOperations.length === 0) {
-    vscode.window.showWarningMessage(`No actionable files found. Skipped ${plan.skippedOperations.length}.`);
+    const reasons = skipLines(plan);
+    vscode.window.showWarningMessage(
+      `No actionable files found. Skipped ${plan.skippedOperations.length}.${reasons.length > 0 ? ` ${reasons.join('; ')}.` : ''}`
+    );
     return;
   }
 
+  const confirmation = confirmationText(plan);
   const proceed = await vscode.window.showWarningMessage(
-    confirmationSummary(plan),
-    { modal: true },
+    confirmation.message,
+    { modal: true, detail: confirmation.detail || undefined },
     'Proceed'
   );
   if (proceed !== 'Proceed') return;
 
   let overwriteExisting = false;
   let skipExisting = false;
-  const existing = plan.createOperations.filter(operation => operation.existed);
-  if (existing.length > 0) {
+  // A non-text target that already holds the same bytes is left unchanged: no permission needed.
+  const existing = existingTargets(plan);
+  if (existing > 0) {
     const choice = await vscode.window.showWarningMessage(
-      `${existing.length} file(s) already exist.`,
+      `${existing} file(s) already exist.`,
       { modal: true },
       'Overwrite All',
       'Skip Existing',
@@ -457,13 +465,7 @@ async function pasteAndRestoreFiles(): Promise<void> {
   }
 
   const result = await executeRestorePlan(plan, { overwriteExisting, skipExisting });
-  const parts = [
-    result.createdCount > 0 ? `Created ${result.createdCount}` : '',
-    result.overwrittenCount > 0 ? `Overwritten ${result.overwrittenCount}` : '',
-    result.skippedExistingCount > 0 ? `Skipped ${result.skippedExistingCount}` : '',
-    result.deletedCount > 0 ? `Deleted ${result.deletedCount}` : ''
-  ].filter(Boolean);
-  vscode.window.showInformationMessage(parts.length > 0 ? parts.join(', ') : 'No files changed.');
+  vscode.window.showInformationMessage(resultNotice(plan, result));
   if (result.errors.length > 0) {
     vscode.window.showErrorMessage(`Snipcode failed ${result.errors.length} operation(s): ${result.errors.slice(0, 3).join('; ')}`);
   }
@@ -498,14 +500,6 @@ function readSettings(): ClipCodeSettings {
     useExcludeFilters: config.get<boolean>('useExcludeFilters'),
     filterRules: config.get<FilterRule[]>('filterRules')
   });
-}
-
-function confirmationSummary(plan: Awaited<ReturnType<typeof planRestore>>): string {
-  const create = plan.createOperations.filter(operation => !operation.existed).length;
-  const overwrite = plan.createOperations.filter(operation => operation.existed).length;
-  const deleted = plan.deleteOperations.length;
-  const skipped = plan.skippedOperations.length;
-  return `Snipcode will create ${create}, overwrite ${overwrite}, delete ${deleted}, and skip ${skipped} operation(s).`;
 }
 
 async function getGitApi(): Promise<GitAPI | undefined> {
