@@ -117,7 +117,8 @@ export interface WalkOptions {
   // tree (pnpm's .pnpm store, Bazel) has a path count that grows like a sum of falling
   // factorials — 7 linked dirs already yield 13,699 paths — and with the default 30-file
   // limit the copy becomes 30 aliases of the same few files. A symlink to a FILE is still
-  // followed: it is yielded and its target's bytes are read under the link's path.
+  // yielded; the copy reads its target's bytes under the link's path only when that target
+  // lies inside a copy root (X7, see collectCopyFiles), otherwise it is named Unreadable.
   onSymlinkedFolder?: (linkPath: string) => void;
   // A directory entry whose name is not valid UTF-8. A string readdir would hand back a
   // lossy U+FFFD spelling that no longer opens, so the entry vanished silently mid-walk.

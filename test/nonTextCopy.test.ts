@@ -487,6 +487,80 @@ test('a symlink to a file is followed and carries the target bytes under the lin
   });
 });
 
+/** Runs [run] recording every path handed to readFile. */
+async function recordingReads<T>(run: () => Promise<T>): Promise<{ result: T; reads: string[] }> {
+  const reads: string[] = [];
+  const mutable = fsp as unknown as Record<'readFile', (...args: unknown[]) => unknown>;
+  const original = mutable.readFile;
+  mutable.readFile = (...args: unknown[]) => { reads.push(String(args[0])); return original(...args); };
+  try {
+    return { result: await run(), reads };
+  } finally {
+    mutable.readFile = original;
+  }
+}
+
+test('X7: a symlink to a file outside every copy root is not read and is named Unreadable', async () => {
+  await withTempDir(async root => {
+    await withTempDir(async outside => {
+      // A sibling folder, not under the root: credentials and dotfiles live in places like
+      // this (`CLAUDE.md -> ~/.agents/...`), and the clipboard often goes to an LLM.
+      await put(path.join(outside, 'secret.txt'), 'token=hunter2');
+      await put(path.join(outside, 'id.png'), png(4));
+      await put(path.join(root, 'src', 'keep.ts'), 'keep');
+      await symlink(path.join(outside, 'secret.txt'), path.join(root, 'src', 'secret.txt'), 'file');
+      await symlink(path.join(outside, 'id.png'), path.join(root, 'src', 'id.png'), 'file');
+
+      // Expanded from a selected folder, and selected directly.
+      for (const inputs of [[path.join(root, 'src')], [path.join(root, 'src', 'secret.txt'), path.join(root, 'src', 'id.png'), path.join(root, 'src', 'keep.ts')]]) {
+        const { result, reads } = await recordingReads(() => collectCopyFiles(root, inputs, defaultSettings, INCLUDE));
+        assert.deepEqual(result.files.map(f => f.path), ['src/keep.ts'], `from ${inputs.join(', ')}`);
+        assert.ok(!result.payload.includes('hunter2'));
+        assert.equal(result.skippedUnreadableCount, 2);
+        assert.deepEqual([...result.unreadablePaths].sort(), ['src/id.png', 'src/secret.txt']);
+        assert.equal(result.symlinkedFolderCount, 0);
+        assert.deepEqual(result.nonTextFiles, [], 'an out-of-root image is not offered for Include');
+        assert.ok(
+          !reads.some(p => p.endsWith('secret.txt') || p.endsWith('id.png')),
+          `the link and its target are never read (read: ${reads.join(', ')})`
+        );
+      }
+    });
+  });
+});
+
+test('X7: a link in one copy root to a file in another root is followed', async () => {
+  await withTempDir(async base => {
+    const a = path.join(base, 'a');
+    const b = path.join(base, 'b');
+    await put(path.join(b, 'shared.ts'), 'shared');
+    await mkdir(a, { recursive: true });
+    await symlink(path.join(b, 'shared.ts'), path.join(a, 'shared.ts'), 'file');
+
+    const inRoots = await collectCopyFiles([a, b], [path.join(a, 'shared.ts')], defaultSettings);
+    assert.deepEqual(inRoots.files.map(f => f.content), ['shared']);
+    assert.equal(inRoots.skippedUnreadableCount, 0);
+
+    // The same link with only root a open: b is outside every copy root.
+    const onlyA = await collectCopyFiles([a], [path.join(a, 'shared.ts')], defaultSettings);
+    assert.deepEqual(onlyA.files, []);
+    assert.deepEqual(onlyA.unreadablePaths, ['shared.ts']);
+  });
+});
+
+test('X7: a dangling symlink to a file stays Unreadable', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'keep.ts'), 'keep');
+    await symlink(path.join(root, 'gone.ts'), path.join(root, 'inside.ts'), 'file');
+    await symlink(path.join(os.tmpdir(), `clipcode-missing-${process.pid}`, 'gone.ts'), path.join(root, 'outside.ts'), 'file');
+
+    const result = await collectCopyFiles(root, [root], defaultSettings);
+    assert.deepEqual(result.files.map(f => f.path), ['keep.ts']);
+    assert.equal(result.skippedUnreadableCount, 2);
+    assert.deepEqual([...result.unreadablePaths].sort(), ['inside.ts', 'outside.ts']);
+  });
+});
+
 test('case 25: an unescapable headerFormat offers only Exclude and says why', async () => {
   await withTempDir(async root => {
     await put(path.join(root, 'logo.png'), png(1));
