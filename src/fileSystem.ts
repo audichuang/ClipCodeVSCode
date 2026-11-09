@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { lstat, mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -157,15 +158,43 @@ export async function* listFilesRecursive(
   }
 }
 
+/** Writes UTF-8 text by replacing the directory entry; see writeBytesFile. */
 export async function writeTextFile(filePath: string, content: string): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, content);
+  await writeBytesFile(filePath, Buffer.from(content, 'utf8'));
 }
 
-/** Writes raw bytes (a non-text entry), creating missing parent folders. */
+/**
+ * Writes [bytes] by REPLACING the directory entry, creating missing parent folders: a
+ * temporary file in the same folder is written, given the old file's permission mode,
+ * synced and renamed over [filePath]. A hard link or symlink at [filePath] is never
+ * written through — writing in place rewrote the file a hard link's OTHER name holds,
+ * outside the workspace too. The temporary file is removed when anything fails.
+ * Mirror of OpenIDEA fsutil.rs write_bytes_file.
+ */
 export async function writeBytesFile(filePath: string, bytes: Uint8Array): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, bytes);
+  const dir = path.dirname(filePath);
+  await mkdir(dir, { recursive: true });
+  // Exclusive create under a fresh random name: never an existing entry or link.
+  const temp = path.join(dir, `.snip-write.${randomBytes(8).toString('hex')}`);
+  const handle = await open(temp, 'wx', 0o666);
+  let renamed = false;
+  try {
+    try {
+      await handle.writeFile(bytes);
+      const existing = await lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      if (existing?.isFile()) await handle.chmod(existing.mode & 0o7777);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temp, filePath);
+    renamed = true;
+  } finally {
+    if (!renamed) await unlink(temp).catch(() => undefined);
+  }
 }
 
 /**
