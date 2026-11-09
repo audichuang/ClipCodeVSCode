@@ -301,25 +301,37 @@ test('paste UI text: non-text count and size, corrupt and unchanged rows, reason
   });
 });
 
-test('target identity folds NFC/NFD only on a case-insensitive volume', async () => {
+test('target identity folds NFC/NFD on a case-insensitive volume and on any macOS volume', async () => {
   await withRoot(async root => {
     // Not yet on disk, so realpath anchors on the root and the basenames stay as spelled.
-    const nfc = 'café.txt';
-    const nfd = 'café.txt';
+    const nfc = 'caf\u00e9.txt';
+    const nfd = 'cafe\u0301.txt';
     const op = (name: string) => ({
       relativePath: name, absolutePath: path.join(root, name), content: 'x', existed: false, rootPath: root
     });
     const plan = { roots: [root], createOperations: [op(nfc), op(nfd)], deleteOperations: [], skippedOperations: [] };
+    const collide = (result: Awaited<ReturnType<typeof markTargetCollisions>>, why: string) => {
+      assert.deepEqual(result.createOperations, [], why);
+      assert.deepEqual(result.skippedOperations.map(s => s.reason), ['TARGET_COLLISION', 'TARGET_COLLISION'], why);
+    };
 
-    // Case-sensitive (Linux ext4): two distinct files, nothing collides.
-    const sensitive = await markTargetCollisions(plan, async () => false);
-    assert.deepEqual(sensitive.createOperations.map(o => o.relativePath), [nfc, nfd]);
-    assert.deepEqual(sensitive.skippedOperations, []);
+    // Case-sensitive Linux (ext4): two distinct files, nothing collides.
+    const linux = await markTargetCollisions(plan, async () => false, 'linux');
+    assert.deepEqual(linux.createOperations.map(o => o.relativePath), [nfc, nfd]);
+    assert.deepEqual(linux.skippedOperations, []);
 
-    // Case-insensitive (APFS, NTFS): one file, both entries are TARGET_COLLISION.
-    const insensitive = await markTargetCollisions(plan, async () => true);
-    assert.deepEqual(insensitive.createOperations, []);
-    assert.deepEqual(insensitive.skippedOperations.map(s => s.reason), ['TARGET_COLLISION', 'TARGET_COLLISION']);
+    // Case-sensitive APFS / HFS+ still normalize Unicode: one file on darwin.
+    collide(await markTargetCollisions(plan, async () => false, 'darwin'), 'darwin, case-sensitive');
+
+    // Case-insensitive (APFS, NTFS, mounted elsewhere): one file whatever the platform.
+    for (const platform of ['darwin', 'win32', 'linux'] as const) {
+      collide(await markTargetCollisions(plan, async () => true, platform), `${platform}, case-insensitive`);
+    }
+
+    // Letter case still folds only on a case-insensitive volume, darwin included.
+    const casePlan = { ...plan, createOperations: [op('A.txt'), op('a.txt')] };
+    const caseSensitiveMac = await markTargetCollisions(casePlan, async () => false, 'darwin');
+    assert.deepEqual(caseSensitiveMac.createOperations.map(o => o.relativePath), ['A.txt', 'a.txt']);
   });
 });
 
