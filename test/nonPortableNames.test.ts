@@ -158,3 +158,66 @@ test('History copy does not apply the files copy\'s "Name not portable" rule', {
   assert.deepEqual(result.files.map(f => f.path), ['/repo/q"x.ts', '/repo/c:d.ts', 'ok 檔 😀.ts']);
   assert.ok(!('nonPortableCount' in result));
 });
+
+// Spec "What is carried", portability bullet: the rule is judged on each FILE's path
+// relative to its copy root, segments joined with `/`.
+test('files copy: edge whitespace is judged on the whole path, not on each folder', { skip: posixOnly }, async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'src', 'trail.ts '), 'refused');
+    await put(path.join(root, 'src', 'mid ', 'ok.ts'), 'mid folder with a trailing space');
+    await put(path.join(root, ' lead', 'x.ts'), 'refused');
+    const result = await collectCopyFiles(root, [path.join(root, 'src'), path.join(root, ' lead')], defaultSettings, { includeNonText: true });
+    assert.deepEqual(result.files.map(f => [f.path, f.content]), [['src/mid /ok.ts', 'mid folder with a trailing space']]);
+    // A folder whose leading space starts every path below it may be named once.
+    assert.deepEqual(result.nonPortablePaths, ['src/trail.ts ', ' lead']);
+  });
+});
+
+test('files copy: a `..` segment and a `\\` in a name are refused', { skip: posixOnly }, async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'w', 'a\\b.ts'), 'refused');
+    await put(path.join(root, 'w', 'ok.ts'), 'ok');
+    const result = await collectCopyFiles(root, [path.join(root, 'w')], defaultSettings, { includeNonText: true });
+    assert.deepEqual(result.files.map(f => f.path), ['w/ok.ts']);
+    assert.deepEqual(result.nonPortablePaths, ['w/a\\b.ts']);
+  });
+  // A real directory entry cannot be named `..`; the rule itself refuses the segment.
+  assert.equal(isExportableRelativePath('a/../y.ts'), false);
+  assert.equal(isExportableRelativePath('../y.ts'), false);
+});
+
+test('files copy: U+007F, CJK, emoji and inner spaces are allowed', { skip: posixOnly }, async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'd', 'del\u007fname.ts'), 'del');
+    await put(path.join(root, 'd', '中文 資料夾', '😀 a b.ts'), 'emoji');
+    const result = await collectCopyFiles(root, [path.join(root, 'd')], defaultSettings, { includeNonText: true });
+    assert.deepEqual(result.files.map(f => f.path).sort(), ['d/del\u007fname.ts', 'd/中文 資料夾/😀 a b.ts'].sort());
+    assert.equal(result.nonPortableCount, 0);
+  });
+});
+
+test('files copy: a name that is not valid UTF-8 is named "Name not portable", not dropped or unreadable', async t => {
+  await withTempDir(async root => {
+    const dir = path.join(root, 'bin');
+    await mkdir(dir);
+    const bad = Buffer.concat([Buffer.from(`${dir}${path.sep}bad`), Buffer.from([0xff]), Buffer.from('.ts')]);
+    try {
+      await writeFile(bad, 'x');
+    } catch (error) {
+      // macOS APFS and Windows refuse such a name outright.
+      t.skip(`platform cannot create a non-UTF-8 name: ${(error as NodeJS.ErrnoException).code}`);
+      return;
+    }
+    const { readdir } = await import('node:fs/promises');
+    if ((await readdir(dir, { encoding: 'buffer' })).every(e => Buffer.from(e.toString('utf8')).equals(e))) {
+      t.skip('the filesystem normalised the name to valid UTF-8');
+      return;
+    }
+    await put(path.join(dir, 'ok.ts'), 'ok');
+    const result = await collectCopyFiles(root, [dir], defaultSettings, { includeNonText: true });
+    assert.deepEqual(result.files.map(f => f.path), ['bin/ok.ts']);
+    assert.equal(result.skippedUnreadableCount, 0);
+    assert.equal(result.nonPortableCount, 1);
+    assert.deepEqual(result.nonPortablePaths, ['bin/bad�.ts']);
+  });
+});

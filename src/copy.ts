@@ -213,16 +213,25 @@ export async function collectCopyFiles(
   // A name the payload cannot carry: skipped and named. Past the file-count limit it is
   // as silent as an unreadable folder there (and, not being a candidate, not left out).
   const nonPortableSeen = new Set<string>();
-  const isNonPortable = (absolutePath: string): boolean => {
-    const name = nonPortableName(roots, absolutePath);
-    if (name === undefined) return false;
+  const noteNonPortable = (absolutePath: string, name: string): void => {
     // A folder selected and also inside a selected folder is named once.
     if (!state.fileLimitReached && !nonPortableSeen.has(absolutePath)) {
       nonPortableSeen.add(absolutePath);
       state.nonPortableCount++;
       if (state.nonPortablePaths.length < UNREADABLE_PATHS_KEPT) state.nonPortablePaths.push(name);
     }
+  };
+  const isNonPortable = (absolutePath: string, directory = false): boolean => {
+    const name = nonPortableName(roots, absolutePath, { directory });
+    if (name === undefined) return false;
+    noteNonPortable(absolutePath, name);
     return true;
+  };
+  // A name that is not valid UTF-8 (the walker sees it lossily decoded, U+FFFD in place of
+  // the bad bytes): not portable either, and not walked — a folder is named once.
+  const onNonUtf8Name = (lossyPath: string): void => {
+    const absolute = path.resolve(lossyPath);
+    noteNonPortable(absolute, toClipboardPathFromRoots(roots, absolute));
   };
   const enterDirectory = (dirPath: string): boolean => {
     const absolute = path.resolve(dirPath);
@@ -233,7 +242,7 @@ export async function collectCopyFiles(
       return false;
     }
     // A folder (or a symlinked one) with such a name costs its whole subtree, named once.
-    return !isNonPortable(absolute);
+    return !isNonPortable(absolute, true);
   };
   const noteUnreadable = (absolutePath: string) => {
     state.skippedUnreadableCount++;
@@ -324,7 +333,7 @@ export async function collectCopyFiles(
         state.symlinkedFolderPaths.push(toClipboardPathFromRoots(roots, absolute));
       }
     };
-    for await (const filePath of listFilesRecursive(inputPath, enterDirectory, true, onUnreadable, onSymlinkedFolder)) {
+    for await (const filePath of listFilesRecursive(inputPath, enterDirectory, true, onUnreadable, onSymlinkedFolder, onNonUtf8Name)) {
       const absolutePath = path.resolve(filePath);
       if (seen.has(absolutePath)) continue;
       seen.add(absolutePath);

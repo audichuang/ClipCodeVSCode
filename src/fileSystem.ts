@@ -122,7 +122,11 @@ export async function* listFilesRecursive(
   // factorials — 7 linked dirs already yield 13,699 paths — and with the default 30-file
   // limit the copy becomes 30 aliases of the same few files. A symlink to a FILE is still
   // followed: it is yielded and its target's bytes are read under the link's path.
-  onSymlinkedFolder?: (linkPath: string) => void
+  onSymlinkedFolder?: (linkPath: string) => void,
+  // A directory entry whose name is not valid UTF-8. A string readdir would hand back a
+  // lossy U+FFFD spelling that no longer opens, so the entry vanished silently mid-walk.
+  // It is reported here with that lossy spelling and neither yielded nor walked.
+  onNonUtf8Name?: (lossyPath: string) => void
 ): AsyncGenerator<string> {
   const info = await lstat(inputPath).catch(() => undefined);
   if (!info) {
@@ -153,13 +157,19 @@ export async function* listFilesRecursive(
 
   // An unreadable directory must cost its own subtree, not the whole copy: an unguarded
   // readdir threw EACCES out of collectCopyFiles and nothing at all reached the clipboard.
-  const entries = await readdir(inputPath).catch(() => undefined);
-  if (!entries) {
+  const raw = await readdir(inputPath, { encoding: 'buffer' }).catch(() => undefined);
+  if (!raw) {
     onUnreadable?.(inputPath);
     return;
   }
-  for (const entry of entries.sort()) {
-    yield* listFilesRecursive(path.join(inputPath, entry), shouldEnterDirectory, false, onUnreadable, onSymlinkedFolder);
+  const entries = raw.map(bytes => ({ name: bytes.toString('utf8'), bytes }));
+  for (const { name, bytes } of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const entryPath = path.join(inputPath, name);
+    if (!Buffer.from(name, 'utf8').equals(bytes)) {
+      onNonUtf8Name?.(entryPath);
+      continue;
+    }
+    yield* listFilesRecursive(entryPath, shouldEnterDirectory, false, onUnreadable, onSymlinkedFolder, onNonUtf8Name);
   }
 }
 
