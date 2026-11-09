@@ -574,6 +574,60 @@ test('case 25: an unescapable headerFormat offers only Exclude and says why', as
   });
 });
 
+test('X2: an Include estimate over 50 MiB offers only Exclude and gives the reason with the raw total', () => {
+  const over = {
+    nonTextFiles: [{ path: 'big.zip', size: 40 * 1024 * 1024 }], nonTextTotalBytes: 40 * 1024 * 1024,
+    nonTextOverLimitCount: 0, unreadOverLimitCount: 0, limitLeftOut: 0, estimatedBytes: 52_428_801
+  };
+  const dialog = nonTextDialog(over, defaultSettings);
+  assert.deepEqual(dialog.buttons, ['Exclude']);
+  assert.equal(dialog.message, 'The selection has non-text files. They can only be left out.');
+  const lines = dialog.detail.split('\n');
+  assert.ok(lines.includes(`Non-text files: 1 (${formatSize(40 * 1024 * 1024)})`), dialog.detail);
+  assert.ok(lines.includes(
+    `Include is unavailable: the payload would be more than 50 MiB (non-text files: ${formatSize(40 * 1024 * 1024)}).`), dialog.detail);
+
+  // Exactly 50 MiB is within the limit.
+  const atLimit = nonTextDialog({ ...over, estimatedBytes: 52_428_800 }, defaultSettings);
+  assert.deepEqual(atLimit.buttons, ['Include', 'Exclude']);
+  assert.ok(!atLimit.detail.includes('Include is unavailable'), atLimit.detail);
+});
+
+test('X2: the estimate never reads below the raw total, and the limit judges that value', () => {
+  // An estimate under the raw total (never produced by a real copy) is raised to it.
+  const summary = {
+    nonTextFiles: [{ path: 'a.png', size: 2048 }], nonTextTotalBytes: 2048,
+    nonTextOverLimitCount: 0, unreadOverLimitCount: 0, limitLeftOut: 0, estimatedBytes: 100
+  };
+  const dialog = nonTextDialog(summary, defaultSettings, { payloadLimitBytes: 1024 });
+  assert.deepEqual(dialog.buttons, ['Exclude']);
+  assert.ok(dialog.detail.split('\n').includes(`Estimated payload with them: ${formatSize(2048)}`), dialog.detail);
+});
+
+test('X2: a files copy whose Include payload is over the (injected) limit offers only Exclude', async () => {
+  await withTempDir(async root => {
+    await put(path.join(root, 'logo.png'), png(1));
+    await put(path.join(root, 'a.ts'), 'export const a = 1;\n');
+    const result = await collectCopyFiles(root, [root], defaultSettings, INCLUDE);
+    const under = nonTextDialog(result, defaultSettings, { payloadLimitBytes: result.estimatedBytes });
+    assert.deepEqual(under.buttons, ['Include', 'Exclude']);
+    const over = nonTextDialog(result, defaultSettings, { payloadLimitBytes: result.estimatedBytes - 1 });
+    assert.deepEqual(over.buttons, ['Exclude']);
+    assert.ok(over.detail.includes('Include is unavailable: the payload would be more than 50 MiB (non-text files: 64 B).'), over.detail);
+  });
+});
+
+test('X2 + case 25: both reasons are given when both hold', () => {
+  const summary = {
+    nonTextFiles: [{ path: 'a.png', size: 64 }], nonTextTotalBytes: 64,
+    nonTextOverLimitCount: 0, unreadOverLimitCount: 0, limitLeftOut: 0, estimatedBytes: 52_428_801
+  };
+  const dialog = nonTextDialog(summary, { headerFormat: '$FILE_PATH' });
+  assert.deepEqual(dialog.buttons, ['Exclude']);
+  assert.ok(dialog.detail.includes('more than 50 MiB'), dialog.detail);
+  assert.ok(dialog.detail.includes('cannot be escaped'), dialog.detail);
+});
+
 test('dialog paths: the folder part shrinks first and the file name with its extension stays whole', () => {
   const folder = 'd11long/' + 'a-really-long-folder-name/'.repeat(6);
   const shortened = shortenPath(`${folder}name-alpha.png`, 70);

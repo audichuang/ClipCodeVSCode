@@ -209,6 +209,29 @@ test('askAboutNonText: no dialog without non-text files; Include, Exclude and Ca
   assert.deepEqual(shown, [['Exclude']]);
 });
 
+test('X2: every surface\'s shared flow leaves Include out when its estimate is over 50 MiB', async () => {
+  const shown: NonTextChoice[][] = [];
+  const answer = (choice: NonTextChoice | undefined) => async (_m: string, _o: unknown, ...buttons: NonTextChoice[]) => {
+    shown.push(buttons);
+    return choice;
+  };
+  const settings = { headerFormat: '// file: $FILE_PATH' };
+  const sized = (estimatedBytes: number) => async (includeNonText: boolean) => ({ ...summary(includeNonText, 1), estimatedBytes });
+
+  // The real 50 MiB limit, no override: one byte over leaves only Exclude; a stray Include is Cancel.
+  assert.equal(await askAboutNonText(settings, sized(52_428_801), answer('Include')), undefined);
+  assert.equal((await askAboutNonText(settings, sized(52_428_801), answer('Exclude')))?.includeNonText, false);
+  // Exactly 50 MiB is within the limit.
+  assert.equal((await askAboutNonText(settings, sized(52_428_800), answer('Include')))?.includeNonText, true);
+  assert.deepEqual(shown, [['Exclude'], ['Exclude'], ['Include', 'Exclude']]);
+
+  // The limit is injectable.
+  shown.length = 0;
+  assert.equal(await askAboutNonText(settings, sized(11), answer('Include'), { payloadLimitBytes: 10 }), undefined);
+  assert.equal((await askAboutNonText(settings, sized(10), answer('Include'), { payloadLimitBytes: 10 }))?.includeNonText, true);
+  assert.deepEqual(shown, [['Exclude'], ['Include', 'Exclude']]);
+});
+
 test('Graph: the left-out count stops at the cap; exactly the cap reads plain; unreadable blobs are named', async () => {
   const blobs: Record<string, string> = {};
   const names = Array.from({ length: 7 }, (_, i) => `f${i}.ts`);
