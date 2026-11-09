@@ -12,7 +12,7 @@ export type NonTextChoice = 'Include' | 'Exclude';
 
 /** Paths listed in the dialog before "and N more". */
 const DIALOG_PATHS = 10;
-/** Unreadable / symlinked-folder paths named in the completion notice and dialog. */
+/** Unreadable / symlinked-folder / non-portable paths named in the completion notice and dialog. */
 const NOTICE_PATHS = 3;
 /** Display width a dialog path is shortened to. */
 const PATH_WIDTH = 70;
@@ -36,6 +36,9 @@ export interface NonTextSummary {
   /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
   symlinkedFolderCount?: number;
   symlinkedFolderPaths?: string[];
+  /** Files and folders skipped because a payload header cannot carry their real name. */
+  nonPortableCount?: number;
+  nonPortablePaths?: string[];
 }
 
 /** What the completion notice reads off the result that was copied. */
@@ -51,6 +54,9 @@ export interface NonTextNoticeCounts {
   /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
   symlinkedFolderCount?: number;
   symlinkedFolderPaths?: string[];
+  /** Files and folders skipped because a payload header cannot carry their real name. */
+  nonPortableCount?: number;
+  nonPortablePaths?: string[];
 }
 
 export interface NonTextDialog {
@@ -84,6 +90,9 @@ export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSe
   if (include.symlinkedFolderCount) {
     lines.push(namedCount('Symlinked folder', include.symlinkedFolderCount, include.symlinkedFolderPaths ?? []));
   }
+  if (include.nonPortableCount) {
+    lines.push(namedCount('Name not portable', include.nonPortableCount, include.nonPortablePaths ?? []));
+  }
   if (!includeAllowed) {
     lines.push(
       `Include is unavailable: the header format "${settings.headerFormat}" cannot be escaped, ` +
@@ -113,6 +122,9 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   }
   if (result.symlinkedFolderCount) {
     parts.push(`${namedCount('Symlinked folder', result.symlinkedFolderCount, result.symlinkedFolderPaths ?? [])}.`);
+  }
+  if (result.nonPortableCount) {
+    parts.push(`${namedCount('Name not portable', result.nonPortableCount, result.nonPortablePaths ?? [])}.`);
   }
   return parts;
 }
