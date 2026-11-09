@@ -108,7 +108,11 @@ export interface CopyResult {
   fileLimitReached: boolean;
   /** Candidates (after dedup and filters) the file-count limit cut off; none of them was read. */
   limitLeftOut: number;
-  /** More than limitLeftOut were left out: the walk stopped counting at LEFT_OUT_CAP. */
+  /**
+   * The walk stopped before it finished counting: past the limit every entry it meets,
+   * left-out candidates and skipped entries alike, spends one of LEFT_OUT_CAP, and the walk
+   * stops once that budget is gone. At least limitLeftOut were left out, maybe more.
+   */
   limitLeftOutCapped: boolean;
   /** Include only: the non-text entries carried as Base64, in payload order. */
   nonTextFiles: { path: string; size: number }[];
@@ -205,17 +209,39 @@ export async function collectCopyFiles(
   const readLimit = options.includeNonText ? Math.max(textLimit, nonTextLimit) : textLimit;
   const limitOn = settings.setMaxFileCount;
   const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
-  // One more candidate past the limit: counted up to the cap, after which the walk stops.
+  // Past the file-count limit nothing is read; the walk goes on only to count what the limit
+  // left out. Every entry it meets there spends one unit of a budget of leftOutCap — a
+  // left-out candidate, and equally an entry it skips (non-portable, filtered, a duplicate,
+  // a symlinked or unreadable folder, a pruned folder) — and once the budget is gone the
+  // walk stops and the count reads "N+". Counting only candidates walked a tree of skipped
+  // entries to its end for a number nobody sees (spec "Asking the user": implementations
+  // must not walk the rest of the tree only to count). A skip never raises limitLeftOut:
+  // it was never a candidate, the "+" just says the count is unfinished.
+  let spentPastLimit = 0;
+  const spend = (): boolean => {
+    if (spentPastLimit >= leftOutCap) {
+      state.limitLeftOutCapped = true;
+      return false;
+    }
+    spentPastLimit++;
+    return true;
+  };
   const leaveOut = (): void => {
-    if (state.limitLeftOut >= leftOutCap) state.limitLeftOutCapped = true;
-    else state.limitLeftOut++;
+    if (spend()) state.limitLeftOut++;
+  };
+  /** True past the limit, where a skipped entry is not reported but spends the budget. */
+  const skippedPastLimit = (): boolean => {
+    if (!state.fileLimitReached) return false;
+    spend();
+    return true;
   };
   // A name the payload cannot carry: skipped and named. Past the file-count limit it is
   // as silent as an unreadable folder there (and, not being a candidate, not left out).
   const nonPortableSeen = new Set<string>();
   const noteNonPortable = (absolutePath: string, name: string): void => {
+    if (skippedPastLimit()) return;
     // A folder selected and also inside a selected folder is named once.
-    if (!state.fileLimitReached && !nonPortableSeen.has(absolutePath)) {
+    if (!nonPortableSeen.has(absolutePath)) {
       nonPortableSeen.add(absolutePath);
       state.nonPortableCount++;
       if (state.nonPortablePaths.length < UNREADABLE_PATHS_KEPT) state.nonPortablePaths.push(name);
@@ -239,6 +265,7 @@ export async function collectCopyFiles(
       settings.useFilters && settings.useExcludeFilters &&
       directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute)
     ) {
+      skippedPastLimit();
       return false;
     }
     // A folder (or a symlinked one) with such a name costs its whole subtree, named once.
@@ -317,14 +344,19 @@ export async function collectCopyFiles(
     }
   };
 
+  // Checked by the walker before every entry: a run of skipped entries yields nothing, so
+  // the loop below never gets control to break out of it.
+  const shouldStop = (): boolean => state.limitLeftOutCapped;
+
   walk: for (const inputPath of inputPaths) {
+    if (shouldStop()) break;
     const onUnreadable = (dirPath: string) => {
       // Past the limit nothing is read; an unreadable folder there is not reported.
-      if (!state.fileLimitReached) noteUnreadable(dirPath);
+      if (!skippedPastLimit()) noteUnreadable(dirPath);
     };
     const onSymlinkedFolder = (linkPath: string) => {
       // Same as an unreadable folder: past the limit it is not reported.
-      if (state.fileLimitReached) return;
+      if (skippedPastLimit()) return;
       const absolute = path.resolve(linkPath);
       if (symlinkedFoldersSeen.has(absolute)) return;
       symlinkedFoldersSeen.add(absolute);
@@ -336,10 +368,14 @@ export async function collectCopyFiles(
     // A workspace root opened through a symlink is the folder the user is working in, not
     // a link met in a tree: it is walked (links inside it still are not).
     const walkSelectedLink = roots.some(root => path.resolve(root) === path.resolve(inputPath));
-    const walk = listFilesRecursive(inputPath, { shouldEnterDirectory: enterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name, walkSelectedLink });
+    const walk = listFilesRecursive(inputPath, { shouldEnterDirectory: enterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name, walkSelectedLink, shouldStop });
     for await (const filePath of walk) {
+      if (shouldStop()) break walk;
       const absolutePath = path.resolve(filePath);
-      if (seen.has(absolutePath)) continue;
+      if (seen.has(absolutePath)) {
+        skippedPastLimit();
+        continue;
+      }
       seen.add(absolutePath);
 
       const relativePath = toClipboardPathFromRoots(roots, absolutePath);
@@ -353,6 +389,7 @@ export async function collectCopyFiles(
           absolutePath
         )
       ) {
+        skippedPastLimit();
         continue;
       }
       // Not read and not a candidate: it never consumes the file-count limit.
@@ -368,7 +405,7 @@ export async function collectCopyFiles(
       // Once the limit has tripped the walk goes on (no reads) only to count what it left
       // out: every remaining candidate, size placeholders and unreadable files included,
       // because before the limit tripped they would all have been processed. It stops once
-      // the count passes LEFT_OUT_CAP.
+      // the past-limit budget (shared with skipped entries, see spend) is gone.
       if (state.fileLimitReached) {
         leaveOut();
         if (state.limitLeftOutCapped) break walk;

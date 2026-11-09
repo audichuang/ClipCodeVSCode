@@ -127,6 +127,9 @@ export interface WalkOptions {
   // that is itself a link (VS Code keeps the link path for a folder opened through one).
   // It is walked like a real folder; links met inside it are still skipped.
   walkSelectedLink?: boolean;
+  // Checked before every entry, skipped ones included: the caller's way to end a walk that
+  // yields nothing (a run of symlinked, unreadable or pruned folders).
+  shouldStop?: () => boolean;
 }
 
 export async function* listFilesRecursive(
@@ -136,7 +139,8 @@ export async function* listFilesRecursive(
   // as unreadable, a mid-walk race stays silent.
   isSelection = true
 ): AsyncGenerator<string> {
-  const { shouldEnterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name } = options;
+  const { shouldEnterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name, shouldStop } = options;
+  if (shouldStop?.()) return;
   const info = await lstat(inputPath).catch(() => undefined);
   if (!info) {
     // A picked path that is gone (an open tab whose file was deleted, a selection removed
@@ -175,6 +179,7 @@ export async function* listFilesRecursive(
   const entries = raw.map(bytes => ({ name: bytes.toString('utf8'), bytes }));
   const inner = { ...options, walkSelectedLink: false };
   for (const { name, bytes } of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (shouldStop?.()) return;
     const entryPath = path.join(inputPath, name);
     if (!Buffer.from(name, 'utf8').equals(bytes)) {
       onNonUtf8Name?.(entryPath);
