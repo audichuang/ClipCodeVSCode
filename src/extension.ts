@@ -16,7 +16,7 @@ import { notifyCopied } from './notify.js';
 import { buildGraphCopyPayload, type GraphCopyDeps, type GraphCopyPayload } from './graphCopy.js';
 import { DELETED_FILE_MARKER, UNREADABLE_FILE_MARKER, isStagedGitStatus, mapGitStatusToChangeType } from './gitCopy.js';
 import { registerHistoryView } from './historyView.js';
-import { nonPortableHeader, nonPortableName, sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { nonPortableHeader, nonPortableName, sourceRootName, toClipboardPathFromRoots, workingTreeReadEscapes } from './pathResolver.js';
 import { executeRestorePlan, markTargetCollisions, planRestore } from './restore.js';
 import { confirmationText, existingTargets, resultNotice, formatSize, skipLines } from './restoreSummary.js';
 import { normalizeSettings, type ClipCodeSettings, type FilterRule } from './settings.js';
@@ -703,7 +703,9 @@ export async function collectGitPayloadFiles(
     candidate,
     read: await readGitChangeContent(
       options.rawReader ? withRawBlobs(candidate.repository, options.rawReader) : candidate.repository,
-      candidate.change, candidate.changeType, candidate.forceIndexContent, readLimit)
+      candidate.change, candidate.changeType, candidate.forceIndexContent, readLimit,
+      // X7 copy roots: the workspace, plus the repo itself (it may sit outside the workspace).
+      [...workspaceRoots, candidate.repository.rootUri.fsPath])
   }));
   // Working-tree files that are unreadable (or non-text under Exclude). IntelliJ counts them
   // and, only in the Git layout (known after the loop), keeps them as an "Unable to read" entry.
@@ -839,7 +841,8 @@ async function readGitChangeContent(
   change: GitChange,
   changeType: ChangeTypeLabel,
   forceIndexContent: boolean,
-  readLimit: number
+  readLimit: number,
+  copyRoots: string[]
 ): Promise<GitChangeRead> {
   if (changeType === 'DELETED') {
     // Text only: a [DELETED] body is never read on paste, so a non-text one keeps the marker.
@@ -865,6 +868,8 @@ async function readGitChangeContent(
   // Working tree: size first, then decode, the order CopyFileContentAction uses. Decoding
   // first dropped an oversized binary with no "size exceeds limit" entry and no count.
   const uri = change.renameUri ?? change.uri;
+  // X7: a working-tree link (leaf or ancestor) out of every copy root is never read.
+  if (workingTreeReadEscapes(copyRoots, uri.fsPath)) return { kind: 'unreadable' };
   try {
     const { size } = await vscode.workspace.fs.stat(uri);
     if (size > readLimit) return { kind: 'tooLarge', size };

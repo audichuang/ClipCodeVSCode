@@ -679,6 +679,26 @@ export function escapesAllRoots(roots: string[], targetPath: string): boolean {
 }
 
 /**
+ * X7 for every working-tree reader (files copy, SCM, Graph uncommitted): true when this file
+ * must not be read because it really lands outside every copy root. Judged whenever the path
+ * is spelled inside a root — a link on the leaf OR on any ancestor (`secrets -> ~/.ssh`, then
+ * `secrets/id_rsa`; the Explorer shows such a link as a folder) — since realpath resolves the
+ * whole chain. A path spelled outside every root (Copy Open Editors of /etc/hosts) is the
+ * user's explicit pick and is read as before; only a link on its leaf is still refused.
+ */
+export function workingTreeReadEscapes(roots: string[], absolutePath: string): boolean {
+  const target = path.resolve(absolutePath);
+  if (!roots.some(root => isContained(target, path.resolve(root)))) {
+    try {
+      if (!lstatSync(target).isSymbolicLink()) return false;
+    } catch {
+      return false; // missing: the read fails on its own and is named Unreadable
+    }
+  }
+  return escapesAllRoots(roots, target);
+}
+
+/**
  * Containment on NATIVE paths, via path.relative — never on slash-normalised strings.
  * normalizeSystemPath rewrites `\` to `/`, which is right for clipboard paths and wrong
  * here: a backslash is an ordinary filename character on POSIX, so a real sibling
