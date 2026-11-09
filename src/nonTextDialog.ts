@@ -12,7 +12,7 @@ export type NonTextChoice = 'Include' | 'Exclude';
 
 /** Paths listed in the dialog before "and N more". */
 const DIALOG_PATHS = 10;
-/** Unreadable paths named in the completion notice. */
+/** Unreadable / symlinked-folder paths named in the completion notice and dialog. */
 const NOTICE_PATHS = 3;
 /** Display width a dialog path is shortened to. */
 const PATH_WIDTH = 70;
@@ -33,6 +33,9 @@ export interface NonTextSummary {
   limitLeftOutCapped?: boolean;
   /** UTF-8 byte length of the payload. */
   estimatedBytes: number;
+  /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
+  symlinkedFolderCount?: number;
+  symlinkedFolderPaths?: string[];
 }
 
 /** What the completion notice reads off the result that was copied. */
@@ -45,6 +48,9 @@ export interface NonTextNoticeCounts {
   /** Unreadable items, non-text files left out NOT included. */
   skippedUnreadableCount: number;
   unreadablePaths: string[];
+  /** Files copy only: symlinked folders skipped (never followed) and their first paths. */
+  symlinkedFolderCount?: number;
+  symlinkedFolderPaths?: string[];
 }
 
 export interface NonTextDialog {
@@ -75,6 +81,9 @@ export function nonTextDialog(include: NonTextSummary, settings: Pick<ClipCodeSe
   if (include.limitLeftOut > 0) {
     lines.push(`Left out by the file-count limit: ${leftOutText(include)}`);
   }
+  if (include.symlinkedFolderCount) {
+    lines.push(namedCount('Symlinked folder', include.symlinkedFolderCount, include.symlinkedFolderPaths ?? []));
+  }
   if (!includeAllowed) {
     lines.push(
       `Include is unavailable: the header format "${settings.headerFormat}" cannot be escaped, ` +
@@ -100,12 +109,20 @@ export function copyNoticeDetails(result: NonTextNoticeCounts): string[] {
   if (result.excludedNonTextCount > 0) parts.push(`Non-text files left out: ${result.excludedNonTextCount}.`);
   if (result.limitLeftOut > 0) parts.push(`Left out by the file-count limit: ${leftOutText(result)}.`);
   if (result.skippedUnreadableCount > 0) {
-    const named = result.unreadablePaths.slice(0, NOTICE_PATHS);
-    const more = result.skippedUnreadableCount - named.length;
-    const list = named.join(', ') + (more > 0 ? ` and ${more} more` : '');
-    parts.push(list ? `Unreadable: ${result.skippedUnreadableCount} (${list}).` : `Unreadable: ${result.skippedUnreadableCount}.`);
+    parts.push(`${namedCount('Unreadable', result.skippedUnreadableCount, result.unreadablePaths)}.`);
+  }
+  if (result.symlinkedFolderCount) {
+    parts.push(`${namedCount('Symlinked folder', result.symlinkedFolderCount, result.symlinkedFolderPaths ?? [])}.`);
   }
   return parts;
+}
+
+/** `Label: n (a, b, c and N more)` — the first NOTICE_PATHS paths, or just `Label: n` with none. */
+function namedCount(label: string, count: number, paths: string[]): string {
+  const named = paths.slice(0, NOTICE_PATHS);
+  const more = count - named.length;
+  const list = named.join(', ') + (more > 0 ? ` and ${more} more` : '');
+  return list ? `${label}: ${count} (${list})` : `${label}: ${count}`;
 }
 
 /** `1000+` once the count stopped at its cap. */

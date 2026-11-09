@@ -71,12 +71,16 @@ TS-side pins for the shared invariants:
   with no workspace root does it fall back to repo-relative paths (single repo) or repo
   basenames (multi-repo); that basename prefix is a spelling restore cannot read back
   (`alpha/secret.txt` resolved to `alpha/alpha/secret.txt`).
-- `listFilesRecursive` walks a directory symlink only when it IS the selected input, never
-  during recursion. Right-clicking a linked folder used to copy nothing; following links
-  everywhere is worse — a cross-linked tree (pnpm's `.pnpm`, Bazel) has a path count that
-  grows like a sum of falling factorials, and with the default 30-file limit the copy
-  becomes 30 aliases of the same few files while the real tree is dropped. IntelliJ's
-  own walker has that hazard; do not import it.
+- `listFilesRecursive` never walks a directory symlink — not when it IS the selected input
+  (alone or in a multi-selection), not when met during recursion. It reports the link through
+  `onSymlinkedFolder`, and the copy counts and names it as "Symlinked folder: n (a, b, c)" in
+  the non-text dialog and the completion notice (spec `non-text-files.md` "What is carried" +
+  user decision D2, 2026-11-09; this replaces the old "walk it when selected" rule). A link the
+  exclude rules prune stays silent like a pruned folder. A symlink to a FILE is still followed
+  and carries its target's bytes under the link's path. Following directory links is a trap —
+  a cross-linked tree (pnpm's `.pnpm`, Bazel) has a path count that grows like a sum of falling
+  factorials, and with the default 30-file limit the copy becomes 30 aliases of the same few
+  files while the real tree is dropped.
 
 Beyond the frozen fixtures, round-trip is guarded by `test/clipboardFormat.test.ts`
 and the e2e `test-e2e/suite/roundtrip.test.ts`.
