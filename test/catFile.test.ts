@@ -28,16 +28,16 @@ test('parses blob contents in request order', () => {
     { oid: '2222', content: 'export const b = 2;' }
   ]);
   const map = parseCatFileBatch(out, ['a.ts', 'b.ts']);
-  assert.equal(map.get('a.ts'), 'const a = 1;\n');
-  assert.equal(map.get('b.ts'), 'export const b = 2;');
+  assert.deepEqual(map.get('a.ts'), { text: 'const a = 1;\n' });
+  assert.deepEqual(map.get('b.ts'), { text: 'export const b = 2;' });
 });
 
 test('content with embedded newlines is parsed by byte count, not by lines', () => {
   const tricky = 'line1\n0000 blob 5\nline2';
   const out = batchOutput([{ oid: 'aaaa', content: tricky }, { oid: 'bbbb', content: 'next' }]);
   const map = parseCatFileBatch(out, ['x.ts', 'y.ts']);
-  assert.equal(map.get('x.ts'), tricky);
-  assert.equal(map.get('y.ts'), 'next');
+  assert.deepEqual(map.get('x.ts'), { text: tricky });
+  assert.deepEqual(map.get('y.ts'), { text: 'next' });
 });
 
 test('missing object omits the key (so prepareFile falls back) and following entries still align', () => {
@@ -49,10 +49,10 @@ test('missing object omits the key (so prepareFile falls back) and following ent
   // Key omitted — not stored as undefined — so a batch `has()` check lets the
   // per-file `git show` fallback run instead of treating it as a resolved miss.
   assert.equal(map.has('gone.ts'), false);
-  assert.equal(map.get('here.ts'), 'still here');
+  assert.deepEqual(map.get('here.ts'), { text: 'still here' });
 });
 
-test('binary content with a NUL byte maps to undefined', () => {
+test('binary content with a NUL byte maps to its raw bytes, classified non-text', () => {
   const body = Buffer.from([0x50, 0x4e, 0x47, 0x00, 0x44]); // PNG<NUL>D
   const out = Buffer.concat([
     Buffer.from(`4444 blob ${body.length}\n`, 'utf8'),
@@ -60,19 +60,20 @@ test('binary content with a NUL byte maps to undefined', () => {
     Buffer.from('\n', 'utf8')
   ]);
   const map = parseCatFileBatch(out, ['img.png']);
-  assert.equal(map.get('img.png'), undefined);
+  // Was `undefined` (dropped) before non-text support; the bytes now travel as Base64.
+  assert.deepEqual(map.get('img.png'), { nonText: new Uint8Array(body) });
 });
 
 test('empty file maps to empty string, not undefined', () => {
   const out = batchOutput([{ oid: '5555', content: '' }]);
   const map = parseCatFileBatch(out, ['empty.ts']);
-  assert.equal(map.get('empty.ts'), '');
+  assert.deepEqual(map.get('empty.ts'), { text: '' });
 });
 
 test('truncated output leaves remaining paths unresolved without throwing', () => {
   const out = Buffer.from('6666 blob 4\nabcd\n7777 blob 100\nshort', 'utf8');
   const map = parseCatFileBatch(out, ['ok.ts', 'truncated.ts']);
-  assert.equal(map.get('ok.ts'), 'abcd');
+  assert.deepEqual(map.get('ok.ts'), { text: 'abcd' });
   assert.equal(map.get('truncated.ts'), undefined);
 });
 
@@ -87,6 +88,7 @@ test('a non-UTF-8 blob is skipped by the batch reader, never decoded to mojibake
     Buffer.from('bbb blob 2\n', 'utf8'), Buffer.from('ok', 'utf8'), Buffer.from('\n', 'utf8')
   ]);
   const result = parseCatFileBatch(stdout, ['bad.ts', 'good.ts']);
-  assert.equal(result.get('bad.ts'), undefined, 'undecodable bytes must not become a string');
-  assert.equal(result.get('good.ts'), 'ok');
+  // Undecodable bytes must not become a string: they stay bytes (non-text), byte for byte.
+  assert.deepEqual(result.get('bad.ts'), { nonText: new Uint8Array(big5) });
+  assert.deepEqual(result.get('good.ts'), { text: 'ok' });
 });

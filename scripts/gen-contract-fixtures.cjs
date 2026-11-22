@@ -669,6 +669,101 @@ async function computeRestoreCases() {
   }
 }
 
+// ---- non-text files (spec non-text-files.md, required cases 1-7, 12, 18) -----------------
+// nonTextBuildCases: files with `base64` are non-text (raw bytes), files with `content` are
+// text. nonTextRestoreCases: a payload planned against an EMPTY directory — creates are
+// {path, base64} for non-text and {path, content} for text, skips {rawPath, reason}. The
+// inputs are authored here; only the wire/plan come from the real build/restore code.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQ=';
+const SHAPED_B64 = 'AAIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5ADs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyAHR1dnd4eXp7fH1+f4CBgg==';
+const PNG_SHA = '3067f3a1a846d709d1b4aa1e3226be6fd0227a2c2343a0be64ee2be2ef646f90';
+const PH_TEXT = '// File skipped: non-text file, 3 bytes, sha256 47ffa3ea45a70b8a41c2c0825df323c00a8b7a01c1ea06083cc41dddcc001123; base64 follows';
+const PH_FAKE = '// File skipped: non-text file, 3 bytes, sha256 039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81; base64 follows';
+const MIXED_FILES = [
+  { path: 'a.bin', base64: 'AAECA//+' },
+  { path: 't1.txt', content: `${PH_TEXT}\nYWJj` },
+  { path: 't2.txt', content: `//clipcode-esc: ${PH_TEXT}\nline two` },
+];
+const SHAPED_FILES = [
+  { path: 'img/shaped.bin', base64: SHAPED_B64 },
+  { path: 't1.txt', content: `${PH_TEXT}\nYWJj` },
+];
+const nonTextBuildInputs = [
+  { name: 'PNG with NUL bytes, wrapped at 76', headerFormat: H,
+    files: [{ path: 'public/static/logo.png', base64: PNG_B64 }] },
+  { name: 'Big5 text (no NUL, invalid UTF-8) is a non-text file', headerFormat: H,
+    files: [{ path: 'legacy/big5.txt', base64: 'pKSk5bT6uNUK' }, { path: 'src/a.ts', content: 'const a = 1;' }] },
+  { name: '1-byte 0x00 file is non-text; an empty file stays a text entry', headerFormat: H,
+    files: [{ path: 'nul.bin', base64: 'AA==' }, { path: 'empty.txt', content: '' }] },
+  { name: 'header-shaped Base64 lines under a custom headerFormat are escaped', headerFormat: 'A$FILE_PATH',
+    files: [{ path: 'img/shaped.bin', base64: SHAPED_B64 }] },
+  { name: 'a text file whose first line looks like a non-text placeholder is escaped', headerFormat: H,
+    files: [{ path: 'fake.txt', content: `${PH_FAKE}\nAQID` }] },
+  { name: 'build: non-text file, placeholder-shaped text with Base64 second line, and ESC-prefixed placeholder text (built-in header)', headerFormat: H,
+    files: MIXED_FILES },
+  { name: 'build: same under a header format that matches the placeholder line itself', headerFormat: '// $FILE_PATH',
+    files: MIXED_FILES },
+  { name: 'build: Base64 lines header-shaped under A$FILE_PATH next to placeholder-shaped text', headerFormat: 'A$FILE_PATH',
+    files: SHAPED_FILES },
+  { name: 'build: a whitespace-only first line that the header format matches is escaped; the placeholder escape goes on the next, first non-blank, line', headerFormat: ' $FILE_PATH',
+    files: [{ path: 't.txt', content: `   \n${PH_FAKE}\nAQID` }] },
+];
+
+function nonTextWire(input) {
+  const files = input.files.map(f =>
+    f.base64 !== undefined ? { path: f.path, nonText: new Uint8Array(Buffer.from(f.base64, 'base64')) } : { path: f.path, content: f.content });
+  return fmt.buildPayload({ headerFormat: input.headerFormat, preText: '', postText: '', addExtraLineBetweenFiles: true, files });
+}
+const wireOf = i => nonTextWire(nonTextBuildInputs[i]);
+const PNG_PLACEHOLDER = `// File skipped: non-text file, 83 bytes, sha256 ${PNG_SHA}; base64 follows`;
+const PNG_LINE_1 = PNG_B64.slice(0, 76);
+const PNG_LINE_2 = PNG_B64.slice(76);
+const OK_FILE = '\n// file: src/ok.ts\nok\n\n';
+const nonTextRestoreInputs = [
+  { name: 'round trip: PNG with NUL bytes, wrapped at 76', headerFormat: H, payload: wireOf(0) },
+  { name: 'round trip: Big5 text (no NUL, invalid UTF-8) is a non-text file', headerFormat: H, payload: wireOf(1) },
+  { name: 'round trip: 1-byte 0x00 file is non-text; an empty file stays a text entry', headerFormat: H, payload: wireOf(2) },
+  { name: 'round trip: header-shaped Base64 lines under a custom headerFormat are escaped', headerFormat: 'A$FILE_PATH', payload: wireOf(3) },
+  { name: 'CRLF line endings (Windows clipboard) still decode', headerFormat: H, payload: wireOf(0).replace(/\n/g, '\r\n') },
+  { name: 'spaces and tabs around Base64 lines are ignored', headerFormat: H,
+    payload: `\n// file: loose.png\n${PNG_PLACEHOLDER}\n ${PNG_LINE_1} \t\n ${PNG_LINE_2} \t\n\n` },
+  { name: 'truncated Base64 skips only that file', headerFormat: H,
+    payload: `\n// file: trunc.png\n${PNG_PLACEHOLDER}\n${PNG_LINE_1}\n${PNG_LINE_2.slice(0, -4)}\n${OK_FILE}` },
+  { name: 'wrong SHA-256 skips only that file', headerFormat: H,
+    payload: `\n// file: sha.png\n${PNG_PLACEHOLDER.replace(PNG_SHA, '0'.repeat(64))}\n${PNG_LINE_1}\n${PNG_LINE_2}\n${OK_FILE}` },
+  { name: 'wrong size skips the file', headerFormat: H,
+    payload: `\n// file: size.png\n${PNG_PLACEHOLDER.replace(' 83 bytes', ' 84 bytes')}\n${PNG_LINE_1}\n${PNG_LINE_2}\n\n` },
+  { name: 'a non-text file over its limit is a size placeholder', headerFormat: H,
+    payload: '\n// file: img/huge.png\n// File skipped: size exceeds limit (3000000 bytes)\n\n' },
+  { name: 'round trip: a text file whose first line looks like a non-text placeholder restores as that text', headerFormat: H, payload: wireOf(4) },
+  { name: 'round trip: non-text file, placeholder-shaped text with Base64 second line, and ESC-prefixed placeholder text (built-in header)', headerFormat: H, payload: wireOf(5) },
+  { name: 'round trip: same under a header format that matches the placeholder line itself', headerFormat: '// $FILE_PATH', payload: wireOf(6) },
+  { name: 'round trip: Base64 lines header-shaped under A$FILE_PATH next to placeholder-shaped text', headerFormat: 'A$FILE_PATH', payload: wireOf(7) },
+  { name: 'round trip: placeholder escape on the first non-blank line after an escaped whitespace-only line', headerFormat: ' $FILE_PATH', payload: wireOf(8) },
+];
+
+async function computeNonTextRestoreCases() {
+  const os = require('node:os');
+  const { planRestore } = require('../out/src/restore.js');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clipcode-nontext-cases-')));
+  try {
+    const cases = [];
+    for (const input of nonTextRestoreInputs) {
+      const plan = await planRestore([root], fmt.parseClipboard(input.payload, input.headerFormat));
+      cases.push({
+        ...input,
+        creates: plan.createOperations.map(op => op.nonText
+          ? { path: op.relativePath, base64: Buffer.from(op.nonText.bytes).toString('base64') }
+          : { path: op.relativePath, content: op.content }),
+        skips: plan.skippedOperations.map(op => ({ rawPath: op.rawPath, reason: op.reason })),
+      });
+    }
+    return cases;
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function buildWire(input) {
   return input.kind === 'git' ? fmt.buildGitPayload(input.options) : fmt.buildPayload(input.options);
 }
@@ -684,7 +779,9 @@ function parseExpected(input) {
 const fixtures = {
   _comment: 'AUTO-GENERATED by ClipCodeVSCode/scripts/gen-contract-fixtures.cjs. ' +
     'Frozen cross-tool contract goldens, committed byte-identically in both repos. ' +
-    'Regenerate and copy to both repos; update EXPECTED_FIXTURES_SHA on both sides.',
+    'Regenerate and copy to both repos; update EXPECTED_FIXTURES_SHA on both sides. ' +
+    'nonTextBuildCases and nonTextRestoreCases come from OpenIDEA crates/ide-clip ' +
+    '(docs/clipcode/non-text-files.md, required test cases 1-7).',
   buildCases: buildInputs.map(i => ({ name: i.name, kind: i.kind, options: i.options, wire: buildWire(i) })),
   parseCases: parseInputs.map(i => ({ name: i.name, headerFormat: i.headerFormat, input: i.input, expected: parseExpected(i) })),
   tokenCases: tokenInputs.map(i => ({ name: i.name, text: i.text, ...payloadStats(i.text) })),
@@ -695,9 +792,29 @@ const fixtures = {
 
 (async () => {
 fixtures.restoreCases = await computeRestoreCases();
+fixtures.nonTextBuildCases = nonTextBuildInputs.map(i => ({ name: i.name, headerFormat: i.headerFormat, files: i.files, wire: nonTextWire(i) }));
+fixtures.nonTextRestoreCases = await computeNonTextRestoreCases();
 const json = JSON.stringify(fixtures, null, 2) + '\n';
 const vscodeOut = path.join(__dirname, '..', 'test', 'fixtures', 'clipboard-contract.json');
 fs.mkdirSync(path.dirname(vscodeOut), { recursive: true });
+// CLIPCODE_FIXTURE_CHECK=1: compare only. The generated JSON goes to a temp file and the
+// committed fixture is left untouched, so a run that cannot match (for example while the
+// restore planner does not know non-text entries yet) can never overwrite the shared bytes.
+if (process.env.CLIPCODE_FIXTURE_CHECK) {
+  const committed = fs.readFileSync(vscodeOut, 'utf8');
+  const tmpOut = path.join(require('node:os').tmpdir(), 'clipboard-contract.generated.json');
+  fs.writeFileSync(tmpOut, json);
+  if (committed === json) {
+    console.log('fixture check: generated output is byte-identical to the committed fixture');
+  } else {
+    const a = JSON.parse(committed);
+    const differing = Object.keys({ ...a, ...fixtures }).filter(k => JSON.stringify(a[k]) !== JSON.stringify(fixtures[k]));
+    console.log('fixture check: MISMATCH in sections:', differing.join(', ') || '(formatting only)');
+    console.log('generated output written to', tmpOut);
+    process.exitCode = 1;
+  }
+  return;
+}
 fs.writeFileSync(vscodeOut, json);
 
 const crypto = require('node:crypto');

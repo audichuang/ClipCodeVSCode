@@ -982,6 +982,12 @@
             "default": 500,
             "description": "%configuration.clipcode.maxFileSizeKB.description%"
           },
+          "clipcode.maxNonTextFileSizeKB": {
+            "type": "number",
+            "default": 2048,
+            "exclusiveMinimum": 0,
+            "description": "%configuration.clipcode.maxNonTextFileSizeKB.description%"
+          },
           "clipcode.showCopyNotification": {
             "type": "boolean",
             "default": true,

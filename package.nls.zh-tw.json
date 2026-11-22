@@ -84,6 +84,7 @@
   "configuration.clipcode.setMaxFileCount.description": "限制單次複製可包含的檔案數量上限（參見 fileCountLimit）。",
   "configuration.clipcode.fileCountLimit.description": "啟用 setMaxFileCount 時，單次複製可包含的最大檔案數量。",
   "configuration.clipcode.maxFileSizeKB.description": "複製時跳過大於此大小（KB）的檔案。",
+  "configuration.clipcode.maxNonTextFileSizeKB.description": "以 Base64 複製的非文字檔（圖片、壓縮檔、非 UTF-8 文字）大小上限（KB）。",
   "configuration.clipcode.showCopyNotification.description": "每次複製後顯示含字元/行數/字詞/token 數的通知。",
   "configuration.clipcode.useFilters.description": "複製時套用下方的納入/排除篩選規則。",
   "configuration.clipcode.useIncludeFilters.description": "啟用篩選時，套用 filterRules 中的 INCLUDE 規則。",

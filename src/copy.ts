@@ -1,9 +1,10 @@
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPayload, type PayloadFile } from './clipboardFormat.js';
 import { mapInOrder } from './concurrency.js';
 import { directoryExcluded, fileMatchesFilters } from './filterMatcher.js';
-import { fileSize, listFilesRecursive, readTextFile } from './fileSystem.js';
-import { sourceRootName, toClipboardPathFromRoots } from './pathResolver.js';
+import { fileSize, listFilesRecursive, readClassifiedFile } from './fileSystem.js';
+import { nonPortableName, sourceRootName, toClipboardPathFromRoots, workingTreeReadEscapes } from './pathResolver.js';
 import type { ClipCodeSettings } from './settings.js';
 
 /**
@@ -83,26 +84,103 @@ export function estimateTokens(text: string): number {
 export interface CopyResult {
   files: PayloadFile[];
   payload: string;
+  /** Entries carried with a body, text and (Include) non-text alike: what the file-count limit counts. */
   copiedFileCount: number;
+  /** Size placeholders emitted (`// File skipped: size exceeds limit (...)`), whatever the kind. */
   skippedFileSizeCount: number;
-  /** Not decodable as UTF-8, binary, or unreadable — dropped, and previously in silence. */
+  /** Could not be read: stat/read failure, a dangling symlink, a folder that cannot be listed. */
   skippedUnreadableCount: number;
+  /** First UNREADABLE_PATHS_KEPT of those, as clipboard paths, for the notice. */
+  unreadablePaths: string[];
+  /** Symlinks to a folder, selected or met while expanding: never walked, skipped and named. */
+  symlinkedFolderCount: number;
+  /** First UNREADABLE_PATHS_KEPT of those, as clipboard paths (the link's own path). */
+  symlinkedFolderPaths: string[];
+  /**
+   * Files and folders whose real name a payload header cannot carry (pathResolver
+   * nonPortableName): never read, not counted toward the file-count limit; a folder costs
+   * its whole subtree and is named once.
+   */
+  nonPortableCount: number;
+  /** First UNREADABLE_PATHS_KEPT of those, with the real name (a `\` kept as typed). */
+  nonPortablePaths: string[];
+  /** Exclude only: non-text files within the text limit that were left out. */
+  excludedNonTextCount: number;
   fileLimitReached: boolean;
+  /** Candidates (after dedup and filters) the file-count limit cut off; none of them was read. */
+  limitLeftOut: number;
+  /**
+   * The walk stopped before it finished counting: once the limit is filled every entry it
+   * meets — left-out candidates, skipped entries and folders alike — spends one of
+   * LEFT_OUT_CAP, and the walk stops once that budget is gone. At least limitLeftOut were
+   * left out, maybe more.
+   */
+  limitLeftOutCapped: boolean;
+  /** Include only: the non-text entries carried as Base64, in payload order. */
+  nonTextFiles: { path: string; size: number }[];
+  nonTextTotalBytes: number;
+  /** Include only: non-text files read but over maxNonTextFileSizeKB, copied as size placeholders. */
+  nonTextOverLimitCount: number;
+  /** Over both per-file limits: never read (kind unknown), copied as size placeholders. */
+  unreadOverLimitCount: number;
+  /** UTF-8 byte length of the payload. */
+  estimatedBytes: number;
+}
+
+export interface CopyOptions {
+  /**
+   * Carry non-text files (NUL or not strict UTF-8) as Base64 entries. False is the
+   * behaviour before non-text support, byte for byte: they are left out, and a file
+   * over the text limit becomes a size placeholder without being read.
+   */
+  includeNonText: boolean;
+  /** Tests only: a smaller LEFT_OUT_CAP. */
+  leftOutCap?: number;
+}
+
+/**
+ * How many candidates past the file-count limit the walk counts before it stops. Counting
+ * every one walked the whole tree after the limit tripped — copying a repository root went
+ * from 48 ms to 6.2 s, paid twice on Exclude — for a number that only has to say "a lot".
+ * Past the cap the notice and dialog say `1000+`.
+ */
+export const LEFT_OUT_CAP = 1000;
+
+/**
+ * A left-out total as the Git surfaces report it: counted up to the cap, and flagged when
+ * at least one more went past it (exactly the cap still reads "1000", the files copy's rule).
+ */
+export function capLeftOut(total: number, cap: number = LEFT_OUT_CAP): { limitLeftOut: number; limitLeftOutCapped: boolean } {
+  return total > cap ? { limitLeftOut: cap, limitLeftOutCapped: true } : { limitLeftOut: total, limitLeftOutCapped: false };
 }
 
 interface CopyState {
   copiedFileCount: number;
   skippedFileSizeCount: number;
   skippedUnreadableCount: number;
+  unreadablePaths: string[];
+  symlinkedFolderCount: number;
+  symlinkedFolderPaths: string[];
+  nonPortableCount: number;
+  nonPortablePaths: string[];
+  excludedNonTextCount: number;
   fileLimitReached: boolean;
+  limitLeftOut: number;
+  limitLeftOutCapped: boolean;
+  nonTextFiles: { path: string; size: number }[];
+  nonTextTotalBytes: number;
+  nonTextOverLimitCount: number;
+  unreadOverLimitCount: number;
 }
 
 const READ_CONCURRENCY = 16;
+export const UNREADABLE_PATHS_KEPT = 10;
 
 export async function collectCopyFiles(
   workspaceRoots: string | string[],
   inputPaths: string[],
-  settings: ClipCodeSettings
+  settings: ClipCodeSettings,
+  options: CopyOptions = { includeNonText: false }
 ): Promise<CopyResult> {
   const files: PayloadFile[] = [];
   const seen = new Set<string>();
@@ -110,25 +188,121 @@ export async function collectCopyFiles(
     copiedFileCount: 0,
     skippedFileSizeCount: 0,
     skippedUnreadableCount: 0,
-    fileLimitReached: false
+    unreadablePaths: [],
+    symlinkedFolderCount: 0,
+    symlinkedFolderPaths: [],
+    nonPortableCount: 0,
+    nonPortablePaths: [],
+    excludedNonTextCount: 0,
+    fileLimitReached: false,
+    limitLeftOut: 0,
+    limitLeftOutCapped: false,
+    nonTextFiles: [],
+    nonTextTotalBytes: 0,
+    nonTextOverLimitCount: 0,
+    unreadOverLimitCount: 0
   };
   const roots = normalizeRoots(workspaceRoots);
-  const pruneExcludedDirectory = (dirPath: string): boolean => {
-    if (!settings.useFilters || !settings.useExcludeFilters) return true;
-    const absolute = path.resolve(dirPath);
-    return !directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute);
+  const textLimit = settings.maxFileSizeKB * 1024;
+  const nonTextLimit = settings.maxNonTextFileSizeKB * 1024;
+  // A file over every limit that could apply to it is not read: its kind does not matter.
+  // Exclude keeps the old rule (only the text limit applies), so a large image is still a
+  // size placeholder there, exactly as before.
+  const readLimit = options.includeNonText ? Math.max(textLimit, nonTextLimit) : textLimit;
+  const limitOn = settings.setMaxFileCount;
+  const leftOutCap = options.leftOutCap ?? LEFT_OUT_CAP;
+  // Once the file-count limit is filled nothing more is read; the walk goes on only to count
+  // what the limit leaves out. Every entry it meets from then on spends one unit of a budget
+  // of leftOutCap — a left-out candidate, an entry it skips (non-portable, filtered, a
+  // duplicate) and every folder it reaches (entered, pruned, symlinked or unreadable alike:
+  // one unit, charged in enterDirectory) — and once the budget is gone the walk stops and
+  // the count reads "N+". The budget starts when the limit is FILLED, not when the first
+  // candidate is cut: a filled limit followed only by skips or folders otherwise walked the
+  // whole rest of the tree for a number nobody sees (spec "Asking the user":
+  // implementations must not walk the rest of the tree only to count). A skip or a folder
+  // never raises limitLeftOut: it was never a candidate, the "+" just says the count is
+  // unfinished. fileLimitReached still means a candidate was actually cut.
+  // copiedFileCount moves only in drainBatch, and the walk drains as soon as the batch
+  // could fill the limit, so this is exact whenever a callback asks.
+  const limitFilled = (): boolean => limitOn && state.copiedFileCount >= settings.fileCountLimit;
+  let spentPastLimit = 0;
+  const spend = (): boolean => {
+    if (spentPastLimit >= leftOutCap) {
+      state.limitLeftOutCapped = true;
+      return false;
+    }
+    spentPastLimit++;
+    return true;
   };
+  const leaveOut = (): void => {
+    if (spend()) state.limitLeftOut++;
+  };
+  /** True once the limit is filled, where a skipped entry is not reported but spends the budget. */
+  const skippedPastLimit = (): boolean => {
+    if (!limitFilled()) return false;
+    spend();
+    return true;
+  };
+  // A name the payload cannot carry: skipped and named. Past the file-count limit it is
+  // as silent as an unreadable folder there (and, not being a candidate, not left out).
+  // A folder has already paid in enterDirectory, so it is only silenced here.
+  const nonPortableSeen = new Set<string>();
+  const noteNonPortable = (absolutePath: string, name: string, charged = false): void => {
+    if (charged ? limitFilled() : skippedPastLimit()) return;
+    // A folder selected and also inside a selected folder is named once.
+    if (!nonPortableSeen.has(absolutePath)) {
+      nonPortableSeen.add(absolutePath);
+      state.nonPortableCount++;
+      if (state.nonPortablePaths.length < UNREADABLE_PATHS_KEPT) state.nonPortablePaths.push(name);
+    }
+  };
+  const isNonPortable = (absolutePath: string, directory = false): boolean => {
+    const name = nonPortableName(roots, absolutePath, { directory });
+    if (name === undefined) return false;
+    noteNonPortable(absolutePath, name, directory);
+    return true;
+  };
+  // A name that is not valid UTF-8 (the walker sees it lossily decoded, U+FFFD in place of
+  // the bad bytes): not portable either, and not walked — a folder is named once.
+  const onNonUtf8Name = (lossyPath: string): void => {
+    const absolute = path.resolve(lossyPath);
+    noteNonPortable(absolute, toClipboardPathFromRoots(roots, absolute));
+  };
+  // The walker asks this for every folder it reaches, a symlinked one included, before
+  // anything else happens to it: the one place a folder spends its unit. onSymlinkedFolder,
+  // onUnreadable and a non-portable folder name are therefore silent past the limit, not
+  // charged a second time.
+  const enterDirectory = (dirPath: string): boolean => {
+    if (skippedPastLimit() && state.limitLeftOutCapped) return false;
+    const absolute = path.resolve(dirPath);
+    if (
+      settings.useFilters && settings.useExcludeFilters &&
+      directoryExcluded(toClipboardPathFromRoots(roots, absolute), settings.filterRules, absolute)
+    ) {
+      return false;
+    }
+    // A folder (or a symlinked one) with such a name costs its whole subtree, named once.
+    return !isNonPortable(absolute, true);
+  };
+  const noteUnreadable = (absolutePath: string) => {
+    state.skippedUnreadableCount++;
+    if (state.unreadablePaths.length < UNREADABLE_PATHS_KEPT) {
+      state.unreadablePaths.push(toClipboardPathFromRoots(roots, path.resolve(absolutePath)));
+    }
+  };
+  // A link reached twice (selected and also inside a selected folder) is named once.
+  const symlinkedFoldersSeen = new Set<string>();
 
   // Candidates buffered out of the ordered walk below; dedup and filtering happen
   // there (no I/O), so the candidate order is fixed before anything is read.
   const batch: { absolutePath: string; relativePath: string }[] = [];
   // Resolve one buffered batch concurrently, then apply limit/size/order bookkeeping
   // over the in-order results so the payload is byte-identical to the old serial
-  // version. As with the git copy, tripping the limit mid-batch discards up to a
-  // batch of already-issued reads (bounded over-fetch). False = stop the walk.
-  const drainBatch = async (): Promise<boolean> => {
+  // version. The walk drains as soon as the batch could fill the limit, so a batch never
+  // holds more candidates than the limit has room for and cannot trip it mid-batch; the
+  // limit check below is only a guard.
+  const drainBatch = async (): Promise<void> => {
     const pending = batch.splice(0);
-    const sizeLimit = settings.maxFileSizeKB * 1024;
     const read = mapInOrder(pending, READ_CONCURRENCY, async candidate => {
       // Stat first and read only what fits — the size guard exists to avoid pulling
       // a multi-GB file into memory.
@@ -136,48 +310,96 @@ export async function collectCopyFiles(
       // (which listFilesRecursive does yield) rejected out of collectCopyFiles and the
       // whole copy produced nothing at all. IntelliJ skips the file and copies the rest.
       try {
-        const size = await fileSize(candidate.absolutePath);
-        return { candidate, size, content: size > sizeLimit ? undefined : await readTextFile(candidate.absolutePath) };
+        // X7 (spec "What is carried"): a symlink to a file is followed only when its real
+        // target lies inside a copy root. One pointing out of every root (`CLAUDE.md ->
+        // ~/.agents/...`, a credentials file) is never read and is named Unreadable, like a
+        // dangling link: the clipboard often goes to an LLM. A regular file under a directory
+        // link that leaves the roots is the same escape (workingTreeReadEscapes).
+        if (workingTreeReadEscapes(roots, candidate.absolutePath)) {
+          return { candidate, size: 0, content: undefined, failed: true };
+        }
+        const info = await lstat(candidate.absolutePath);
+        const size = info.isSymbolicLink() ? await fileSize(candidate.absolutePath) : info.size;
+        return { candidate, size, content: size > readLimit ? undefined : await readClassifiedFile(candidate.absolutePath) };
       } catch {
-        return { candidate, size: 0, content: undefined };
+        return { candidate, size: 0, content: undefined, failed: true };
       }
     });
-    for await (const { candidate, size, content } of read) {
-      if (settings.setMaxFileCount && state.copiedFileCount >= settings.fileCountLimit) {
+    for await (const result of read) {
+      const { candidate, size, content } = result;
+      if (state.fileLimitReached || (limitOn && state.copiedFileCount >= settings.fileCountLimit)) {
         state.fileLimitReached = true;
-        return false;
+        leaveOut();
+        continue;
       }
-      if (size > sizeLimit) {
+      if ('failed' in result) { noteUnreadable(candidate.absolutePath); continue; }
+      if (content === undefined) {
+        // size > readLimit: a size placeholder, the file never read.
         state.skippedFileSizeCount++;
+        if (size > Math.max(textLimit, nonTextLimit)) state.unreadOverLimitCount++;
         files.push({ path: candidate.relativePath, skippedReason: `size exceeds limit (${size} bytes)` });
         continue;
       }
-      // `undefined`, not falsy: a 0-byte file is content. `!content` dropped every empty
-      // __init__.py / .gitkeep, which IntelliJ copies (it checks `file.length == 0L`
-      // explicitly) — so the same folder produced different file sets in the two tools.
-      if (content === undefined) { state.skippedUnreadableCount++; continue; }
-      files.push({ path: candidate.relativePath, content });
+      if ('text' in content) {
+        if (size > textLimit) {
+          state.skippedFileSizeCount++;
+          files.push({ path: candidate.relativePath, skippedReason: `size exceeds limit (${size} bytes)` });
+          continue;
+        }
+        // A 0-byte file is text content: `!content` dropped every empty __init__.py /
+        // .gitkeep, which IntelliJ copies (it checks `file.length == 0L` explicitly).
+        files.push({ path: candidate.relativePath, content: content.text });
+        state.copiedFileCount++;
+        continue;
+      }
+      if (!options.includeNonText) { state.excludedNonTextCount++; continue; }
+      if (size > nonTextLimit) {
+        state.skippedFileSizeCount++;
+        state.nonTextOverLimitCount++;
+        files.push({ path: candidate.relativePath, skippedReason: `size exceeds limit (${size} bytes)` });
+        continue;
+      }
+      files.push({ path: candidate.relativePath, nonText: content.nonText });
+      state.nonTextFiles.push({ path: candidate.relativePath, size: content.nonText.length });
+      state.nonTextTotalBytes += content.nonText.length;
       state.copiedFileCount++;
     }
-    return true;
   };
 
-  inputLoop:
-  for (const inputPath of inputPaths) {
-    for await (const filePath of listFilesRecursive(inputPath, pruneExcludedDirectory, true, () => { state.skippedUnreadableCount++; })) {
-      // The limit check needs an exact copiedFileCount, so drain first whenever the
-      // buffered candidates could still push the count up to the limit. Below that
-      // watermark no batch can trip it, so the walk keeps buffering.
-      if (settings.setMaxFileCount && state.copiedFileCount + batch.length >= settings.fileCountLimit) {
-        if (!(await drainBatch())) break inputLoop;
-        if (state.copiedFileCount >= settings.fileCountLimit) {
-          state.fileLimitReached = true;
-          break inputLoop;
-        }
-      }
+  // Checked by the walker before every entry: a run of skipped entries yields nothing, so
+  // the loop below never gets control to break out of it.
+  const shouldStop = (): boolean => state.limitLeftOutCapped;
 
+  walk: for (const inputPath of inputPaths) {
+    if (shouldStop()) break;
+    const onUnreadable = (dirPath: string) => {
+      // Past the limit nothing is read; an unreadable folder there is not reported (it
+      // already paid in enterDirectory; a selected path that is gone is bounded by the
+      // selection).
+      if (!limitFilled()) noteUnreadable(dirPath);
+    };
+    const onSymlinkedFolder = (linkPath: string) => {
+      // Same as an unreadable folder: past the limit it is not reported.
+      if (limitFilled()) return;
+      const absolute = path.resolve(linkPath);
+      if (symlinkedFoldersSeen.has(absolute)) return;
+      symlinkedFoldersSeen.add(absolute);
+      state.symlinkedFolderCount++;
+      if (state.symlinkedFolderPaths.length < UNREADABLE_PATHS_KEPT) {
+        state.symlinkedFolderPaths.push(toClipboardPathFromRoots(roots, absolute));
+      }
+    };
+    // A workspace root opened through a symlink is the folder the user is working in, not
+    // a link met in a tree: it is walked (links inside it still are not).
+    const walkSelectedLink = roots.some(root => path.resolve(root) === path.resolve(inputPath));
+    const walk = listFilesRecursive(inputPath, { shouldEnterDirectory: enterDirectory, onUnreadable, onSymlinkedFolder, onNonUtf8Name, walkSelectedLink, shouldStop });
+    for await (const filePath of walk) {
+      if (shouldStop()) break walk;
       const absolutePath = path.resolve(filePath);
-      if (seen.has(absolutePath)) continue;
+      if (seen.has(absolutePath)) {
+        skippedPastLimit();
+        continue;
+      }
       seen.add(absolutePath);
 
       const relativePath = toClipboardPathFromRoots(roots, absolutePath);
@@ -191,11 +413,30 @@ export async function collectCopyFiles(
           absolutePath
         )
       ) {
+        skippedPastLimit();
+        continue;
+      }
+      // Not read and not a candidate: it never consumes the file-count limit.
+      if (isNonPortable(absolutePath)) continue;
+
+      // Once the limit has tripped the walk goes on (no reads) only to count what it left
+      // out: every remaining candidate, size placeholders and unreadable files included,
+      // because before the limit tripped they would all have been processed. It stops once
+      // the past-limit budget (shared with skipped entries, see spend) is gone.
+      if (limitFilled()) {
+        state.fileLimitReached = true;
+        leaveOut();
+        if (state.limitLeftOutCapped) break walk;
         continue;
       }
 
       batch.push({ absolutePath, relativePath });
-      if (batch.length >= READ_CONCURRENCY && !(await drainBatch())) break inputLoop;
+      // Settle as soon as the buffered candidates could fill the limit, so limitFilled() is
+      // exact for every entry and callback that follows. Below that watermark no batch can
+      // fill it, so the walk keeps buffering.
+      if (batch.length >= READ_CONCURRENCY || (limitOn && state.copiedFileCount + batch.length >= settings.fileCountLimit)) {
+        await drainBatch();
+      }
     }
   }
   await drainBatch();
@@ -209,23 +450,17 @@ function buildCopyResult(
   settings: ClipCodeSettings,
   roots: string[]
 ): CopyResult {
-  return {
+  const payload = buildPayload({
+    headerFormat: settings.headerFormat,
+    preText: settings.preText,
+    postText: settings.postText,
+    addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
     files,
-    payload: buildPayload({
-      headerFormat: settings.headerFormat,
-      preText: settings.preText,
-      postText: settings.postText,
-      addExtraLineBetweenFiles: settings.addExtraLineBetweenFiles,
-      files,
-      // Only a single-root copy has an unambiguous source root; multi-root paths
-      // carry per-root labels, so omit metadata there.
-      sourceRoot: sourceRootName(roots)
-    }),
-    copiedFileCount: state.copiedFileCount,
-    skippedFileSizeCount: state.skippedFileSizeCount,
-    skippedUnreadableCount: state.skippedUnreadableCount,
-    fileLimitReached: state.fileLimitReached
-  };
+    // Only a single-root copy has an unambiguous source root; multi-root paths
+    // carry per-root labels, so omit metadata there.
+    sourceRoot: sourceRootName(roots)
+  });
+  return { files, payload, ...state, estimatedBytes: Buffer.byteLength(payload, 'utf8') };
 }
 
 function normalizeRoots(workspaceRoots: string | string[]): string[] {
